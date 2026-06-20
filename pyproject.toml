@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jacobik"
+version = "0.0.0"
+description = "Jacobik conformer ensemble engine for transition-metal complexes."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+    "rdkit"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jacobik = ["constraints.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
