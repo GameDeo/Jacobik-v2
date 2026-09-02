@@ -39,6 +39,23 @@ Version history
          tensors (via additive log-offset), so score() takes no float args.
          q2_score() updated to use precomputed tensors.
          Measured ~1.35× speedup per VMM call; negligible for GMM.
+2.2.0 : Per-quantity GMM variance floor. _GMM_VAR_MIN was a single float
+         shared between Q1 (vars in Å²) and Q4 (vars in deg²) — a floor
+         sane for Å² is ~2 orders of magnitude too permissive for deg²,
+         letting near-delta-function Q4 components (raw var as low as
+         0.002 deg², almost certainly duplicate/near-duplicate tmQM
+         structures rather than real chemical precision) survive
+         essentially unclamped and crush any donor a few degrees off.
+         Now a dict keyed by quantity, in that quantity's native units.
+         Investigated (and reverted) switching Q1-Q5 from per-term mean to
+         Q6-style soft-min aggregation to address a separate, confirmed
+         "mean laundering" issue (a single severe D-M-D angle violation on
+         EDTA, raw log-prob -130 nats, diluted to -5.15 by averaging with
+         14 fine pairs). Every soft-min variant tested made vanilla Adam
+         perform WORSE (0/16 converged, score and geometry both regressed)
+         due to gradient concentrating entirely on whichever term is
+         currently worst each step. Reverted to plain mean; see the
+         KNOWN ISSUE note on the _vmm/_gmm helpers in _score_components.
 """
 
 from __future__ import annotations
@@ -75,7 +92,21 @@ _CHELATE_SHORT_MAX = 4
 _CHELATE_LONG_MAX = 8
 
 # See exp.md for detailed rationale
-_GMM_VAR_MIN: float = 0.04
+#
+# BUGFIX (2.2.0): this used to be a single float shared between Q1 (vars in
+# Å²) and Q4 (vars in deg²). A floor tuned for Å² (0.04 Å² -> sigma ~0.2 Å,
+# reasonable) is ~2 orders of magnitude too permissive when reused verbatim
+# for deg²-valued Q4: 0.04 deg² -> sigma ~0.2 degrees, which lets fitted
+# near-delta components (e.g. Q4 N_amine modes with raw var=0.0021,
+# 0.046 deg^2 -- almost certainly duplicate/near-duplicate tmQM structures
+# inflating apparent certainty, not real chemical precision) survive
+# essentially unclamped. Any donor a few degrees off such a spike then
+# incurs an enormous, physically unwarranted penalty. Floors are now
+# per-quantity and in that quantity's native units.
+_GMM_VAR_MIN: Dict[str, float] = {
+    "Q1": 0.04,  # Å²   -> sigma floor ~0.2 Å
+    "Q4": 4.00,  # deg² -> sigma floor ~2.0 deg
+}
 
 # Mathematical constants used in the batched VMM/GMM helpers in
 # _score_components.  Defined locally so scorer.py has no hidden
@@ -647,9 +678,9 @@ class Scorer:
                 lw = torch.full_like(lw, float("-inf"))
             return ln, lw
 
-        def _gmm_precomp(vars_, weights, q_weight):
+        def _gmm_precomp(vars_, weights, q_weight, var_min):
             """Precompute static GMM eff_vars and log_w (with quantity weight)."""
-            ev = vars_.clamp(min=max(_GMM_VAR_MIN, _EPS))
+            ev = vars_.clamp(min=max(var_min, _EPS))
             lw = torch.log(weights.clamp(min=_EPS))
             if q_weight != 1.0 and q_weight > 0.0:
                 lw = lw + math.log(q_weight)
@@ -660,7 +691,9 @@ class Scorer:
         qw = self._qweights
 
         # Q1 (GMM)
-        self._q1_eff_vars, self._q1_log_w = _gmm_precomp(self._q1_vars, self._q1_weights, qw["Q1"])
+        self._q1_eff_vars, self._q1_log_w = _gmm_precomp(
+            self._q1_vars, self._q1_weights, qw["Q1"], _GMM_VAR_MIN["Q1"]
+        )
 
         # Q2 (VMM) — weight already controls whether Q2 contributes at all
         self._q2_log_norm, self._q2_log_w = _vmm_precomp(
@@ -673,7 +706,9 @@ class Scorer:
         )
 
         # Q4 (GMM)
-        self._q4_eff_vars, self._q4_log_w = _gmm_precomp(self._q4_vars, self._q4_weights, qw["Q4"])
+        self._q4_eff_vars, self._q4_log_w = _gmm_precomp(
+            self._q4_vars, self._q4_weights, qw["Q4"], _GMM_VAR_MIN["Q4"]
+        )
 
         # Q5 (VMM)
         self._q5_log_norm, self._q5_log_w = _vmm_precomp(
@@ -724,6 +759,28 @@ class Scorer:
         # log_norm : (N, K)   precomputed: LOG_2PI + log(i0e(κ)) + κ
         # log_w    : (N, K)   precomputed: log(weights) [+ log(q_weight) baked in]
         # returns (B,) — normalised (sum / N) log-prob for this quantity
+        #
+        # KNOWN ISSUE, NOT FIXED (investigated 2.2.0): mean-aggregation here
+        # launders a single severe per-term violation across the other,
+        # unrelated terms -- the same "mean laundering" pattern that was
+        # already found and fixed for Q6 in 2.0.0 (a -16 clash diluted to
+        # -2.36 by averaging over ~30 pairs). Confirmed present for Q2 on
+        # EDTA: a genuinely rigid 5-membered chelate pair (kappa=500) missing
+        # its target by 42 deg carries a raw log-prob of -130 nats, diluted
+        # to a -5.15 nat contribution by averaging with 14 other pairs --
+        # 25x too weak a gradient signal to compete with everything else
+        # pulling on the same donors. Tried switching to the same soft-min
+        # form already used for Q6 (both at Q6's tau=2.0 and at several
+        # gentler tau down to 0.1-0.5): every variant made the actual IK
+        # solve WORSE on EDTA (0/16 converged, score and geometry both
+        # regressed vs. plain mean) -- a worst-case objective concentrates
+        # the gradient entirely on whichever single term is currently worst
+        # each step, starving every other term ("whack-a-mole"), which
+        # vanilla per-step Adam handles badly. Reverted to plain mean.
+        # The dilution problem above is still real; it just needs a
+        # different fix than a naive aggregation swap (e.g. only fix up
+        # egregious outliers, or a curriculum/annealed tau, or address it
+        # via better initialization instead) -- not attempted yet.
         def _vmm(obs, means, kappas, log_norm, log_w, n_terms):
             cos_diff = torch.cos(obs.unsqueeze(-1) - means.unsqueeze(0))  # (B, N, K)
             log_comp = kappas.unsqueeze(0) * cos_diff - log_norm.unsqueeze(0)
@@ -735,7 +792,7 @@ class Scorer:
         # means    : (N, K)
         # eff_vars : (N, K)   precomputed: vars.clamp(min=GMM_VAR_MIN)
         # log_w    : (N, K)   precomputed: log(weights) [+ log(q_weight) baked in]
-        # returns (B,) — normalised (sum / N) log-prob
+        # returns (B,) — normalised (sum / N) log-prob (see _vmm note above)
         def _gmm(obs, means, eff_vars, log_w, n_terms):
             diff = obs.unsqueeze(-1) - means.unsqueeze(0)  # (B, N, K)
             log_comp = (

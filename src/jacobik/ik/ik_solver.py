@@ -18,6 +18,21 @@ Version
           Scorer constructor argument (quantity_weights={"Q2": ...}).
           score() takes no per-call float args; all weights are baked into
           precomputed tensors at Scorer.__init__ time.
+2.2.0 : kabsch_init() gains diversify_orientation/diversity_scale — extends
+        the existing rank<2 (degenerate Kabsch fit) random-orientation
+        injection to the general rank>=2 case (3+ non-collinear donors
+        fit jointly), which previously had NO diversity injection at all
+        because a well-posed least-squares fit doesn't need one to be
+        mathematically correct -- it just isn't the only torsion-reachable
+        wrap-around topology for a flexible ligand. Confirmed on EDTA (6
+        donors, rank=3): every batch trial got an identical base
+        orientation, collapsing 128 raw IK trials to 3 distinct final
+        geometries. See engine.py 2.3.0 for the measured effect.
+        JointIKSolver gains anchor_floor_frac: lambda_eff no longer decays
+        all the way to 0, retaining `anchor_floor_frac * lambda_init`
+        permanently. Tested in isolation on EDTA with negligible effect;
+        kept as an available lever (default 0.0 = old behaviour) since it
+        may help in combination with diversify_orientation on other cases.
 """
 
 from __future__ import annotations
@@ -45,10 +60,39 @@ def kabsch_init(
     X_ref: torch.Tensor,  # (N, 3) — full complex reference positions
     donor_targets: torch.Tensor,  # (B, n_d_lig, 3) targets for THIS ligand
     donor_pos_idx: Optional[torch.Tensor] = None,  # (n_d_lig,) position indices into X_ref
+    diversify_orientation: bool = False,
+    diversity_scale: float = 1.0,
 ) -> torch.Tensor:
     """
     Initialise base DOF (translation + axis-angle) for each batch item
     via Kabsch alignment of current donor positions to targets.
+
+    Parameters
+    ----------
+    diversify_orientation : bool
+        BUGFIX (2.2.0): the original orientational-diversity injection below
+        only fires for rank 0/1 fits (1 donor, or collinear donors) -- the
+        cases where the least-squares rigid alignment is genuinely
+        underdetermined. For 3+ non-collinear donors (rank 2-3, the common
+        case for tridentate+ ligands), _kabsch(P, Q) has a UNIQUE optimal
+        solution: every trial in the batch gets the identical base
+        orientation regardless of beam_width or n_coord_samples, because
+        that's the correct answer to "best rigid-body fit of this point
+        cloud" -- it just isn't the only *reachable* wrap-around topology
+        for a flexible, torsion-jointed ligand. Measured on EDTA (6 donors,
+        rank=3): 128 raw IK trials collapsed to 3 distinct final geometries
+        (pairwise RMSD ~0 within each cluster) because every trial started
+        from the same rigid-body placement and could only locally wiggle
+        from there. Setting diversify_orientation=True perturbs R with an
+        independent random rotation per trial (same mechanism already used
+        for the rank<2 case) even when the Kabsch fit is well-posed, so
+        beam_width/n_coord_samples actually explore distinct basins instead
+        of W x M near-copies of one.
+    diversity_scale : float
+        Max perturbation angle in units of pi (1.0 = full random SO(3)-ish
+        perturbation about a random axis, matching the existing rank<2
+        code's `torch.rand(1) * 2*pi`). Lower values keep trials closer to
+        the Kabsch optimum while still breaking exact ties.
     """
     device = donor_targets.device
     B = donor_targets.shape[0]
@@ -107,6 +151,21 @@ def kabsch_init(
             if axis.norm() > 1e-5:
                 axis = F.normalize(axis, dim=0)
                 angle = torch.rand(1, device=device).item() * 2.0 * math.pi
+                R_rand = axisangle_to_matrix((axis * angle).unsqueeze(0)).squeeze(0)
+                R = R_rand @ R
+                t = Q.mean(dim=0) - R @ P.mean(dim=0)
+
+        elif diversify_orientation:
+            # rank >= 2: the Kabsch fit is well-posed (unique optimum) but
+            # that uniqueness is exactly the bug for flexible multi-donor
+            # ligands -- see diversify_orientation docstring above. Perturb
+            # with an independent random rotation about a random axis, same
+            # form as the rank<2 branches, scaled by diversity_scale.
+            rand_axis = torch.randn(3, device=device)
+            axis_norm = rand_axis.norm()
+            if axis_norm > 1e-8:
+                axis = rand_axis / axis_norm
+                angle = torch.rand(1, device=device).item() * diversity_scale * math.pi
                 R_rand = axisangle_to_matrix((axis * angle).unsqueeze(0)).squeeze(0)
                 R = R_rand @ R
                 t = Q.mean(dim=0) - R @ P.mean(dim=0)
@@ -294,6 +353,16 @@ class JointIKSolver:
                    (default 8)
     plateau_atol : absolute score change below which a step is "not improving"
                    for plateau detection (default 0.02 nats)
+    anchor_floor_frac : fraction of lambda_init retained permanently instead
+                   of decaying fully to zero (default 0.0 = old behaviour).
+                   EDTA-class crowded/flexible polydentate ligands were
+                   observed to drift to a WORSE score and geometry under a
+                   longer solve once the anchor fully vanished (Q1-Q6 alone
+                   underconstrains the donor shell once nothing is pinning
+                   it to the target polyhedron) -- a small nonzero floor
+                   (~0.02-0.05) keeps a gentle permanent pull toward the
+                   assigned geometry without preventing the statistical
+                   score from doing the local refinement.
     device       : torch device
     """
 
@@ -309,6 +378,7 @@ class JointIKSolver:
         adam_betas: Tuple[float, float] = (0.9, 0.999),
         plateau_window: int = 8,
         plateau_atol: float = 0.02,
+        anchor_floor_frac: float = 0.0,
         device: torch.device = torch.device("cpu"),
     ) -> None:
         self.fks = fks
@@ -322,6 +392,7 @@ class JointIKSolver:
         self.adam_eps = 1e-8
         self.plateau_window = plateau_window
         self.plateau_atol = plateau_atol
+        self.anchor_floor_frac = anchor_floor_frac
         self.device = device
 
     def solve(
@@ -424,7 +495,8 @@ class JointIKSolver:
             with torch.no_grad():
                 gain = torch.nan_to_num(best_score_ever - score_t0, nan=0.0).clamp(min=0.0)
                 frac = (1.0 - gain / max(self.lambda_init, _EPS)).clamp(min=0.0)
-                lambda_eff = self.lambda_init * frac**2  # (B,)
+                floor = self.anchor_floor_frac
+                lambda_eff = self.lambda_init * (frac**2 * (1.0 - floor) + floor)  # (B,)
 
             # --- Forward: apply all FKs sequentially to build X_current ---
             X_current = X_ref.unsqueeze(0).expand(B, -1, -1).clone()  # (B, N, 3)

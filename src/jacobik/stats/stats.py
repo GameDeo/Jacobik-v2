@@ -2,6 +2,24 @@
 stats.py
 ========
 Constraints database loader and key-resolution interface for the IK engine.
+
+Version history
+----------------
+1.0.0 : initial release
+1.1.0 : _fallback_q6 no longer uses raw covalent-radii-sum for metal-
+        involving pairs. The constraint DB has no fitted Q6 statistics for
+        ANY (metal, element) pair (Q6 was only ever fit on organic
+        element pairs), so every metal-ligand-atom contact was hitting this
+        hard fallback. Covalent radii describe bonding distance, so the old
+        fallback only penalised a non-donor atom once it was nearly close
+        enough to covalently bond to the metal -- confirmed on EDTA: a
+        backbone carbon at 1.71 A from Co (inside typical covalent contact)
+        cost only -0.32 nats out of a ~-13 total score. Metal-involving
+        pairs now use a VDW-like scale factor (1.18x covalent-sum, vs.
+        covalent-sum alone -- VDW radii are the standard tool for steric-
+        clash walls, not covalent radii) and a tighter sigma (0.12 vs.
+        0.25), so a severe violation isn't washed out. Organic-pair
+        fallback behaviour is unchanged.
 """
 
 from __future__ import annotations
@@ -160,6 +178,26 @@ _COVALENT_RADIUS: Dict[str, float] = {
     "Lu": 1.87,
 }
 _DEFAULT_RADIUS = 1.50  # fallback for unknown elements
+
+# Symbols covered by the "Transition metals" section of _COVALENT_RADIUS
+# above. Used by _fallback_q6 to detect metal-involving pairs and apply the
+# VDW-like scale/tighter sigma instead of raw covalent-radii-sum.
+_TRANSITION_METALS = frozenset(
+    {
+        "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
+        "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
+        "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+        "La", "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho",
+        "Er", "Tm", "Yb", "Lu",
+    }
+)
+#: VDW radii run ~1.15-1.2x covalent radii; applied to covalent-radii-sum
+#: for metal-involving Q6 fallback pairs only (see _fallback_q6 1.1.0).
+_Q6_METAL_VDW_SCALE: float = 1.18
+#: Tighter than the generic _Q6_DEFAULT_SIGMA (0.25) so a severe
+#: metal-proximity violation isn't washed out by soft-min aggregation.
+_Q6_METAL_SIGMA: float = 0.12
+
 
 _Q6_DEFAULT_SIGMA = 0.25  # Å — width of hard-fallback half-Gaussian
 
@@ -726,21 +764,51 @@ class StatsLookup:
         if fd is not None and fd.n >= self._n_min:
             return fd
 
-        # Hard fallback: sum of covalent radii as wall position
+        # Hard fallback: sum of covalent radii as wall position.
         r_A = _COVALENT_RADIUS.get(elem_A, _DEFAULT_RADIUS)
         r_B = _COVALENT_RADIUS.get(elem_B, _DEFAULT_RADIUS)
         mu = r_A + r_B
+        sigma = _Q6_DEFAULT_SIGMA
+
+        # BUGFIX (1.1.0): this hard fallback only fires when no fitted Q6
+        # statistic exists for the pair -- true for every (metal, element)
+        # pair, since the constraint DB has no metal entries at all (Q6 was
+        # only ever fit on organic element pairs). Covalent-radii-sum is the
+        # wrong physical model here: it describes BONDING distance, so a
+        # non-donor ligand atom (a backbone carbon, say) only gets penalised
+        # once it's nearly close enough to covalently bond to the metal --
+        # far too permissive for "how close should an atom that ISN'T
+        # coordinating ever get to an already 6-donor-saturated centre."
+        # Confirmed on EDTA: a backbone carbon measured at 1.71 A from Co
+        # (inside typical covalent contact) cost only -0.32 nats out of a
+        # ~-13 total score, barely distinguishable from a conformer whose
+        # closest such contact was a normal 2.33 A. Van der Waals radii (the
+        # standard tool for steric-clash walls in molecular modelling, as
+        # opposed to covalent radii for bonded distances) are typically
+        # ~1.15-1.2x covalent radii; applied here only for metal-involving
+        # pairs (organic-pair fallbacks are unaffected -- not the reported
+        # problem, and covalent-sum is a reasonable model for two organic
+        # atoms that could plausibly almost-bond). Sigma is also tightened
+        # for metal pairs so the wall is steep enough that a severe
+        # violation isn't washed out by soft-min aggregation across the
+        # (typically much larger) count of organic-organic Q6 pairs.
+        if elem_A in _TRANSITION_METALS or elem_B in _TRANSITION_METALS:
+            mu *= _Q6_METAL_VDW_SCALE
+            sigma = _Q6_METAL_SIGMA
+
         log.debug(
-            "Q6 hard fallback for %s: mu=%.3f (%.3f + %.3f)",
+            "Q6 hard fallback for %s: mu=%.3f (%.3f + %.3f, scale=%s), sigma=%.3f",
             canonical,
             mu,
             r_A,
             r_B,
+            elem_A in _TRANSITION_METALS or elem_B in _TRANSITION_METALS,
+            sigma,
         )
         return FittedDist(
             type="halfgauss",
             n=0,
             level=99,
             mu=mu,
-            sigma=_Q6_DEFAULT_SIGMA,
+            sigma=sigma,
         )

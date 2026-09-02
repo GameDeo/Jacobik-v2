@@ -172,6 +172,29 @@ def _render_complex_with_opacity(
                     },
                 )
 
+            # Draw Hungarian matching ghostly anchor and vector
+            if getattr(site, "anchor", None) is not None:
+                anchor_pos = metal_pos + np.asarray(site.anchor, dtype=float)
+                # Ghost sphere for anchor
+                view.addSphere(
+                    {
+                        "center": _xyz(anchor_pos),
+                        "radius": 0.45 * (1.2 if site.is_haptic else 1.0),
+                        "color": "#FFA500",  # warm orange/gold color for anchor
+                        "opacity": 0.25 * opacity,
+                    }
+                )
+                # Vector arrow from donor position to anchor
+                view.addArrow(
+                    {
+                        "start": _xyz(pos),
+                        "end": _xyz(anchor_pos),
+                        "radius": 0.05,
+                        "color": "#FFA500",
+                        "opacity": 0.6 * opacity,
+                    }
+                )
+
 
 # ---------------------------------------------------------------------------
 # GMM/VMM evaluation functions for individual term analysis

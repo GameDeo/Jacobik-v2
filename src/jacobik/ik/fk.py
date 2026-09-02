@@ -2,11 +2,30 @@
 fk.py
 =====
 Batched, differentiable forward kinematics for the IK engine.
+
+Version history
+----------------
+1.0.0 : initial release
+2.3.0 : Joint list is now built from one canonical BFS over body_adj_for_bfs
+        starting at ligand.decomposition.root_body (decompose.py 1.2.1),
+        replacing the previous "iterate ligand.pivot_chains in donor order,
+        dedupe bonds first-come-first-served" construction. That mechanism
+        made joint direction -- and therefore which body ends up as the
+        FK tree's un-correctable root -- an accidental function of donor
+        list order, with no guarantee a donor would be avoided. See
+        decompose.py 1.2.1 for the root-selection rule and the EDTA case
+        that surfaced this (a donor atom/group measured moving exactly
+        0.0000 A under any combination of the ligand's other torsions).
+        Also hoists body_adj_for_bfs construction out of the per-donor
+        loop it used to live in -- it doesn't depend on which donor is
+        being processed, so rebuilding it once per donor was O(n_donors)
+        wasted work for no benefit.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import deque
 from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 
 import torch
@@ -117,10 +136,45 @@ class ForwardKinematics:
         # rigid_bodies: list of sets of atom.idx per body
         body_sets: List[Set[int]] = decomp.rigid_bodies
 
-        # Build the ordered joint list with downstream masks.
-        # Each PivotChain's joints are in BFS order donor-outward.
-        # We iterate chains in ligand order; within each chain, joints are
-        # already in BFS order.  Dedup by canonical bond key.
+        # Build body-level adjacency for downstream BFS.
+        # body_adj_for_bfs[b] = list of (neighbour_body, atom_in_b, atom_in_neighbour)
+        # for every rotatable bond crossing out of body b. Built ONCE.
+        #
+        # PERF (fk.py 2.3.0): previously rebuilt from scratch inside the
+        # per-donor `for chain in ligand.pivot_chains` loop below -- i.e.
+        # O(n_donors) redundant reconstructions of the same, donor-independent
+        # structure. Hoisted out.
+        body_adj_for_bfs: Dict[int, List[Tuple[int, int, int]]] = {}
+        for rb in ligand.rotatable_bonds:
+            u, v = rb.i, rb.j
+            if u not in body_of or v not in body_of:
+                continue
+            bu, bv = body_of[u], body_of[v]
+            if bu != bv:
+                body_adj_for_bfs.setdefault(bu, []).append((bv, u, v))
+                body_adj_for_bfs.setdefault(bv, []).append((bu, v, u))
+
+        # BUGFIX (fk.py 2.3.0): the joint list (and therefore which body
+        # ends up as the un-correctable root -- see decompose.py 1.2.1) used
+        # to be built by iterating `ligand.pivot_chains` in donor-list order
+        # and deduping bonds first-come-first-served, making the effective
+        # root an accidental function of donor order. Replaced with one
+        # canonical BFS from the ligand's explicitly-chosen, donor-free
+        # root_body, giving an order-independent joint list where every
+        # donor sits behind at least one real, position-changing joint.
+        root_body: int = getattr(decomp, "root_body", 0)
+        ordered_joints: List[Tuple[int, int]] = []  # (j_atom, k_atom) atom.idx pairs
+        visited_bodies_root: Set[int] = {root_body}
+        queue_root: deque = deque([root_body])
+        while queue_root:
+            curr = queue_root.popleft()
+            for nb_body, j_atom, k_atom in sorted(body_adj_for_bfs.get(curr, [])):
+                if nb_body in visited_bodies_root:
+                    continue
+                visited_bodies_root.add(nb_body)
+                queue_root.append(nb_body)
+                ordered_joints.append((j_atom, k_atom))
+
         seen_bonds: Set[Tuple[int, int]] = set()
 
         # Ordered lists parallel to the joint sequence
@@ -130,101 +184,64 @@ class ForwardKinematics:
         flanking_l_list: List[int] = []
         downstream_lists: List[List[int]] = []  # pos indices per joint
 
-        for chain in ligand.pivot_chains:
-            # See exp.md for detailed rationale
-
-            # Build a simple body-adjacency along the chain direction.
-            # Since chains are BFS-ordered, we can reconstruct the tree.
-            chain_joints = chain.joints
-            if not chain_joints:
+        for j_atom, k_atom in ordered_joints:
+            # Skip coordination bonds (metal-ligand, not a torsion DOF)
+            if j_atom == mol.metal_idx or k_atom == mol.metal_idx:
                 continue
 
-            # For each joint: downstream bodies = bodies reachable from
-            # joint.atom_j side (not through joint.atom_i side).
-            # Compute via the full body adjacency from decomp.rigid_bodies.
+            bond_key = (min(j_atom, k_atom), max(j_atom, k_atom))
+            if bond_key in seen_bonds:
+                continue
+            seen_bonds.add(bond_key)
 
-            # See exp.md for detailed rationale
+            # Flanking atoms — identical convention to geometry.py
+            j_nbs = [n for n in heavy_nb.get(j_atom, []) if n != k_atom]
+            k_nbs = [n for n in heavy_nb.get(k_atom, []) if n != j_atom]
 
-            chain_joints = chain.joints
-            if not chain_joints:
+            if not j_nbs:
+                j_nbs = [n for n in all_nb.get(j_atom, []) if n != k_atom]
+            if not k_nbs:
+                k_nbs = [n for n in all_nb.get(k_atom, []) if n != j_atom]
+
+            if not j_nbs or not k_nbs:
                 continue
 
-            # Build body-level adjacency for downstream BFS.
-            # body_adj_for_bfs[b] = list of (neighbor_body, crossing_atom_j)
-            # where crossing_atom_j is in neighbor_body (the tail side of each
-            # rotatable bond that exits body b).
-            body_adj_for_bfs: Dict[int, List[Tuple[int, int]]] = {}
-            for rb in ligand.rotatable_bonds:
-                u, v = rb.i, rb.j
-                if u not in body_of or v not in body_of:
+            fi_atom = heaviest_heavy_neighbor(j_nbs, atom_map)
+            fl_atom = heaviest_heavy_neighbor(k_nbs, atom_map)
+
+            for atom in (fi_atom, j_atom, k_atom, fl_atom):
+                if atom not in idx_to_pos:
+                    break
+            else:
+                # Downstream bodies: BFS from body_of[k_atom], not
+                # allowed to cross back through body_of[j_atom].
+                # This correctly handles branching chains.
+                if k_atom not in body_of or j_atom not in body_of:
                     continue
-                bu = body_of[u]
-                bv = body_of[v]
-                if bu != bv:
-                    body_adj_for_bfs.setdefault(bu, []).append((bv, v))
-                    body_adj_for_bfs.setdefault(bv, []).append((bu, u))
+                start_body = body_of[k_atom]
+                forbid_body = body_of[j_atom]
 
-            for jt in chain_joints:
-                j_atom = jt.atom_i  # donor-proximal end (atom.idx)
-                k_atom = jt.atom_j  # tail end (atom.idx)
+                visited_bodies: Set[int] = {start_body}
+                queue_b = [start_body]
+                while queue_b:
+                    curr_b = queue_b.pop()
+                    for nb_b, _, _ in body_adj_for_bfs.get(curr_b, []):
+                        if nb_b not in visited_bodies and nb_b != forbid_body:
+                            visited_bodies.add(nb_b)
+                            queue_b.append(nb_b)
 
-                # Skip coordination bonds (metal-ligand, not a torsion DOF)
-                if j_atom == mol.metal_idx or k_atom == mol.metal_idx:
-                    continue
+                down_pos = sorted(
+                    idx_to_pos[a_idx]
+                    for b_idx in visited_bodies
+                    for a_idx in body_sets[b_idx]
+                    if a_idx in idx_to_pos
+                )
 
-                bond_key = (min(j_atom, k_atom), max(j_atom, k_atom))
-                if bond_key in seen_bonds:
-                    continue
-                seen_bonds.add(bond_key)
-
-                # Flanking atoms — identical convention to geometry.py
-                j_nbs = [n for n in heavy_nb.get(j_atom, []) if n != k_atom]
-                k_nbs = [n for n in heavy_nb.get(k_atom, []) if n != j_atom]
-
-                if not j_nbs:
-                    j_nbs = [n for n in all_nb.get(j_atom, []) if n != k_atom]
-                if not k_nbs:
-                    k_nbs = [n for n in all_nb.get(k_atom, []) if n != j_atom]
-
-                if not j_nbs or not k_nbs:
-                    continue
-
-                fi_atom = heaviest_heavy_neighbor(j_nbs, atom_map)
-                fl_atom = heaviest_heavy_neighbor(k_nbs, atom_map)
-
-                for atom in (fi_atom, j_atom, k_atom, fl_atom):
-                    if atom not in idx_to_pos:
-                        break
-                else:
-                    # Downstream bodies: BFS from body_of[k_atom], not
-                    # allowed to cross back through body_of[j_atom].
-                    # This correctly handles branching chains.
-                    if k_atom not in body_of or j_atom not in body_of:
-                        continue
-                    start_body = body_of[k_atom]
-                    forbid_body = body_of[j_atom]
-
-                    visited_bodies: Set[int] = {start_body}
-                    queue_b = [start_body]
-                    while queue_b:
-                        curr_b = queue_b.pop()
-                        for nb_b, _ in body_adj_for_bfs.get(curr_b, []):
-                            if nb_b not in visited_bodies and nb_b != forbid_body:
-                                visited_bodies.add(nb_b)
-                                queue_b.append(nb_b)
-
-                    down_pos = sorted(
-                        idx_to_pos[a_idx]
-                        for b_idx in visited_bodies
-                        for a_idx in body_sets[b_idx]
-                        if a_idx in idx_to_pos
-                    )
-
-                    flanking_i_list.append(idx_to_pos[fi_atom])
-                    pivot_j_list.append(idx_to_pos[j_atom])
-                    pivot_k_list.append(idx_to_pos[k_atom])
-                    flanking_l_list.append(idx_to_pos[fl_atom])
-                    downstream_lists.append(down_pos)
+                flanking_i_list.append(idx_to_pos[fi_atom])
+                pivot_j_list.append(idx_to_pos[j_atom])
+                pivot_k_list.append(idx_to_pos[k_atom])
+                flanking_l_list.append(idx_to_pos[fl_atom])
+                downstream_lists.append(down_pos)
 
         self.n_joints = len(pivot_j_list)
 

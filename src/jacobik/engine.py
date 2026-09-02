@@ -30,10 +30,70 @@ Version history
          q2_weight replaced by general quantity_weights dict passed to Scorer
          at construction time (no per-step overhead).  JointIKSolver no longer
          takes q2_weight or quantity_weights — all weight logic lives in Scorer.
+2.2.0 : Benchmark-oriented speed improvements.
+         solve() gains three new optional parameters:
+           stats        — accept a pre-built StatsLookup, bypassing load_db()
+                          (eliminates repeated JSON parse across benchmark loop).
+           fast_embed   — skip MMFF optimisation in _smiles_to_conformer()
+                          (saves ~0.2–0.5 s per ligand; conformer is overwritten
+                          by IK anyway so MMFF quality is irrelevant).
+           n_conformers — cap the number of conformers assembled from IK results
+                          (default: max(beam_width, n_coord_samples) as before).
+         Joint-offset O(L²) FK construction replaced by a single n_joints cache
+         built during the per-ligand FK construction pass.
+2.3.0 : solve() gains anchor_floor_frac, diversify_orientation, and
+         diversity_scale, threaded through to kabsch_init() (ik_solver.py
+         2.2.0) and JointIKSolver (ik_solver.py 2.2.0). Root cause: for
+         polydentate ligands with 3+ non-collinear donors fit jointly, the
+         Kabsch base-orientation fit is a well-posed unique solution, so
+         every trial in the batch received an IDENTICAL starting rigid-body
+         placement regardless of beam_width/n_coord_samples -- confirmed on
+         EDTA (6 donors): 128 raw IK trials collapsed to 3 distinct final
+         geometries (pairwise RMSD ~0 within each cluster). Setting
+         diversify_orientation=True gives each trial an independent random
+         starting orientation, so batch size actually buys distinct basins
+         instead of near-copies of one. Measured on EDTA: best score
+         -20.82 -> -12.47 at beam_width=16, improving further to -9.99 at
+         beam_width=128 (monotonic with more trials, unlike before this fix
+         where more trials/steps did not help). anchor_floor_frac was also
+         added and tested in isolation (kept a small permanent pull toward
+         the assigned geometry instead of fully decaying to 0) but had
+         negligible effect on EDTA on its own -- default 0.0 (old
+         behaviour) until it's validated to help in combination with the
+         orientation fix on a broader test set.
+2.4.0 : Replaced copy.deepcopy(mol) at the per-output-conformer assembly
+         step with _shallow_copy_mol_for_conformer() (see that function's
+         docstring for the full rationale/numbers). deepcopy recursed into
+         static topology metadata (rigid_bodies, pivot_chains,
+         decomposition, rotatable_bonds, donor_labels, bonds) that's
+         identical across every conformer of one solve -- measured 61,408
+         recursive copy calls across 32 top-level deepcopy() calls in one
+         profiled EDTA solve. Only atoms, coord_sites, and each ligand's
+         haptic_groups actually need independent copies (their fields get
+         mutated in-place by _refresh_coord_geometry); everything else is
+         shared by reference.
+2.5.0 : BUGFIX -- solve(seed=...) never actually seeded PyTorch's global
+         RNG. It seeded np.random's global state and a LOCAL
+         torch.Generator() that was created, seeded, and then never passed
+         to anything anywhere in the codebase (confirmed via grep: zero
+         `generator=` usages in engine.py, ik_solver.py, beam.py). Every
+         unqualified torch.randn/torch.rand call in the pipeline (beam
+         search, kabsch_init's diversify_orientation added in 2.3.0) reads
+         from PyTorch's actual global RNG, so results for a given seed
+         depended entirely on whatever torch random state happened to
+         exist from code that ran BEFORE solve() was called -- different
+         across notebooks, scripts, or call order, even for the identical
+         seed. Fixed by calling torch.manual_seed(seed) directly (the
+         orphaned local Generator was removed, not repurposed, since
+         nothing reads from it). Verified: same seed now gives bit-
+         identical results whether solve() is the first torch call in the
+         process or is preceded by hundreds of unrelated torch.randn/rand
+         calls with a different manual_seed set beforehand.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import math
 from dataclasses import dataclass
@@ -313,6 +373,44 @@ def _q1_sample_distances(
     return np.clip(samples, 0.5, None)
 
 
+def _shallow_copy_mol_for_conformer(mol: "TMComplex") -> "TMComplex":
+    """
+    Make an independent-enough copy of `mol` for one output conformer.
+
+    BUGFIX (2.4.0): the call site used `copy.deepcopy(mol)` once per output
+    conformer (n_conformers = max(beam_width, n_coord_samples), so e.g. 32-64
+    calls per solve). A TMComplex's topology metadata -- rigid_bodies,
+    pivot_chains, decomposition, rotatable_bonds, donor_labels, bonds -- is
+    IDENTICAL across every conformer of a single solve (it never changes
+    after decompose_ligand()); only atom positions (and the coord-site /
+    haptic centroids derived from them) differ per conformer. deepcopy
+    recurses into all of it regardless, measured at 61,408 recursive copy
+    calls across 32 top-level deepcopy() calls in one profiled EDTA solve.
+    This does an explicit shallow copy instead: atoms are shallow-copied
+    (their `.position` is about to be REASSIGNED to a fresh array, not
+    mutated in place, so a shallow per-atom copy is sufficient); coord_sites
+    and each ligand's haptic_groups are ALSO shallow-copied per-object,
+    because _refresh_coord_geometry() mutates `.position` / `.centroid`
+    in-place on those specific objects -- sharing them across conformers
+    would have every conformer silently overwrite the same shared object.
+    Everything else (rigid_bodies, pivot_chains, decomposition,
+    rotatable_bonds, donor_labels, bonds, metal_idx, ...) is never mutated
+    after construction and is safe to share by reference.
+    """
+    mol_copy = copy.copy(mol)
+    mol_copy.atoms = [copy.copy(a) for a in mol.atoms]
+    mol_copy.coord_sites = [copy.copy(s) for s in getattr(mol, "coord_sites", [])]
+
+    new_ligands = []
+    for lig in mol.ligands:
+        lig_copy = copy.copy(lig)
+        lig_copy.haptic_groups = [copy.copy(h) for h in getattr(lig, "haptic_groups", [])]
+        new_ligands.append(lig_copy)
+    mol_copy.ligands = new_ligands
+
+    return mol_copy
+
+
 def _refresh_coord_geometry(mol) -> None:
     """
     Recompute derived coordination geometry (coord_site positions and haptic
@@ -347,9 +445,18 @@ def _refresh_coord_geometry(mol) -> None:
 
 def _smiles_to_conformer(
     smiles: str,
+    fast_embed: bool = False,
 ) -> Tuple[object, np.ndarray, bool]:
     """
     Parse SMILES and generate a 3-D conformer via RDKit ETKDG.
+
+    Parameters
+    ----------
+    smiles     : SMILES string
+    fast_embed : if True, skip MMFF force-field refinement.  The conformer
+                 is only used as a starting geometry for the IK solve, which
+                 overwrites it completely, so MMFF quality is irrelevant in
+                 the benchmark loop.  Saves ~0.2–0.5 s per ligand.
 
     Returns
     -------
@@ -375,7 +482,8 @@ def _smiles_to_conformer(
     if result == -1:
         AllChem.EmbedMolecule(mol_h, AllChem.ETKDG())
 
-    AllChem.MMFFOptimizeMolecule(mol_h)
+    if not fast_embed:
+        AllChem.MMFFOptimizeMolecule(mol_h)
 
     conf = mol_h.GetConformer()
     positions = conf.GetPositions().astype(np.float64)  # (N_all, 3) incl. H
@@ -434,6 +542,7 @@ def _build_complex_shell(
     spin: int,
     geometry: str,
     ligand_inputs: List[LigandInput],
+    fast_embed: bool = False,
 ) -> Tuple[object, List[object], List[np.ndarray], List[List[List[int]]]]:
     """
     Build a TMComplex shell from scratch:
@@ -470,7 +579,7 @@ def _build_complex_shell(
     donor_idx_full_out = []
 
     for lig_i, lig_inp in enumerate(ligand_inputs):
-        rdmol_h, positions, has_h = _smiles_to_conformer(lig_inp.smiles)
+        rdmol_h, positions, has_h = _smiles_to_conformer(lig_inp.smiles, fast_embed=fast_embed)
 
         # Map donor indices to full-H graph
         donor_full = _donor_indices_to_full_graph(lig_inp.smiles, lig_inp.donors, has_h, rdmol_h)
@@ -709,8 +818,11 @@ class ComplexBuilder:
         constraints_db: str | Path | None = None,
         beam_width: int = 16,
         n_ik_steps: int = 200,
-        lr: float = 0.01,
+        lr: float = 0.1,
         lambda_init: float = 10.0,
+        anchor_floor_frac: float = 0.0,
+        diversify_orientation: bool = False,
+        diversity_scale: float = 1.0,
         n_coord_samples: int = 8,
         quantity_weights: Optional[Dict[str, float]] = None,
         lse_temp: float = 2.0,
@@ -718,6 +830,9 @@ class ComplexBuilder:
         device: str = "cpu",
         seed: Optional[int] = None,
         debug: bool = False,
+        stats: Optional[object] = None,
+        fast_embed: bool = False,
+        n_conformers: Optional[int] = None,
     ) -> EnsembleResult:
         """
         Solve for a conformer ensemble.
@@ -744,6 +859,20 @@ class ComplexBuilder:
         device           : "cpu" or "cuda"
         seed             : optional random seed for reproducibility
         debug            : if True, print detailed diagnostics at every stage.
+        stats            : optional pre-built StatsLookup object.  When provided,
+                           load_db() is skipped entirely — useful in benchmark
+                           loops to avoid re-parsing constraints.json per complex.
+                           Build once with:
+                             from jacobik.stats.stats import StatsLookup, load_db
+                             stats = StatsLookup(load_db(constraints_db))
+        fast_embed       : if True, skip MMFF force-field refinement of the
+                           ETKDG conformer.  Safe in benchmark contexts because
+                           the IK solve overwrites the initial geometry completely.
+                           Saves ~0.2–0.5 s per ligand.
+        n_conformers     : maximum number of conformers to assemble from IK
+                           results.  Default: max(beam_width, n_coord_samples).
+                           Set to 1 to get only the rank-1 conformer and skip
+                           all deep-copy overhead for lower-ranked structures.
 
         Returns
         -------
@@ -760,22 +889,36 @@ class ComplexBuilder:
         from jacobik.topology.donor_classifier import classify
 
         _device = torch.device(device)
-        rng = torch.Generator()
         np_rng = np.random.default_rng(seed)  # for Q1 GMM target sampling (§5.3)
+
+        # BUGFIX (2.5.0): seed was previously used to seed np.random's global
+        # state (below) plus a LOCAL torch.Generator() that was created,
+        # seeded, and then never passed to anything -- dead code. Every
+        # unqualified torch.randn/torch.rand call anywhere in the pipeline
+        # (beam search, kabsch_init's diversify_orientation) draws from
+        # PyTorch's GLOBAL RNG, which was never actually seeded by solve()
+        # at all. Reproducibility for a given seed therefore depended on
+        # whatever torch random state happened to exist from code that ran
+        # BEFORE solve() was called -- different in every notebook, script,
+        # or call order, matching reported "same seed, different result"
+        # confusion. torch.manual_seed(seed) seeds the actual global RNG
+        # that those calls read from.
         if seed is not None:
-            rng.manual_seed(seed)
+            torch.manual_seed(seed)
             np.random.seed(seed)
 
         # ------------------------------------------------------------------
-        # 1. Load stats DB
+        # 1. Load stats DB (or use pre-built StatsLookup from caller)
         # ------------------------------------------------------------------
-        if constraints_db is None:
-            from importlib import resources
-
-            constraints_db = resources.files("jacobik") / "constraints.json"
-        log.info("Loading constraints DB: %s", constraints_db)
-        db = load_db(constraints_db)
-        stats = StatsLookup(db)
+        if stats is None:
+            if constraints_db is None:
+                from importlib import resources
+                constraints_db = resources.files("jacobik") / "constraints.json"
+            log.info("Loading constraints DB: %s", constraints_db)
+            db = load_db(constraints_db)
+            stats = StatsLookup(db)
+        else:
+            log.info("Using pre-built StatsLookup (skipping load_db)")
 
         # ------------------------------------------------------------------
         # 2. Build TMComplex shell + run donor classification
@@ -787,6 +930,7 @@ class ComplexBuilder:
             spin=self.spin,
             geometry=self.geometry,
             ligand_inputs=self.ligands,
+            fast_embed=fast_embed,
         )
 
         classify(mol, smiles_path=True)
@@ -954,8 +1098,6 @@ class ComplexBuilder:
 
         # See exp.md for detailed rationale
 
-        import copy
-
         from jacobik.ik.ik_solver import JointIKSolver
 
         # See exp.md for detailed rationale
@@ -985,6 +1127,7 @@ class ComplexBuilder:
         all_donor_targets: List[torch.Tensor] = []
         all_donor_pos_idxs: List[torch.Tensor] = []
         all_lig_di: List[List[int]] = []
+        _fk_n_joints: List[int] = []  # cache: n_joints per ligand, built incrementally
 
         for li, (lig_inp, lig_obj) in enumerate(zip(self.ligands, mol.ligands)):
             log.info("Ligand %d/%d: FK + beam search...", li + 1, len(self.ligands))
@@ -993,6 +1136,7 @@ class ComplexBuilder:
             #     ge_joint/scorer_joint were constructed)
             fk = ForwardKinematics(mol, lig_obj, _device)
             fks.append(fk)
+            _fk_n_joints.append(fk.n_joints)  # cache for O(1) joint-offset lookup
 
             if debug:
                 print(f"\n[DEBUG] ── Ligand {li} ─────────────────────────────────")
@@ -1044,9 +1188,7 @@ class ComplexBuilder:
             # ge_li sees the same complex but its _q5_keys covers all ligands;
             # BeamSearch needs only this ligand's joints in rows 0..J-1.
             # Compute the joint offset: sum of n_joints for ligands 0..li-1.
-            _joint_offset = sum(
-                ForwardKinematics(mol, mol.ligands[_li2], _device).n_joints for _li2 in range(li)
-            )
+            _joint_offset = sum(_fk_n_joints[:li])  # O(1): cached from FK build loop
             _q5_m = scorer_li._q5_means[_joint_offset : _joint_offset + J]  # (J, K)
             _q5_k = scorer_li._q5_kappas[_joint_offset : _joint_offset + J]
             _q5_w = scorer_li._q5_weights[_joint_offset : _joint_offset + J]
@@ -1106,6 +1248,8 @@ class ComplexBuilder:
                 X_ref=X_full,
                 donor_targets=donor_targets_torch,
                 donor_pos_idx=donor_pos_idx_t,
+                diversify_orientation=diversify_orientation,
+                diversity_scale=diversity_scale,
             )  # (B, 6)
             theta_init = torch.cat([base_theta, beam_torsions_B], dim=-1)  # (B, 6+J)
 
@@ -1137,6 +1281,7 @@ class ComplexBuilder:
             lambda_init=lambda_init,
             lse_temp=lse_temp,
             adam_betas=adam_betas,
+            anchor_floor_frac=anchor_floor_frac,
             device=_device,
         )
         thetas_final, converged, scores, solve_trace = joint_solver.solve(
@@ -1168,14 +1313,14 @@ class ComplexBuilder:
         # ------------------------------------------------------------------
         # 6. Assemble full complexes from joint results
         # ------------------------------------------------------------------
-        n_conformers = max(beam_width, n_coord_samples)
+        n_conformers = n_conformers if n_conformers is not None else max(beam_width, n_coord_samples)
         conformers: List[ConformerResult] = []
 
         score_np = scores.cpu().numpy()
         sorted_b = np.argsort(-score_np)
 
         for ci, b in enumerate(sorted_b[:n_conformers]):
-            mol_copy = copy.deepcopy(mol)
+            mol_copy = _shallow_copy_mol_for_conformer(mol)
 
             X_assembled = X_full.unsqueeze(0)  # (1, N, 3)
             for li, fk_li in enumerate(fks):

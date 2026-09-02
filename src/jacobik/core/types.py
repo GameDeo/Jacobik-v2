@@ -99,6 +99,7 @@ class CoordinationSite:
     label: str  # short donor label, e.g. "py", "η⁵", "OAc"
     avg_bond_order: float = 0.0  # mean raw metal-donor Wiberg BO (for scoring)
     haptic_order: int = 0  # n for haptic; 0 for kappa
+    anchor: Optional[np.ndarray] = None  # target position relative to metal center
 
     @property
     def is_haptic(self) -> bool:
