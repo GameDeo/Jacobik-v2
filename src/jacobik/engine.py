@@ -3,321 +3,29 @@ engine.py
 =========
 Public API and orchestration for the Jacobik conformer ensemble engine.
 
-Version history
----------------
-1.0.0 : initial release
-1.1.0 : _DEFAULT_QUANTITY_WEIGHTS introduced with Q3=3.0, Q4=3.0 to
-         compensate for gradient dilution in broad amine distributions
-         (superseded by 1.2.0).
-1.2.0 : _DEFAULT_QUANTITY_WEIGHTS reverted to all-1.0.  Per-DOF lr
-         adaptation is now handled by Adam on c_grad (ik_solver.py 1.1.0),
-         making the weight boost unnecessary and removing a magic constant.
-         New solve() params threaded through to JointIKSolver: chem_lr,
-         adam_betas, lambda_decay_tol, anchor_lse_temp.
-1.3.0 : Fixed polydentate ligand initial placement in _build_complex_shell.
-         The old logic placed the donor centroid at 2.5 Å from the metal for
-         ALL ligands.  For monodentate this is correct.  For polydentate
-         (EDTA: 6 donors spanning ±5 Å in extended ETKDG conformation) it
-         placed individual donors anywhere from 0 to 10 Å away, with at least
-         one nitrogen at ~0.66 Å (essentially on the metal).  This poisoned
-         the Hungarian assignment (garbage directions near 0°) and the Kabsch
-         init, making the IK solve impossible to converge regardless of solver
-         quality.  Fix: for n_donor_groups ≥ 2, scale the conformer so the
-         donor radius of gyration equals the target M-D bond length (~2.0 Å)
-         and center the donor centroid at the metal origin.  All donors then
-         start at approximately the correct coordination distance.
-2.1.0 : Speed improvements aligned with scorer.py 2.1.0 and ik_solver.py 2.1.0.
-         q2_weight replaced by general quantity_weights dict passed to Scorer
-         at construction time (no per-step overhead).  JointIKSolver no longer
-         takes q2_weight or quantity_weights — all weight logic lives in Scorer.
-2.2.0 : Benchmark-oriented speed improvements.
-         solve() gains three new optional parameters:
-           stats        — accept a pre-built StatsLookup, bypassing load_db()
-                          (eliminates repeated JSON parse across benchmark loop).
-           fast_embed   — skip MMFF optimisation in _smiles_to_conformer()
-                          (saves ~0.2–0.5 s per ligand; conformer is overwritten
-                          by IK anyway so MMFF quality is irrelevant).
-           n_conformers — cap the number of conformers assembled from IK results
-                          (default: max(beam_width, n_coord_samples) as before).
-         Joint-offset O(L²) FK construction replaced by a single n_joints cache
-         built during the per-ligand FK construction pass.
-2.3.0 : solve() gains anchor_floor_frac, diversify_orientation, and
-         diversity_scale, threaded through to kabsch_init() (ik_solver.py
-         2.2.0) and JointIKSolver (ik_solver.py 2.2.0). Root cause: for
-         polydentate ligands with 3+ non-collinear donors fit jointly, the
-         Kabsch base-orientation fit is a well-posed unique solution, so
-         every trial in the batch received an IDENTICAL starting rigid-body
-         placement regardless of beam_width/n_coord_samples -- confirmed on
-         EDTA (6 donors): 128 raw IK trials collapsed to 3 distinct final
-         geometries (pairwise RMSD ~0 within each cluster). Setting
-         diversify_orientation=True gives each trial an independent random
-         starting orientation, so batch size actually buys distinct basins
-         instead of near-copies of one. Measured on EDTA: best score
-         -20.82 -> -12.47 at beam_width=16, improving further to -9.99 at
-         beam_width=128 (monotonic with more trials, unlike before this fix
-         where more trials/steps did not help). anchor_floor_frac was also
-         added and tested in isolation (kept a small permanent pull toward
-         the assigned geometry instead of fully decaying to 0) but had
-         negligible effect on EDTA on its own -- default 0.0 (old
-         behaviour) until it's validated to help in combination with the
-         orientation fix on a broader test set.
-2.4.0 : Replaced copy.deepcopy(mol) at the per-output-conformer assembly
-         step with _shallow_copy_mol_for_conformer() (see that function's
-         docstring for the full rationale/numbers). deepcopy recursed into
-         static topology metadata (rigid_bodies, pivot_chains,
-         decomposition, rotatable_bonds, donor_labels, bonds) that's
-         identical across every conformer of one solve -- measured 61,408
-         recursive copy calls across 32 top-level deepcopy() calls in one
-         profiled EDTA solve. Only atoms, coord_sites, and each ligand's
-         haptic_groups actually need independent copies (their fields get
-         mutated in-place by _refresh_coord_geometry); everything else is
-         shared by reference.
-2.5.0 : BUGFIX -- solve(seed=...) never actually seeded PyTorch's global
-         RNG. It seeded np.random's global state and a LOCAL
-         torch.Generator() that was created, seeded, and then never passed
-         to anything anywhere in the codebase (confirmed via grep: zero
-         `generator=` usages in engine.py, ik_solver.py, beam.py). Every
-         unqualified torch.randn/torch.rand call in the pipeline (beam
-         search, kabsch_init's diversify_orientation added in 2.3.0) reads
-         from PyTorch's actual global RNG, so results for a given seed
-         depended entirely on whatever torch random state happened to
-         exist from code that ran BEFORE solve() was called -- different
-         across notebooks, scripts, or call order, even for the identical
-         seed. Fixed by calling torch.manual_seed(seed) directly (the
-         orphaned local Generator was removed, not repurposed, since
-         nothing reads from it). Verified: same seed now gives bit-
-         identical results whether solve() is the first torch call in the
-         process or is preceded by hundreds of unrelated torch.randn/rand
-         calls with a different manual_seed set beforehand.
-2.6.0 : solve() gains use_shape_alm (default True), shape_rho, shape_tol,
-         sym_weight, threaded through to JointIKSolver (ik_solver.py 2.3.0).
-         Root cause addressed: the old anchor pulled every donor toward a
-         FIXED absolute Cartesian target computed once, before the solve,
-         from the ligand's *initial* pose -- as soon as the free rigid pose
-         or the ligand's own torsions moved away from that pose (routine
-         for flexible/chelating ligands such as EDTA), the anchor was
-         scoring deviation from a stale frame, so a strong anchor fought
-         the statistical score over an unreachable configuration while a
-         weak one let the donor shell drift uncoordinated. No single fixed
-         lambda(t) schedule could serve both regimes (e.g. rigid PtCl4 vs
-         flexible EDTA) -- a documented failure mode of fixed-weight
-         penalties in non-convex optimisation (see e.g. arXiv:2505.20628),
-         not a tuning miss. use_shape_alm=True replaces it with a shape
-         term computed via the optimal rigid rotation (Procrustes/Kabsch)
-         between the ideal polyhedron and the CURRENT donor arrangement,
-         RECOMPUTED EVERY STEP -- an approach related to continuous shape
-         measures (CShM; Pinsky & Avnir; Alvarez group), the established
-         way to score deviation from an ideal coordination polyhedron in
-         the inorganic chemistry literature -- combined with an Augmented
-         Lagrangian (dual-ascent) multiplier in place of the fixed
-         schedule, so the enforcement strength self-adjusts per complex
-         instead of one hand-tuned curve trying to serve every ligand.
-         Also adds RDKit-canonical-rank-based detection of topologically
-         equivalent donors (engine.py, new in this version) feeding a
-         symmetry-tying restraint on their M-D distances (mirroring
-         crystallography's SIMU/SAME restraints) -- addresses the observed
-         spurious bond-length spread between chemically indistinguishable
-         donors (e.g. EDTA's two amine N atoms differing by ~0.15 A with
-         nothing previously tying them together). Backward compatible:
-         use_shape_alm=False restores the pre-2.6.0 behaviour byte-
-         identically. See ik/ik_solver.py JointIKSolver 2.3.0 changelog
-         for the full technical rationale.
-2.7.0 : solve() gains sym_angle_weight, threaded through to JointIKSolver
-         (ik_solver.py 2.4.0). Extends the 2.6.0 symmetry-tying restraint
-         (M-D bond length only) to also tie Q3 (donor approach angle)
-         between topologically-equivalent donors. Root cause: the entire
-         live Q3 constraint table turned out to have been running through
-         a broken score-time fallback (kappa clamped to 10, i.e. an
-         almost-toothless ~18 deg-sigma approximation) for its whole
-         history, independent of and prior to the periodicity/model-family
-         issue the same-session Q2/Q3 GMM-cos refit (stats/fitter.py) set
-         out to fix. Once that refit gave Q3 a real, properly fit
-         distribution for the first time, two chemically-identical donors
-         (e.g. EDTA's two amine N) could for the first time be pulled
-         toward different modes of a genuinely differentiated Q3
-         preference, with nothing tying their approach-angle outcomes
-         together the way sym_weight already ties M-D distance -- a
-         plausible mechanism for the "uneven N anchoring / carboxylate
-         spread" reported after that refit. See ik/ik_solver.py's
-         JointIKSolver 2.4.0 changelog for the full rationale.
-2.8.0 : solve() gains q3_mode_commit, threaded through to JointIKSolver.solve()
-         (ik_solver.py 2.5.0). Addresses a gap left by 2.7.0: with Q3 finally
-         live, sym_angle_weight's mean-tie can land a symmetric group between
-         two genuinely separate GMM modes (confirmed multi-modal for
-         O_carboxylate on Co/octahedral -- 5 modes, ~87-130 deg) rather than
-         at either one, which matches the observed EDTA regression (bond
-         spread ~5x worse, n_converged collapsed 29->1-2, insensitive to
-         sym_angle_weight). q3_mode_commit hard-selects one mode per
-         symmetric group per trial from the initial pose instead of tying
-         toward a mean. See ik/ik_solver.py's JointIKSolver 2.5.0 changelog
-         for the full rationale.
-2.9.0 : solve() gains mu_shape_stall_window, mu_shape_stall_atol,
-         mu_shape_freeze_on_stall, mu_shape_max, sym_weight_tracks_mu,
-         threaded through to JointIKSolver (ik_solver.py 2.6.0). Root
-         cause addressed: EDTA's convergence collapse and its two
-         topologically-equivalent amine N ending up at very different
-         M-D distances turned out not to be a Q3 problem at all (2.5.0's
-         q3_mode_commit made no measurable difference on this symptom).
-         solve_trace inspection showed mu_shape (the shape-ALM dual
-         variable) growing WITHOUT BOUND for the full solve whenever the
-         shape constraint is effectively infeasible for a ligand's real
-         connectivity, reaching 1500-2000+ by step 199 and dwarfing the
-         FIXED-weight sym_weight/sym_angle_weight restraints by a factor
-         of 3000-3600x by then (vs. 17-84x at step 0) -- i.e. the
-         restraints meant to keep symmetric donors tied together become
-         numerically irrelevant well before the solve ends, independent
-         of Q3 handling entirely. mu_shape_freeze_on_stall (default True)
-         is a safeguarded-ALM fix (cf. Birgin & Martinez) that stops
-         escalating mu_shape once the violation itself has stalled;
-         sym_weight_tracks_mu (default True) scales the symmetry-tying
-         weights alongside mu_shape so their relative influence doesn't
-         decay. Both default on; both False restores pre-2.9.0 behaviour
-         byte-identically. See ik/ik_solver.py's JointIKSolver 2.6.0
-         changelog for the full rationale and literature.
-2.10.0 : solve() gains sym_use_own_alm, sym_rho, sym_tol, sym_stall_window,
-         sym_stall_atol, sym_freeze_on_stall, mu_sym_max, threaded through
-         to JointIKSolver (ik_solver.py 2.7.0). 2.9.0's sym_weight_tracks_mu
-         was empirically validated (test-suite notebook section 14, live
-         PtCl4/Fe(CO)5/EDTA solves) and found to regress PtCl4's
-         bond_spread_A (0.028 -> 0.103 A, a case with no symmetric-tie
-         donors at all) while only reducing EDTA's amine-asymmetry
-         (symmetric_pair_spread_A) by ~12% -- pinning sym_weight's RATIO to
-         mu_shape stops it decaying further but does nothing about that
-         ratio already being wrong at t=0, and couples sym_weight's
-         behaviour to a different constraint's dynamics. sym_use_own_alm
-         (default True) replaces this with the generalizable
-         multi-constraint safeguarded-ALM extension: sym_penalty and
-         sym_angle_penalty each get their own dual variable (mu_sym,
-         mu_sym_angle) escalating off their own violation, self-calibrating
-         per case with no hand-tuned constant -- a case with no symmetric
-         donors is inert by construction rather than needing to be
-         excluded. sym_weight_tracks_mu is retained, consulted only when
-         sym_use_own_alm=False. See ik/ik_solver.py's JointIKSolver 2.7.0
-         changelog for the full rationale and literature.
-2.11.0 : solve() gains enable_bend_dof, bend_diversify, bend_diversity_scale,
-         threaded through to ForwardKinematics (fk.py 2.4.0) and used to
-         seed/diversify its new donor "branch bend" joints. This addresses
-         the actual root cause behind EDTA's amine-nitrogen asymmetry that
-         2.9.0/2.10.0's reweighting fixes (mu_shape, sym_weight/mu_sym)
-         could not touch: a branch-point kappa donor (e.g. a tertiary
-         amine N) has no torsion, under the pre-2.4.0 joint set, that can
-         change its OWN local pyramidal/approach geometry independently of
-         its sibling branches -- confirmed directly against fk.py's joint
-         construction and decompose.py's own documented KNOWN LIMIT (see
-         fk.py 2.4.0 changelog for the full derivation and a synthetic
-         verification). enable_bend_dof=True (default) gives such donors
-         genuine independent control over each outgoing branch; theta_init
-         seeds each new joint at its own zero-delta (current-conformer)
-         angle via fk.bend_seed_angles(), same convention as every other
-         joint, then optionally randomises it per beam trial
-         (bend_diversify, default True; bend_diversity_scale, default 1.0
-         -> full 2*pi range) so different trials can explore different
-         local pyramidal configurations, mirroring diversify_orientation's
-         role for the base transform. Also fixes the Q5 statistics
-         offset/slicing (previously keyed off fk.n_joints) to use
-         fk.n_joints_base, since these new joints have no fitted Q5 data
-         and are excluded from beam search's own statistical modes (see
-         beam.py 2.1.0) -- left entirely to gradient descent, driven by
-         whatever differentiable terms (Q3, Q4, shape-ALM, sym-ties)
-         actually respond to them. enable_bend_dof=False restores
-         pre-2.11.0/pre-2.4.0 behaviour byte-for-byte. Not yet empirically
-         validated against a live solve at the time of writing (Claude
-         cannot run torch in the environment this was developed in,
-         though the underlying joint-construction math was verified
-         standalone with a synthetic numpy test) -- see ik/fk.py's
-         ForwardKinematics 2.4.0 changelog and the test-suite notebook for
-         the intended EDTA / PtCl4 / Fe(CO)5 comparison against
-         enable_bend_dof=False.
-2.12.0 : BUGFIX -- solve() now also builds q3_symmetric_groups (a within-
-         single-ligand-instance restriction of symmetric_groups) and
-         threads it through to JointIKSolver.solve() (ik_solver.py 2.8.0),
-         used only for the Q3 approach-angle tie/mode-commit, not the M-D
-         bond-length tie. Root cause and full rationale: see the inline
-         comment at symmetric_groups' construction site above and
-         ik_solver.py's 2.8.0 changelog. In short: q3_mode_commit (2.5.0)
-         was validated only against EDTA (a single hexadentate ligand,
-         donors mechanically coupled through one backbone); applied
-         unmodified to N separate instances of a repeated monodentate
-         ligand (e.g. [Fe(H2O)6]3+'s 6 independent waters), it hard-commits
-         all of them to whichever Q3 GMM mode is nearest one arbitrary
-         initial pose, with no requirement that mode be the dominant one --
-         confirmed this session to reliably lock onto a ~4%-weight minority
-         mode, producing a wildly asymmetric, chemically wrong ligand
-         orientation (M-O-H angles ~68/172 deg instead of ~126/126) despite
-         a higher raw solve score. Restricting q3_symmetric_groups to
-         within-one-ligand-instance groups leaves EDTA-style cases (already
-         single-instance) byte-identical while letting independent repeated
-         monodentate ligands each score softly against the full, correctly-
-         weighted Q3 mixture instead of being force-locked together.
-2.13.0 : solve() gains use_assignment_search (default False),
-         assignment_search_k_max (default 4), assignment_search_margin_deg
-         (default 20.0), and assignment_search_max_ambiguous_group
-         (default 4) -- wires ik/assignment_search.py::
-         generate_candidate_assignments (written this session; validated
-         standalone in assignment_search_experiments.ipynb section 7, but
-         never called from an actual solve() before now) into the real
-         solve loop. Motivation: today exactly ONE arbitrary initial
-         ligand embedding feeds exactly one Hungarian donor-to-site
-         assignment (see "3. Build site assignment" above), with no
-         mechanism for the beam search's later torsion/orientation
-         diversification to ever revisit it if that one embedding locked
-         onto the wrong topology -- the 2026-09 la_polyester diagnosis
-         this was built to address. When enabled, and only when the
-         baseline assignment is genuinely ambiguous (the common/clean
-         case -- PtCl4, EDTA, CO/TBP, etc. -- gets back exactly
-         [baseline] and pays zero extra cost, by construction of
-         generate_candidate_assignments), steps 3b-6 (everything from the
-         ideal-direction targets through conformer assembly) are factored
-         into a new nested _solve_for_assignment() closure and re-run once
-         per diverse candidate assignment; the candidate whose best
-         conformer scores highest against Jacobik's own fitted Q1-Q6
-         objective is kept as the result, with EnsembleResult.
-         assignment_search set to a dict of which candidate won and every
-         candidate's score, for introspection. assignment_search_k_max
-         defaults to 4 here rather than generate_candidate_assignments'
-         own default of 10, since each candidate here re-runs the FULL
-         beam+IK solve rather than a cheap pre-relax/single-point call, so
-         the multiplicative cost is much higher per candidate. Fully
-         explicit (every site caller-pinned) assignments skip the search
-         entirely. This refactor is a pure extraction -- with
-         use_assignment_search=False (the default), _solve_for_assignment
-         is called exactly once, with the same baseline assignment solve()
-         always computed, and nothing about steps 3b-6's logic changed;
-         confirmed byte-identical on the full benchmark test suite.
-2.14.0 : Two fixes to use_assignment_search (2.13.0), both from 2026-09
-         profiling/user feedback that it made symmetric cases (e.g.
-         Fe(H2O)6) 2-4x slower than the <20s budget allows.
-         (a) Symmetric-donor-swap dedup: generate_candidate_assignments
-         has no concept of chemical identity, so a fully symmetric donor
-         set (chemically-identical, interchangeable donors -- e.g.
-         Fe(H2O)6's 6 waters) reliably produced several "candidates" that
-         were pure relabelings of the SAME physical molecule among
-         identical sites -- confirmed via profiling: Fe(H2O)6 baseline
-         2.53s vs. 11.22s for 4 such candidates scoring within ~1e-6 of
-         each other (i.e. physically indistinguishable), with
-         generate_candidate_assignments itself costing 0.0002s -- 100% of
-         the overhead was wasted redundant full re-solves. Candidates are
-         now deduped against the baseline (and each other) using the same
-         (SMILES, RDKit CanonicalRankAtoms) equivalence-class concept as
-         symmetric_groups: a candidate whose assigned sites, restricted to
-         each chemically-equivalent donor group, are just a permutation of
-         an already-kept candidate's (with every donor outside any group
-         identically assigned) is dropped as chemically indistinguishable.
-         (b) Screen-then-resolve: when >1 candidate survives dedup, each
-         is now first solved cheaply (new assignment_search_screen_
-         beam_width=8, assignment_search_screen_n_ik_steps=60 params,
-         both capped to never exceed the caller's own beam_width/
-         n_ik_steps) and only the screening winner is re-solved once at
-         full quality for the final result -- turning an N-candidate
-         search from N full solves into N cheap screens + 1 full solve.
-         EnsembleResult.assignment_search gains screen_beam_width,
-         screen_n_ik_steps, and screening_scores (screening-quality score
-         per surviving candidate) alongside the existing
-         winning_candidate_idx/winning_assignment. Both fixes are no-ops
-         (and dedup/screening are skipped entirely) whenever exactly one
-         candidate is generated, which remains true for every
-         chemically-unambiguous case (PtCl4, EDTA, CO/TBP, etc.) -- those
-         pay zero extra cost, unchanged from 2.13.0.
+ComplexBuilder.solve() runs the full pipeline for one complex: build an
+initial 3D shell from each ligand's SMILES, decompose ligands into
+kinematic trees, beam-search torsion seeds, then jointly refine all
+ligands' degrees of freedom with JointIKSolver (ik/ik_solver.py) against
+the Scorer's statistical objective plus shape/symmetry constraints.
+Returns an EnsembleResult of conformers ranked best-to-worst by score.
+
+Notable non-default knobs on solve():
+  enable_bend_dof         : gives branch-point donors (e.g. a tertiary
+                             amine N) independent per-branch control via
+                             extra "bend" joints (see ik/fk.py).
+  use_assignment_search    : when the baseline Hungarian donor-to-site
+                             assignment is ambiguous, tries alternative
+                             assignments and keeps whichever solves best
+                             (ik/assignment_search.py). Off by default;
+                             unambiguous cases are unaffected either way.
+  q3_mode_commit           : commits a topologically-symmetric donor group
+                             to a single Q3 GMM mode (from its initial
+                             pose) instead of tying members toward a mean
+                             that can fall between two real modes.
+
+See IKSolverConfig (ik/ik_solver.py) for the shape/symmetry-constraint
+hyperparameters threaded through from here.
 """
 
 from __future__ import annotations
@@ -1056,8 +764,6 @@ class ComplexBuilder:
         n_ik_steps: int = 200,
         lr: float = 0.1,
         lambda_init: float = 10.0,
-        anchor_floor_frac: float = 0.0,
-        use_shape_alm: bool = True,
         shape_rho: float = 8.0,
         shape_tol: float = 0.02,
         sym_weight: float = 2.0,
@@ -1067,8 +773,6 @@ class ComplexBuilder:
         mu_shape_stall_atol: float = 0.01,
         mu_shape_freeze_on_stall: bool = True,
         mu_shape_max: Optional[float] = None,
-        sym_weight_tracks_mu: bool = True,
-        sym_use_own_alm: bool = True,
         sym_rho: float = 8.0,
         sym_tol: float = 0.0,
         sym_stall_window: int = 20,
@@ -1108,86 +812,42 @@ class ComplexBuilder:
         beam_width       : W — number of torsion seeds per ligand from beam search
         n_ik_steps       : T — gradient descent iterations per solve
         lr               : learning rate for Adam on the combined gradient
-        lambda_init      : anchor weight at t=0; decays toward 0 as score
-                           improves (init-only anchor semantics). Under
-                           use_shape_alm=True this instead seeds mu_shape's
-                           initial value for the Augmented-Lagrangian dual
-                           ascent (ik_solver.py 2.3.0) -- see that module's
-                           changelog.
-        use_shape_alm    : bool, default True (2.3.0). Replaces the old
-                           fixed-schedule anchor (a pull toward FIXED
-                           absolute Cartesian targets computed once, before
-                           the solve, from the ligand's *initial* pose) with
-                           an Augmented-Lagrangian shape constraint computed
-                           via the optimal rotation between the ideal
-                           polyhedron and the CURRENT donor arrangement,
-                           RECOMPUTED EVERY STEP -- plus a symmetry-tying
-                           restraint on topologically-equivalent donors
-                           (e.g. EDTA's two amine N, or all 4 Cl- in PtCl4).
-                           See ik/ik_solver.py's JointIKSolver 2.3.0
-                           changelog for the full rationale and the
-                           literature it follows (constrained optimisation
-                           over fixed penalties; continuous shape measures).
-                           Set False to restore the pre-2.3.0 behaviour
-                           byte-identically, e.g. for A/B comparison.
+        lambda_init      : initial value of the shape constraint's
+                           Augmented-Lagrangian dual variable mu_shape (see
+                           ik_solver.py's IKSolverConfig).
         shape_rho        : Augmented-Lagrangian dual-ascent step size for the
-                           shape constraint (only used when use_shape_alm).
-                           Default 8.0 -- starting value, not empirically
-                           fit; tune against the test-suite notebook.
+                           shape constraint. Default 8.0 -- starting value,
+                           not empirically fit; tune against the test-suite
+                           notebook.
         shape_tol        : shape-deviation tolerance below which the
-                           constraint is considered satisfied (only used
-                           when use_shape_alm). Default 0.02 (roughly an
-                           8-degree worst-donor deviation from the ideal
-                           polyhedron -- see JointIKSolver docstring).
-        sym_weight       : fixed weight on the symmetry-tying restraint
-                           (only used when use_shape_alm). Default 2.0.
-        sym_angle_weight : fixed weight on the Q3 approach-angle symmetry-
-                           tying restraint (only used when use_shape_alm).
+                           constraint is considered satisfied. Default 0.02
+                           (roughly an 8-degree worst-donor deviation from
+                           the ideal polyhedron -- see JointIKSolver
+                           docstring).
+        sym_weight       : initial value of the M-D distance symmetry-tying
+                           restraint's dual variable mu_sym. Default 2.0.
+        sym_angle_weight : initial value of the Q3 approach-angle symmetry-
+                           tying restraint's dual variable mu_sym_angle.
                            Same symmetric donor groups as sym_weight, but
                            ties approach angle instead of M-D distance --
-                           deliberately a separate weight since the two
-                           quantities have different natural scales (Å² vs
-                           rad²). See ik/ik_solver.py's JointIKSolver 2.4.0
-                           changelog. Starting default, not empirically
-                           fit. Default 1.0.
+                           deliberately separate since the two quantities
+                           have different natural scales (Å² vs rad²).
+                           Default 1.0.
         mu_shape_stall_window : steps of no improvement in shape violation
-                           before mu_shape is frozen (2.9.0; only used
-                           when mu_shape_freeze_on_stall). Default 20.
+                           before mu_shape is frozen (only used when
+                           mu_shape_freeze_on_stall). Default 20.
         mu_shape_stall_atol : violation range below which, over
-                           mu_shape_stall_window steps, counts as stalled
-                           (2.9.0). Default 0.01.
-        mu_shape_freeze_on_stall : bool, default True (2.9.0). Freezes
-                           mu_shape once shape violation has stalled
-                           instead of letting it grow without bound and
-                           drown out sym_weight/sym_angle_weight. See
-                           ik/ik_solver.py's JointIKSolver 2.6.0
-                           changelog. False restores pre-2.9.0 behaviour
-                           byte-identically.
-        mu_shape_max     : Optional[float], default None (2.9.0). Hard
-                           ceiling on mu_shape regardless of the stall
-                           detector.
-        sym_weight_tracks_mu : bool, default True (2.9.0). SUPERSEDED by
-                           sym_use_own_alm as the default mechanism
-                           (2.10.0); only consulted when
-                           sym_use_own_alm=False. Scales
-                           sym_weight/sym_angle_weight by
-                           (mu_shape / lambda_init) so their influence
-                           doesn't decay as mu_shape grows. False (with
-                           sym_use_own_alm also False) restores pre-2.9.0
-                           fixed-weight behaviour byte-identically.
-        sym_use_own_alm  : bool, default True (2.10.0). Promotes
-                           sym_penalty/sym_angle_penalty to their own
-                           independent safeguarded-ALM dual variables
-                           (mu_sym, mu_sym_angle), each escalating off its
-                           own violation instead of a ratio borrowed from
-                           mu_shape. Recommended, generalizable mechanism
-                           -- self-calibrates per case with no hand-tuned
-                           constant. See ik/ik_solver.py's JointIKSolver
-                           2.7.0 changelog. False falls back to
-                           sym_weight_tracks_mu's behaviour.
+                           mu_shape_stall_window steps, counts as stalled.
+                           Default 0.01.
+        mu_shape_freeze_on_stall : bool, default True. Freezes mu_shape
+                           once shape violation has stalled instead of
+                           letting it grow without bound and drown out
+                           sym_weight/sym_angle_weight.
+        mu_shape_max     : Optional[float], default None. Hard ceiling on
+                           mu_shape regardless of the stall detector.
         sym_rho          : Augmented-Lagrangian penalty/step-size for the
-                           sym_use_own_alm dual ascent (2.10.0; shared by
-                           mu_sym and mu_sym_angle). Default 8.0.
+                           symmetry-tie dual ascent (shared by mu_sym and
+                           mu_sym_angle). Default 8.0.
         sym_tol          : violation tolerance below which
                            sym_penalty/sym_angle_penalty are considered
                            satisfied (2.10.0). Default 0.0.
@@ -1903,7 +1563,7 @@ class ComplexBuilder:
 
             # See exp.md for detailed rationale
 
-            from jacobik.ik.ik_solver import JointIKSolver
+            from jacobik.ik.ik_solver import IKSolverConfig, JointIKSolver
 
             # See exp.md for detailed rationale
             for lig_obj in mol.ligands:
@@ -1930,7 +1590,6 @@ class ComplexBuilder:
 
             fks: List = []
             all_theta_inits: List[torch.Tensor] = []
-            all_donor_targets: List[torch.Tensor] = []
             all_donor_pos_idxs: List[torch.Tensor] = []
             all_lig_di: List[List[int]] = []
             _fk_n_joints: List[int] = []  # cache: n_joints per ligand, built incrementally
@@ -1971,7 +1630,6 @@ class ComplexBuilder:
                     log.warning("Ligand %d has no donor groups — using zero theta", li)
                     J_full = fk.n_joints  # full count incl. any bend joints
                     all_theta_inits.append(torch.zeros(B, 6 + J_full, device=_device))
-                    all_donor_targets.append(torch.zeros(B, 1, 3, device=_device))
                     all_donor_pos_idxs.append(torch.zeros(1, dtype=torch.long, device=_device))
                     continue
 
@@ -2112,7 +1770,6 @@ class ComplexBuilder:
                     )
 
                 all_theta_inits.append(theta_init)
-                all_donor_targets.append(donor_targets_torch)
                 all_donor_pos_idxs.append(donor_pos_idx_t)
 
             # ------------------------------------------------------------------
@@ -2120,16 +1777,12 @@ class ComplexBuilder:
             # ------------------------------------------------------------------
             log.info("Running joint IK: %d ligands × B=%d × T=%d steps", len(fks), B, n_ik_steps)
 
-            joint_solver = JointIKSolver(
-                fks=fks,
-                scorer=scorer_joint,
-                ge=ge_joint,
+            ik_config = IKSolverConfig(
                 n_steps=n_ik_steps,
                 lr=lr,
                 lambda_init=lambda_init,
                 lse_temp=lse_temp,
                 adam_betas=adam_betas,
-                anchor_floor_frac=anchor_floor_frac,
                 shape_rho=shape_rho,
                 shape_tol=shape_tol,
                 sym_weight=sym_weight,
@@ -2138,25 +1791,28 @@ class ComplexBuilder:
                 mu_shape_stall_atol=mu_shape_stall_atol,
                 mu_shape_freeze_on_stall=mu_shape_freeze_on_stall,
                 mu_shape_max=mu_shape_max,
-                sym_weight_tracks_mu=sym_weight_tracks_mu,
-                sym_use_own_alm=sym_use_own_alm,
                 sym_rho=sym_rho,
                 sym_tol=sym_tol,
                 sym_stall_window=sym_stall_window,
                 sym_stall_atol=sym_stall_atol,
                 sym_freeze_on_stall=sym_freeze_on_stall,
                 mu_sym_max=mu_sym_max,
+            )
+            joint_solver = JointIKSolver(
+                fks=fks,
+                scorer=scorer_joint,
+                ge=ge_joint,
+                config=ik_config,
                 device=_device,
             )
             thetas_final, converged, scores, solve_trace = joint_solver.solve(
                 theta_inits=all_theta_inits,
                 X_ref=X_full,
-                donor_targets=all_donor_targets,
                 donor_pos_idxs=all_donor_pos_idxs,
+                ideal_directions=ideal_directions_full_t,
                 debug=debug,
-                ideal_directions=ideal_directions_full_t if use_shape_alm else None,
-                symmetric_groups=symmetric_groups if use_shape_alm else None,
-                q3_symmetric_groups=q3_symmetric_groups if use_shape_alm else None,
+                symmetric_groups=symmetric_groups,
+                q3_symmetric_groups=q3_symmetric_groups,
                 q3_mode_commit=q3_mode_commit,
             )
 
