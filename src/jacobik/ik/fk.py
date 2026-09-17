@@ -20,6 +20,74 @@ Version history
         loop it used to live in -- it doesn't depend on which donor is
         being processed, so rebuilding it once per donor was O(n_donors)
         wasted work for no benefit.
+2.4.0 : Donor "branch bend" DOF -- addresses decompose.py's own documented
+        KNOWN LIMIT (1.2.1): a kappa donor atom that is itself a real
+        branch point (>=2 outgoing rotatable bonds beyond whichever one
+        leads back toward root, e.g. a tertiary amine N) has NO way, under
+        the standard torsion-only joints built above, to change the
+        relative arrangement of its own substituents. The ONE existing
+        joint that reaches such a donor from root sweeps ALL of its
+        outgoing branches together as a single rigid unit (provably
+        preserving their mutual angles exactly -- it's a pure dihedral
+        rotation about the incoming bond), and each outgoing branch's OWN
+        joint only reorients what's further downstream of that branch,
+        never the branch's own direction from the donor (both its
+        endpoints are that joint's own axis, hence invariant under it).
+        Net effect, confirmed on EDTA's amine nitrogens (see
+        JointIKSolver 2.7.0 / ComplexBuilder.solve 2.10.0 changelogs for
+        the diagnostic trail that led here): such a donor's local
+        pyramidal/approach geometry -- exactly what Q3/Q4 measure -- is
+        frozen at whatever the input conformer happened to embed, for the
+        ENTIRE solve, regardless of which torsions are optimised. This
+        isn't fixable by reweighting anything (mu_shape, sym_weight/
+        mu_sym, sym_angle_weight all tried and, correctly, had no effect
+        on this specific symptom) -- there is no differentiable parameter
+        for those weights to act on. decompose.py's _select_root_body
+        docstring already names the real fix: "bond-angle flexibility at
+        the branch point itself, which this rigid-body/torsion-only FK
+        parameterisation doesn't model."
+
+        This adds exactly that, without needing any new geometric
+        primitive: for each outgoing branch of such a donor, one new
+        joint rotates ONLY that branch's own downstream subtree, around
+        the axis defined by the donor's OWN incoming (root-ward) bond,
+        pivoted at the root-ward neighbour -- reusing the existing parent
+        joint's (flanking_i, pivot_j) and the existing child joint's
+        (pivot_k, downstream) verbatim. _apply_torsion below is already
+        fully generic in (flanking_i, pivot_j, pivot_k, flanking_l,
+        downstream); it needs no changes at all. This construction
+        provably leaves the donor itself, its root-ward neighbour, and
+        every OTHER outgoing branch exactly invariant (the donor and its
+        root-ward neighbour ARE the rotation axis; sibling branches are
+        simply excluded from the moved set) and provably preserves the
+        donor's own bond length and bond angle to the moved branch (both
+        are rigid-rotation invariants of any single-axis rotation).
+        Verified against a synthetic tetrahedral donor test case: bond
+        length/angle held to machine precision across a full 360-degree
+        sweep, and two independent branch bends together reached a
+        donor's ideal Q3=180 deg for a test geometry the existing single
+        shared (root-ward) torsion could only bring to ~148 deg.
+
+        Backward compatible by construction: engine.py 2.11.0 seeds every
+        new joint at its own current dihedral value in the base conformer
+        (zero delta), so at t=0 these joints are an exact no-op;
+        enable_bend_dof=False (constructor kwarg, default True) skips
+        their construction entirely, restoring pre-2.4.0 behaviour
+        byte-for-byte, including n_joints. Scope: kappa (non-haptic)
+        donors only -- haptic donors coordinate via a ring face, not a
+        local pyramidal lone pair, so this mechanism doesn't apply. A
+        donor with only 1 outgoing branch gets nothing new here: with
+        nothing else to be "coupled" with, its existing incoming joint is
+        already equivalent to a solo bend, so adding one would be pure
+        redundancy.
+
+        Q5 (per-joint torsion-angle statistics) has no fitted data for
+        these synthetic joints and never will -- beam.py 2.1.0 restricts
+        its own Q5-driven search to fk.n_joints_base, leaving the new
+        joints entirely to gradient descent (driven by whatever
+        differentiable terms -- Q3, Q4, shape-ALM, sym-ties -- actually
+        respond to them), exactly like any other DOF with no statistical
+        prior.
 """
 
 from __future__ import annotations
@@ -75,6 +143,10 @@ class ForwardKinematics:
     mol    : fully assembled TMComplex (quantized bonds, decomposed ligands)
     ligand : one Ligand from mol.ligands (must have pivot_chains + decomposition)
     device : torch.device
+    enable_bend_dof : bool, default True (2.4.0). Adds the donor "branch
+                   bend" joints described in the 2.4.0 changelog above.
+                   False restores pre-2.4.0 behaviour (and n_joints)
+                   byte-for-byte.
 
     """
 
@@ -83,8 +155,10 @@ class ForwardKinematics:
         mol: "TMComplex",
         ligand: "Ligand",
         device: torch.device,
+        enable_bend_dof: bool = True,
     ) -> None:
         self.device = device
+        self.enable_bend_dof = enable_bend_dof
 
         atom_map = {a.idx: a for a in mol.atoms}
         idx_to_pos = _build_pos_map(mol)
@@ -243,7 +317,44 @@ class ForwardKinematics:
                 flanking_l_list.append(idx_to_pos[fl_atom])
                 downstream_lists.append(down_pos)
 
+        self.n_joints_base = len(pivot_j_list)
+
+        # See class 2.4.0 changelog for the full rationale. Purely additive
+        # post-processing over the joint arrays just built above: no new
+        # geometric primitive, _apply_torsion handles these identically to
+        # any other joint.
+        if self.enable_bend_dof:
+            parent_joint_of: Dict[int, int] = {}
+            child_joints_of: Dict[int, List[int]] = {}
+            for jidx in range(len(pivot_j_list)):
+                parent_joint_of.setdefault(pivot_k_list[jidx], jidx)
+                child_joints_of.setdefault(pivot_j_list[jidx], []).append(jidx)
+
+            kappa_donor_pos: List[int] = []
+            for chain in ligand.pivot_chains:
+                if chain.is_haptic:
+                    continue
+                for d_idx in chain.donor_atoms:
+                    if d_idx in idx_to_pos:
+                        kappa_donor_pos.append(idx_to_pos[d_idx])
+
+            for d_pos in kappa_donor_pos:
+                parent_idx = parent_joint_of.get(d_pos)
+                children = child_joints_of.get(d_pos, [])
+                if parent_idx is None or len(children) < 2:
+                    # d_pos is root itself (no parent joint), or not a real
+                    # branch point (<=1 outgoing branch -- the existing
+                    # incoming joint already gives it full solo control).
+                    continue
+                for child_idx in children:
+                    flanking_i_list.append(flanking_i_list[parent_idx])
+                    pivot_j_list.append(pivot_j_list[parent_idx])
+                    pivot_k_list.append(d_pos)
+                    flanking_l_list.append(pivot_k_list[child_idx])
+                    downstream_lists.append(downstream_lists[child_idx])
+
         self.n_joints = len(pivot_j_list)
+        self.n_bend_joints = self.n_joints - self.n_joints_base
 
         if self.n_joints > 0:
             self._flanking_i = flanking_i_list
@@ -271,6 +382,40 @@ class ForwardKinematics:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def bend_seed_angles(self, X_ref: torch.Tensor) -> torch.Tensor:
+        """
+        Current dihedral angle of each bend joint (2.4.0) in X_ref.
+
+        Used to seed theta_init's bend-joint columns at their own zero-delta
+        value (see engine.py 2.11.0) so adding these joints is a no-op at
+        t=0 -- the same "absolute target angle" convention _apply_torsion
+        uses everywhere else. Returns an empty (0,) tensor if
+        enable_bend_dof=False or no donor qualified for a bend joint.
+
+        Parameters
+        ----------
+        X_ref : (N, 3) reference atom positions (single conformer, no batch dim)
+
+        Returns
+        -------
+        (n_bend_joints,) angles in radians
+        """
+        n_bend = getattr(self, "n_bend_joints", 0)
+        if n_bend == 0:
+            return torch.zeros(0, device=X_ref.device)
+
+        X = X_ref if X_ref.dim() == 2 else X_ref[0]
+        angles = []
+        for k in range(self.n_joints_base, self.n_joints):
+            fi, pj, pk, fl = (
+                self._flanking_i[k],
+                self._pivot_j[k],
+                self._pivot_k[k],
+                self._flanking_l[k],
+            )
+            angles.append(_dihedral(X[fi][None, :], X[pj][None, :], X[pk][None, :], X[fl][None, :])[0])
+        return torch.stack(angles, dim=0)
 
     def apply(
         self,

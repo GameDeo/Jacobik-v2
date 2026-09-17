@@ -63,3 +63,43 @@ vis = Visualizer(result, show_hydrogen=True)
 # Interactive 3D view
 vis.view_ensemble_structs()
 ```
+
+## tmQM benchmark suite
+
+The benchmark is deliberately outside the solver and does not alter its
+optimisation loop. It reconstructs each tmQM entry from metal, ligand SMILES,
+donor groups, charge, spin multiplicity, and classified coordination geometry;
+runs the public `ComplexBuilder` API; and compares the resulting ensemble to the
+reference structure.
+
+Install the optional benchmark stack and fetch one split:
+
+```bash
+pip install -e ".[benchmark,dev]"
+jacobik-benchmark fetch data/tmqm --splits X1
+```
+
+Run a quick, deterministic smoke benchmark:
+
+```bash
+jacobik-benchmark run data/tmqm --split X1 --limit 25 \
+  --beam-width 16 --n-ik-steps 200 --seed 42 \
+  --mace --mace-model polar-1-m --output benchmark.json
+```
+
+Run all three splits by invoking `run` once per split. MACE-POLAR-1 model
+weights are downloaded and cached by `mace-torch` on first use.
+
+The JSON output contains rank-1 and best-of-ensemble symmetry-corrected Kabsch
+RMSD, coordination-sphere RMSD, ligand-local RMSD, atom-map coverage, metal–donor
+distance error, donor–metal–donor angle error, retained-coordination fraction,
+steric-clash diagnostics, convergence and timing data, and matched-level
+MACE-POLAR-1 energies. Symmetry correction uses molecular graph automorphisms
+and exchange of identical ligands, so equivalent phenyl flips and rotations do
+not inflate RMSD. Reflection is never allowed.
+
+Energy values are reported as `E(reconstructed) - E(tmQM geometry)` after both
+single points are evaluated by the same MACE-POLAR-1 checkpoint. The tabulated
+tmQM DFT absolute energy is not subtracted from MACE because the methods and
+energy zeros differ. Use `polar-1-m` for routine screening and `polar-1-l` for a
+more expensive confirmation run.

@@ -19,6 +19,15 @@ dev = [
     "ruff",
     "mypy"
 ]
+benchmark = [
+    "ase>=3.23",
+    "mace-torch>=0.3.16",
+    "networkx>=3.0",
+    "scipy>=1.10",
+]
+
+[project.scripts]
+jacobik-benchmark = "jacobik.benchmark.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -6,11 +6,14 @@ Coordination sphere construction for the IK engine.
 
 from __future__ import annotations
 
+import logging
 import math
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     # Avoid hard import at module level; only needed for type hints
@@ -198,6 +201,45 @@ IDEAL_GEOMETRIES["square_anti"] = np.vstack(
     ]
 ).astype(float)
 
+# Tricapped trigonal prismatic  CN=9 -- ideal D3h geometry
+# Two eclipsed equilateral triangles (the trigonal-prism "prism" sites) at
+# polar angle arccos(sqrt(3/7)) from +/-z, plus three "cap" sites in the
+# equatorial (z=0) plane, azimuthally staggered 60 deg from the prism
+# triangles so each cap sits over the centre of a rectangular prism face.
+# This is the standard idealised geometry for 9-coordinate lanthanide aqua
+# ions [Ln(H2O)9]3+ (Muetterties & Guggenberger 1974); the polar angle is
+# fixed by requiring the prism's rectangular side faces be literal squares
+# (edge length = triangle edge length), which gives cos(theta) = sqrt(3/7).
+_TTP_COS = math.sqrt(3.0 / 7.0)  # ~0.6547 -> theta ~49.11 deg
+_TTP_SIN = math.sqrt(4.0 / 7.0)  # ~0.7559
+_TTP_PRISM_AZ = np.deg2rad([0.0, 120.0, 240.0])
+_TTP_CAP_AZ = np.deg2rad([60.0, 180.0, 300.0])
+IDEAL_GEOMETRIES["tricap_pris"] = np.vstack(
+    [
+        np.column_stack(
+            [
+                _TTP_SIN * np.cos(_TTP_PRISM_AZ),
+                _TTP_SIN * np.sin(_TTP_PRISM_AZ),
+                np.full(3, _TTP_COS),
+            ]
+        ),  # top prism triangle
+        np.column_stack(
+            [
+                _TTP_SIN * np.cos(_TTP_PRISM_AZ),
+                _TTP_SIN * np.sin(_TTP_PRISM_AZ),
+                np.full(3, -_TTP_COS),
+            ]
+        ),  # bottom prism triangle (eclipsed with top, not staggered)
+        np.column_stack(
+            [
+                np.cos(_TTP_CAP_AZ),
+                np.sin(_TTP_CAP_AZ),
+                np.zeros(3),
+            ]
+        ),  # equatorial caps
+    ]
+).astype(float)
+
 # Freeze all arrays
 for _k, _v in IDEAL_GEOMETRIES.items():
     _v.flags.writeable = False
@@ -233,6 +275,137 @@ def _chemistry_cost(
 
 
 # ---------------------------------------------------------------------------
+# Chelate bite-angle repair
+# ---------------------------------------------------------------------------
+#
+# BUGFIX (2.6.0): _chemistry_cost() above is a per-donor-per-site cost and,
+# by construction, CANNOT express "these two donors must land on angularly
+# close sites" -- that constraint depends on where BOTH donors of a chelate
+# pair end up, which a linear (Hungarian) assignment cost matrix cannot
+# represent (it would require a quadratic assignment formulation). Leaving
+# it at a stub meant the one-shot Hungarian solve had zero awareness of
+# ligand connectivity: a short (<=4 ligand-graph-bond) chelate pair -- e.g.
+# both nitrogens of an en arm, or an EDTA glycinate arm's N/O pair -- could
+# be assigned to sites on opposite sides of the polyhedron (~180 deg apart)
+# purely because that minimised the SUM of each donor's own angular
+# mismatch against the crude, pre-optimisation initial ligand embedding.
+# A rigid 5-membered chelate ring cannot span anywhere near that angle
+# (real bite angles cluster ~70-95 deg; see architecture.md Q2/chelate_short
+# stats), so IK is then handed a kinematically impossible target from the
+# very first step -- a very plausible mechanism for a permanently "dangling"
+# arm that never reaches the metal, independent of anything the solver does
+# afterward.
+#
+# Fix: a bounded greedy repair pass run AFTER the base Hungarian solve.
+# For each known short-chelate donor pair whose assigned sites exceed a
+# chemically implausible bite angle, search for the best local swap (with
+# any other already-assigned donor) that brings the pair within a plausible
+# bite angle while minimising the increase in total angular cost. This is a
+# heuristic repair, not a global re-optimisation -- it only intervenes on
+# assignments that are almost certainly wrong, and is fully logged so it is
+# auditable per-complex.
+
+#: Bite angles for real short (<=4 ligand-graph-bond) chelate rings cluster
+#: ~70-95 deg (5-membered rings) with a long tail; values beyond this are
+#: not kinematically achievable by a rigid short ring and flag a very
+#: likely mis-assignment.  Intentionally generous (not a hard chemistry
+#: bound) -- this only triggers repair for clearly-broken cases.
+CHELATE_MAX_BITE_DEG: float = 115.0
+
+
+def _repair_chelate_assignment(
+    assignment: np.ndarray,
+    ideal_directions: np.ndarray,
+    C_ang: np.ndarray,
+    chelate_pairs: List[Tuple[int, int]],
+    max_bite_deg: float = CHELATE_MAX_BITE_DEG,
+    max_passes: int = 4,
+) -> np.ndarray:
+    """
+    Greedy post-hoc repair for chelate pairs assigned to implausibly
+    far-apart sites.  Mutates a copy of ``assignment`` in place and returns
+    it.  See module-level note above for rationale.
+
+    Parameters
+    ----------
+    assignment       : (n_donors,) int array from the base Hungarian solve;
+                       assignment[i] = site index for donor i.
+    ideal_directions : (n_sites, 3) unit vectors, IDEAL_GEOMETRIES[geometry].
+    C_ang            : (n_donors, n_sites) angular cost matrix used for the
+                       base solve (radians) -- reused so repair swaps are
+                       judged on the same cost the base solve optimised.
+    chelate_pairs    : list of (donor_i, donor_j) index pairs known (from
+                       ligand connectivity) to be a short chelate link.
+    max_bite_deg     : threshold above which a chelate pair's assigned
+                       site-site angle is flagged as implausible.
+    max_passes       : safety cap on repair iterations.
+
+    Returns
+    -------
+    assignment : (n_donors,) int array, repaired in place where beneficial.
+    """
+    if not chelate_pairs:
+        return assignment
+
+    n_sites = ideal_directions.shape[0]
+    if n_sites < 2:
+        return assignment
+
+    assignment = assignment.copy()
+
+    # Precompute all pairwise site-site angles once (n_sites, n_sites), deg.
+    dots = np.clip(ideal_directions @ ideal_directions.T, -1.0, 1.0)
+    site_angles_deg = np.degrees(np.arccos(dots))
+
+    for _pass in range(max_passes):
+        made_swap = False
+        for di, dj in chelate_pairs:
+            si, sj = int(assignment[di]), int(assignment[dj])
+            if si == sj:
+                continue
+            bite = site_angles_deg[si, sj]
+            if bite <= max_bite_deg:
+                continue
+
+            # Search for the best swap of di's site with some other donor
+            # dk's site (dk != di, dj) that brings (di, dj) within the
+            # plausible bite range, minimising the resulting increase in
+            # total angular cost among di, dj, dk.
+            best_gain = None
+            best_dk = None
+            base_cost = C_ang[di, si] + C_ang[dj, sj]
+            for dk in range(len(assignment)):
+                if dk == di or dk == dj:
+                    continue
+                sk = int(assignment[dk])
+                new_bite = site_angles_deg[sk, sj]
+                if new_bite > max_bite_deg:
+                    continue  # swap wouldn't actually fix the chelate
+                new_cost = C_ang[di, sk] + C_ang[dk, si] + C_ang[dj, sj]
+                old_cost = base_cost + C_ang[dk, sk]
+                delta = new_cost - old_cost
+                if best_gain is None or delta < best_gain:
+                    best_gain = delta
+                    best_dk = dk
+
+            if best_dk is not None:
+                sk = int(assignment[best_dk])
+                log.debug(
+                    "hungarian_assign: chelate repair swapped donor %d (site %d) "
+                    "<-> donor %d (site %d) to fix bite angle %.1f deg "
+                    "(pair with donor %d) -- cost delta %.4f rad",
+                    di, si, best_dk, sk, bite, dj, best_gain,
+                )
+                assignment[di], assignment[best_dk] = sk, si
+                made_swap = True
+
+        if not made_swap:
+            break
+
+    return assignment
+
+
+# ---------------------------------------------------------------------------
 # Hungarian assignment
 # ---------------------------------------------------------------------------
 
@@ -242,6 +415,7 @@ def hungarian_assign(
     ideal_directions: np.ndarray,
     donor_subclasses: Optional[List[str]] = None,
     geometry_label: Optional[str] = None,
+    chelate_pairs: Optional[List[Tuple[int, int]]] = None,
 ) -> np.ndarray:
     """
     Assign donors to coordination sites via the Hungarian algorithm.
@@ -257,6 +431,14 @@ def hungarian_assign(
     donor_subclasses : optional list of n_donors subclass strings; passed
                        to _chemistry_cost.  If None, chemistry cost is skipped.
     geometry_label   : coordination geometry label; passed to _chemistry_cost.
+    chelate_pairs    : optional list of (donor_i, donor_j) index pairs known,
+                       from ligand connectivity, to be a short (<=4 bond)
+                       chelate link.  When given, a post-hoc greedy repair
+                       pass (see _repair_chelate_assignment) fixes pairs
+                       assigned to sites whose angle exceeds
+                       CHELATE_MAX_BITE_DEG — a linear per-donor cost
+                       cannot express this pairwise constraint, so the base
+                       Hungarian solve is blind to it without this repair.
 
     Returns
     -------
@@ -291,5 +473,10 @@ def hungarian_assign(
     # col_ind[i] is the site assigned to donor i
     assignment = np.empty(n_donors, dtype=int)
     assignment[row_ind] = col_ind
+
+    if chelate_pairs:
+        assignment = _repair_chelate_assignment(
+            assignment, ideal_directions, C_ang, chelate_pairs
+        )
 
     return assignment

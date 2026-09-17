@@ -1,0 +1,892 @@
+[
+  {
+    "name": "La_aqua_y8",
+    "score": -4.6487,
+    "cn": 8,
+    "geometry": "square_anti",
+    "jacobik_bond_range": [
+      2.749,
+      2.765
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "La3_8H2O.xyz",
+        "rmsd_A": 0.9495,
+        "ref_bond_range": [
+          2.541,
+          2.578
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.7,
+        "deviation_from_ideal": 59.3,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 8,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "La_aqua_y9",
+    "score": -5.1927,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.755,
+      2.756
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "La3_9H2O.xyz",
+        "rmsd_A": 1.0777,
+        "ref_bond_range": [
+          2.573,
+          2.626
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 26,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 9,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Nd_aqua_y8",
+    "score": -5.4581,
+    "cn": 8,
+    "geometry": "square_anti",
+    "jacobik_bond_range": [
+      2.668,
+      2.679
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Nd3_8H2O.xyz",
+        "rmsd_A": 0.2413,
+        "ref_bond_range": [
+          2.475,
+          2.501
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.3,
+        "deviation_from_ideal": 59.7,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.4,
+        "deviation_from_ideal": 59.6,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 8,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Nd_aqua_y9",
+    "score": -5.9407,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.678,
+      2.678
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Nd3_9H2O.xyz",
+        "rmsd_A": 0.6663,
+        "ref_bond_range": [
+          2.511,
+          2.559
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 26,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 9,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Dy_aqua_y8",
+    "score": -5.2963,
+    "cn": 8,
+    "geometry": "square_anti",
+    "jacobik_bond_range": [
+      2.554,
+      2.559
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Dy3_8H2O.xyz",
+        "rmsd_A": 1.3209,
+        "ref_bond_range": [
+          2.376,
+          2.415
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 8,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Dy_aqua_y9",
+    "score": -5.7757,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.562,
+      2.563
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Dy3_9H2O.xyz",
+        "error": "donor count mismatch: jacobik=9 ref=8"
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 23,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 26,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 9,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "La_nitrato_y7",
+    "score": -5.0051,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.601,
+      2.75
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "La3_7H2O_NO3.xyz",
+        "rmsd_A": 1.1115,
+        "ref_bond_range": [
+          2.555,
+          2.641
+        ]
+      },
+      {
+        "ref": "La3_8H2O_NO3.xyz",
+        "rmsd_A": 1.3278,
+        "ref_bond_range": [
+          2.579,
+          2.631
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 121.2,
+        "deviation_from_ideal": 58.8,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 121.4,
+        "deviation_from_ideal": 58.6,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 121.2,
+        "deviation_from_ideal": 58.8,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 7,
+    "nitrate_orientation": [
+      {
+        "donor_M_O": [
+          2.617,
+          2.601
+        ],
+        "M_N": 2.927,
+        "nondonor_M_O": [
+          4.087
+        ],
+        "planarity_max_dev_A": 0.0,
+        "suspicious": false
+      }
+    ],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Nd_nitrato_y7",
+    "score": -5.4849,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.56,
+      2.681
+    ],
+    "rmsd_vs_ref": [],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 121.2,
+        "deviation_from_ideal": 58.8,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 7,
+    "nitrate_orientation": [
+      {
+        "donor_M_O": [
+          2.58,
+          2.56
+        ],
+        "M_N": 2.86,
+        "nondonor_M_O": [
+          3.993
+        ],
+        "planarity_max_dev_A": 0.0,
+        "suspicious": false
+      }
+    ],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Dy_nitrato_y7",
+    "score": -5.3083,
+    "cn": 9,
+    "geometry": "tricap_pris",
+    "jacobik_bond_range": [
+      2.442,
+      2.566
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Dy3_7H2O_NO3.xyz",
+        "rmsd_A": 1.038,
+        "ref_bond_range": [
+          2.395,
+          2.48
+        ]
+      },
+      {
+        "ref": "Dy3_8H2O_NO3.xyz",
+        "rmsd_A": 1.1665,
+        "ref_bond_range": [
+          2.385,
+          2.495
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 121.2,
+        "deviation_from_ideal": 58.8,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 121.4,
+        "deviation_from_ideal": 58.6,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      },
+      {
+        "o_idx": 20,
+        "angle_metal_vs_bisector": 121.1,
+        "deviation_from_ideal": 58.9,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 7,
+    "nitrate_orientation": [
+      {
+        "donor_M_O": [
+          2.461,
+          2.442
+        ],
+        "M_N": 2.754,
+        "nondonor_M_O": [
+          3.919
+        ],
+        "planarity_max_dev_A": 0.0,
+        "suspicious": false
+      }
+    ],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Fe_aqua_y6",
+    "score": -4.5911,
+    "cn": 6,
+    "geometry": "octahedral",
+    "jacobik_bond_range": [
+      2.058,
+      2.07
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Fe3_6H2O.xyz",
+        "rmsd_A": 0.0579,
+        "ref_bond_range": [
+          2.021,
+          2.039
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.5,
+        "deviation_from_ideal": 59.5,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.5,
+        "deviation_from_ideal": 59.5,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 120.5,
+        "deviation_from_ideal": 59.5,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 116.0,
+        "deviation_from_ideal": 64.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 120.4,
+        "deviation_from_ideal": 59.6,
+        "suspicious": true
+      },
+      {
+        "o_idx": 17,
+        "angle_metal_vs_bisector": 120.4,
+        "deviation_from_ideal": 59.6,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 6,
+    "nitrate_orientation": [],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Fe_nitrato_y4",
+    "score": -4.3542,
+    "cn": 6,
+    "geometry": "octahedral",
+    "jacobik_bond_range": [
+      2.077,
+      2.912
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Fe3_4H2O_1NO3.xyz",
+        "rmsd_A": 0.7207,
+        "ref_bond_range": [
+          2.024,
+          2.077
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 122.9,
+        "deviation_from_ideal": 57.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 122.4,
+        "deviation_from_ideal": 57.6,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 119.1,
+        "deviation_from_ideal": 60.9,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 4,
+    "nitrate_orientation": [
+      {
+        "donor_M_O": [
+          2.085,
+          2.077
+        ],
+        "M_N": 2.397,
+        "nondonor_M_O": [
+          3.635
+        ],
+        "planarity_max_dev_A": 0.0,
+        "suspicious": false
+      }
+    ],
+    "nitrate_suspicious_count": 0
+  },
+  {
+    "name": "Fe_nitrato_y5",
+    "score": -6.1703,
+    "cn": 7,
+    "geometry": "pent_bipyr",
+    "jacobik_bond_range": [
+      2.079,
+      2.982
+    ],
+    "rmsd_vs_ref": [
+      {
+        "ref": "Fe3_5H2O_1NO3.xyz",
+        "rmsd_A": 1.3067,
+        "ref_bond_range": [
+          2.041,
+          2.161
+        ]
+      }
+    ],
+    "water_orientation": [
+      {
+        "o_idx": 2,
+        "angle_metal_vs_bisector": 120.8,
+        "deviation_from_ideal": 59.2,
+        "suspicious": true
+      },
+      {
+        "o_idx": 5,
+        "angle_metal_vs_bisector": 120.5,
+        "deviation_from_ideal": 59.5,
+        "suspicious": true
+      },
+      {
+        "o_idx": 8,
+        "angle_metal_vs_bisector": 121.0,
+        "deviation_from_ideal": 59.0,
+        "suspicious": true
+      },
+      {
+        "o_idx": 11,
+        "angle_metal_vs_bisector": 120.9,
+        "deviation_from_ideal": 59.1,
+        "suspicious": true
+      },
+      {
+        "o_idx": 14,
+        "angle_metal_vs_bisector": 121.6,
+        "deviation_from_ideal": 58.4,
+        "suspicious": true
+      }
+    ],
+    "water_suspicious_count": 5,
+    "nitrate_orientation": [
+      {
+        "donor_M_O": [
+          2.079,
+          2.119
+        ],
+        "M_N": 2.327,
+        "nondonor_M_O": [
+          3.473
+        ],
+        "planarity_max_dev_A": 0.0,
+        "suspicious": false
+      }
+    ],
+    "nitrate_suspicious_count": 0
+  }
+]

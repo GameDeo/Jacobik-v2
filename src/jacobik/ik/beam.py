@@ -2,6 +2,23 @@
 beam.py
 =======
 GPU beam search over Q5 VMM torsion modes for IK seed generation.
+
+Version history
+----------------
+1.0.0 : initial release
+2.1.0 : Search scope pinned to fk.n_joints_base (fk.py 2.4.0), not
+        fk.n_joints. fk.py 2.4.0 can append "branch bend" joints after the
+        topology-derived joints this class was built against; those have
+        no fitted Q5 statistics (they're a synthetic DOF, not a real
+        rotatable bond) and were never meant to be searched here -- they're
+        left entirely to gradient descent in the main IK solve. Using
+        fk.n_joints_base keeps this class's internal partial_apply() calls
+        and Q6 body-pair bookkeeping sized to exactly the joints
+        q5_means/kappas/weights actually have rows for; using the inflated
+        fk.n_joints here would have indexed past those arrays as soon as a
+        ligand had any bend joints. On a ligand with no bend joints
+        (enable_bend_dof=False, or no donor qualifies), n_joints_base ==
+        n_joints and this is a no-op.
 """
 
 from __future__ import annotations
@@ -52,7 +69,9 @@ class BeamSearch:
         self.fk = fk
         self.W = beam_width
         self.device = device
-        self.J = fk.n_joints
+        # 2.1.0: pinned to n_joints_base, not the (possibly bend-inflated)
+        # n_joints -- see class changelog.
+        self.J = getattr(fk, "n_joints_base", fk.n_joints)
 
         # Pre-compute partial Q6 pair sets: for joint k, which atom-index
         # pairs (new_body_pos, fixed_pos) should be clash-checked.
@@ -249,7 +268,8 @@ class BeamSearch:
         Pre-compute partial Q6 pair sets for each joint step.
         """
         fk = self.fk
-        J = fk.n_joints
+        # 2.1.0: pinned to n_joints_base -- see class changelog.
+        J = getattr(fk, "n_joints_base", fk.n_joints)
 
         if J == 0:
             return []

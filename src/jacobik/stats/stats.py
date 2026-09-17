@@ -385,9 +385,22 @@ def _is_empty_dist(fd: "FittedDist") -> bool:
     """
     True if a FittedDist carries no usable parameters and must not be returned
     by the resolver, regardless of its observation count ``n``.
+
+    BUGFIX (this session): "gmm_cos" (Q2/Q3 GMM-on-cos(angle), added
+    alongside "gmm"/"vmm" -- see stats/fitter.py's fit_gmm_cosangle()
+    docstring) was missing from this whitelist. Every gmm_cos entry fell
+    through to the `return True` default below, so _resolve() treated
+    EVERY Q2/Q3 distribution as empty regardless of how well-populated it
+    was (n in the thousands for some keys) -- the resolver skipped past
+    every candidate at every fallback level for every single Q2/Q3
+    lookup, raised "No distribution found ... after full fallback", and
+    ik/scorer.py's try/except silently swallowed that into its own crude,
+    donor-subclass-blind generic default for every donor/pair in every
+    case. gmm_cos entries have the same means/vars/weights shape as gmm
+    entries (just interpreted in cos-space), so the check is identical.
     """
     t = fd.type
-    if t in ("gmm", "vmm"):
+    if t in ("gmm", "vmm", "gmm_cos"):
         return (not fd.means) or (not fd.weights)
     if t == "halfgauss":
         return fd.mu is None or fd.sigma is None

@@ -1,0 +1,212 @@
+[
+  {
+    "name": "La_aqua_y8",
+    "ok": true,
+    "dt": 7.8,
+    "best_score": -4.6487,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 4,
+    "top_scores": [
+      -4.649,
+      -4.651,
+      -4.652
+    ],
+    "geometry": "square_anti",
+    "cn": 8,
+    "xyz": "/tmp/pi_task_results/La_aqua_y8.xyz"
+  },
+  {
+    "name": "La_aqua_y9",
+    "ok": true,
+    "dt": 7.2,
+    "best_score": -5.1927,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 1,
+    "top_scores": [
+      -5.193
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/La_aqua_y9.xyz"
+  },
+  {
+    "name": "Nd_aqua_y8",
+    "ok": true,
+    "dt": 7.0,
+    "best_score": -5.4581,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 5,
+    "top_scores": [
+      -5.458,
+      -5.463,
+      -5.465
+    ],
+    "geometry": "square_anti",
+    "cn": 8,
+    "xyz": "/tmp/pi_task_results/Nd_aqua_y8.xyz"
+  },
+  {
+    "name": "Nd_aqua_y9",
+    "ok": true,
+    "dt": 7.2,
+    "best_score": -5.9407,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 1,
+    "top_scores": [
+      -5.941
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/Nd_aqua_y9.xyz"
+  },
+  {
+    "name": "Dy_aqua_y8",
+    "ok": true,
+    "dt": 6.6,
+    "best_score": -5.2963,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 6,
+    "top_scores": [
+      -5.296,
+      -5.297,
+      -5.298
+    ],
+    "geometry": "square_anti",
+    "cn": 8,
+    "xyz": "/tmp/pi_task_results/Dy_aqua_y8.xyz"
+  },
+  {
+    "name": "Dy_aqua_y9",
+    "ok": true,
+    "dt": 8.2,
+    "best_score": -5.7757,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 2,
+    "top_scores": [
+      -5.776,
+      -5.777
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/Dy_aqua_y9.xyz"
+  },
+  {
+    "name": "La_nitrato_y7",
+    "ok": true,
+    "dt": 8.0,
+    "best_score": -5.0051,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 16,
+    "top_scores": [
+      -5.005,
+      -5.013,
+      -5.169
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/La_nitrato_y7.xyz"
+  },
+  {
+    "name": "Nd_nitrato_y7",
+    "ok": true,
+    "dt": 7.1,
+    "best_score": -5.4849,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 16,
+    "top_scores": [
+      -5.485,
+      -5.569,
+      -5.627
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/Nd_nitrato_y7.xyz"
+  },
+  {
+    "name": "Dy_nitrato_y7",
+    "ok": true,
+    "dt": 6.1,
+    "best_score": -5.3083,
+    "converged": true,
+    "n_converged": 15,
+    "n_total": 16,
+    "n_distinct_scores": 16,
+    "top_scores": [
+      -5.308,
+      -5.369,
+      -5.452
+    ],
+    "geometry": "tricap_pris",
+    "cn": 9,
+    "xyz": "/tmp/pi_task_results/Dy_nitrato_y7.xyz"
+  },
+  {
+    "name": "Fe_aqua_y6",
+    "ok": true,
+    "dt": 6.3,
+    "best_score": -4.5911,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 2,
+    "top_scores": [
+      -4.591,
+      -5.174
+    ],
+    "geometry": "octahedral",
+    "cn": 6,
+    "xyz": "/tmp/pi_task_results/Fe_aqua_y6.xyz"
+  },
+  {
+    "name": "Fe_nitrato_y4",
+    "ok": true,
+    "dt": 4.4,
+    "best_score": -4.3542,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 16,
+    "top_scores": [
+      -4.354,
+      -4.449,
+      -4.626
+    ],
+    "geometry": "octahedral",
+    "cn": 6,
+    "xyz": "/tmp/pi_task_results/Fe_nitrato_y4.xyz"
+  },
+  {
+    "name": "Fe_nitrato_y5",
+    "ok": true,
+    "dt": 5.4,
+    "best_score": -6.1703,
+    "converged": true,
+    "n_converged": 16,
+    "n_total": 16,
+    "n_distinct_scores": 16,
+    "top_scores": [
+      -6.17,
+      -6.414,
+      -6.598
+    ],
+    "geometry": "pent_bipyr",
+    "cn": 7,
+    "xyz": "/tmp/pi_task_results/Fe_nitrato_y5.xyz"
+  }
+]

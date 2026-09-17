@@ -1,0 +1,52 @@
+{
+  "edta": {
+    "n_converged": 8,
+    "n_total": 16,
+    "best_score": -5.1718,
+    "donor_subclasses": {
+      "2": "O_carboxylate",
+      "6": "N_amine",
+      "9": "N_amine",
+      "13": "O_carboxylate",
+      "17": "O_carboxylate",
+      "21": "O_carboxylate"
+    },
+    "donor_distances_A": {
+      "2": 2.129,
+      "6": 2.103,
+      "9": 2.096,
+      "13": 2.125,
+      "17": 2.411,
+      "21": 2.418
+    },
+    "metal": "Co",
+    "n_cis": 12,
+    "n_trans": 3,
+    "n_other": 0
+  },
+  "la_polyester": {
+    "n_converged": 15,
+    "n_total": 16,
+    "best_score": -15.5368,
+    "donor_subclasses": {
+      "5": "O_ether_cyclic",
+      "9": "N_amide",
+      "17": "O_ether_cyclic",
+      "21": "N_amide",
+      "26": "C_pi",
+      "27": "C_pi"
+    },
+    "donor_distances_A": {
+      "5": 3.614,
+      "9": 2.92,
+      "17": 3.41,
+      "21": 3.393,
+      "26": 2.577,
+      "27": 2.722
+    },
+    "metal": "La",
+    "n_cis": 7,
+    "n_trans": 1,
+    "n_other": 7
+  }
+}

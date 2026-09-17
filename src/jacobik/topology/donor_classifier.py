@@ -29,6 +29,32 @@ Version
          neighbour (terminal, excludes acetal where the other O is bridging).
          This correctly handles COO^- anion, COOH acid with explicit H, and
          all Kekule/delocalized forms without bond-order restrictions.
+1.2.0 : Fixed O_carboxylate misclassification for ester alkoxy oxygens
+         (the "-O-" in R-C(=O)-O-R', e.g. polyester/polyol ionophore
+         ligands). Root cause: the v1.1.0 carboxylate rule only checked
+         that the SHARED CARBON has a double-bonded O elsewhere and
+         another terminal O -- it never required the donor O being
+         classified (o_idx) to itself be terminal (D1). A genuine
+         carboxylate/carbonyl O, in any Kekule/delocalized form, is
+         always D1 (bonded to exactly one carbon). An ester's alkoxy O
+         is D2 (bridges the carbonyl carbon to a second, different
+         alkyl carbon) -- topologically nothing like a carboxylate
+         anion, even though its neighbouring carbon happens to carry a
+         separate C=O. The old rule matched it anyway via that shared
+         carbon, silently pulling ester alkoxy donors onto O_carboxylate
+         bond-length/angle statistics fit from real anionic carboxylate
+         crystal structures -- confirmed on the la_polyester_pent_bipyr
+         test case (script_notebooks/la_polyester_test_case.ipynb),
+         where all 4 ester donor oxygens were mislabelled this way and
+         the IK solver failed to converge on any of 16 trials. Fixed by
+         requiring len(heavy) == 1 on the donor O itself before
+         entering the carboxylate branch; ester alkoxy O now correctly
+         falls through to O_ether (D2, bonded to 2 carbons), which the
+         live DB shows is both well-sampled (n=355-765 vs. n=55 for
+         O_carboxylate's own, rarely-D2, Q4 statistic) and already
+         skews toward the same near-planar Q3/Q4 character a
+         conjugated ester oxygen should show. Same D1 requirement
+         applied to the O_carboxylate SMARTS fallback for consistency.
 """
 
 from __future__ import annotations
@@ -113,7 +139,7 @@ _FILTER_TREE: Dict[str, List[Tuple[str, str]]] = {
         # Matches the logic of _classify_oxygen_structural (v1.1.0).
         # This SMARTS is a rarely-reached fallback; the structural classifier
         # handles >99% of O donors before SMARTS is reached.
-        ("O_carboxylate", "[O;D1,D2;$([O]~[C;!$(C-[OH])]~[O;D1;!$([OH])])]"),
+        ("O_carboxylate", "[O;D1;$([O]~[C;!$(C-[OH])]~[O;D1;!$([OH])])]"),  # v1.2.0: D1-only (see donor_classifier.py changelog)
         # Phenoxide: O directly bonded to an aromatic C
         ("O_phenoxide",   "[O;D1,D2]-[c]"),
         # Cyclic ether (THF, furan-type): O in ring, not part of C=O
@@ -358,23 +384,31 @@ def _classify_oxygen_structural(
     #   amide   O=C(N)(C)  : C has no other O (only N)
     #
     # See v1.1.0 changelog for the full failure-mode analysis.
-    for n, bo in heavy:
-        if sym_of.get(n) != "C":
-            continue
-        # Condition (a): C has at least one O bond with double-bond character
-        c_has_double_O = any(
-            sym_of.get(nb) == "O" and nb_bo >= 1.5
-            for nb, nb_bo in adj.get(n, [])
-        )
-        if not c_has_double_O:
-            continue
-        # Condition (b): C also has a terminal O (≤ 1 heavy neighbour)
-        for nb, _ in adj.get(n, []):
-            if nb == o_idx or sym_of.get(nb) != "O":
+    # Condition (0), v1.2.0: the donor O being classified must itself be
+    # terminal (exactly 1 heavy neighbour) -- true carboxylate/carbonyl O,
+    # in any Kekule/delocalized form, always is. A D2 oxygen bridging two
+    # DIFFERENT carbons (an ester's alkoxy "-O-") is never a carboxylate
+    # anion even when one of those carbons carries its own separate C=O --
+    # see v1.2.0 changelog. Without this guard the loop below matched such
+    # esters via their shared carbon's unrelated carbonyl.
+    if len(heavy) == 1:
+        for n, bo in heavy:
+            if sym_of.get(n) != "C":
                 continue
-            nb_heavy = [x for x, _ in adj.get(nb, []) if sym_of.get(x) != "H"]
-            if len(nb_heavy) == 1:
-                return "O_carboxylate"
+            # Condition (a): C has at least one O bond with double-bond character
+            c_has_double_O = any(
+                sym_of.get(nb) == "O" and nb_bo >= 1.5
+                for nb, nb_bo in adj.get(n, [])
+            )
+            if not c_has_double_O:
+                continue
+            # Condition (b): C also has a terminal O (≤ 1 heavy neighbour)
+            for nb, _ in adj.get(n, []):
+                if nb == o_idx or sym_of.get(nb) != "O":
+                    continue
+                nb_heavy = [x for x, _ in adj.get(nb, []) if sym_of.get(x) != "H"]
+                if len(nb_heavy) == 1:
+                    return "O_carboxylate"
 
     # Carbonyl: this O double-bonds a C directly
     if o_has_double and any(sym_of.get(n) == "C" for n, _ in heavy):

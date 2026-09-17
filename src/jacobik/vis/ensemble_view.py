@@ -126,7 +126,11 @@ def _draw_distributions(conf, scorer, out_widget):
         q1_entries.append((lbl, dist, means, vars_, weights))
 
     # ── Collect Q2 data ──────────────────────────────────────────────────
-    q2_entries = []  # (label, actual_angle_deg, means_deg, kappas, weights)
+    # 2.7.0: Q2 moved from VMM to GMM-on-cos(angle) -- see stats/fitter.py's
+    # fit_gmm_cosangle() docstring (Q2 is bounded [0,180] deg via arccos,
+    # never wraps to 360, so it is not a circular quantity). means/vars are
+    # already dimensionless cos-space values -- no np.degrees() conversion.
+    q2_entries = []  # (label, actual_angle_deg, means_cos, vars_cos, weights)
     n_pairs = scorer._q2_means.shape[0]
     sites = mol.coord_sites
     for p, (si, sj, dist_cls) in enumerate(scorer._q2_pair_meta[:n_pairs]):
@@ -140,10 +144,10 @@ def _draw_distributions(conf, scorer, out_widget):
         angle_deg = float(np.degrees(np.arccos(cos_t)))
         la = sites[si].label or f"D{si}"
         lb = sites[sj].label or f"D{sj}"
-        means_deg = np.degrees(scorer._q2_means[p].cpu().numpy())
-        kappas = scorer._q2_kappas[p].cpu().numpy()
+        means_cos = scorer._q2_means[p].cpu().numpy()
+        vars_cos = scorer._q2_vars[p].cpu().numpy()
         weights_arr = scorer._q2_weights[p].cpu().numpy()
-        q2_entries.append((f"{la}–M–{lb}", angle_deg, means_deg, kappas, weights_arr))
+        q2_entries.append((f"{la}–M–{lb}", angle_deg, means_cos, vars_cos, weights_arr))
 
     total_plots = len(q1_entries) + len(q2_entries)
     if total_plots == 0:
@@ -203,22 +207,29 @@ def _draw_distributions(conf, scorer, out_widget):
             ax.legend(fontsize=7, facecolor="#1A1A2E", labelcolor="#C8D8E8", edgecolor="#333355")
 
         # ── Q2 subplots ──────────────────────────────────────────────────
+        # 2.7.0: GMM-on-cos(angle) density, not VMM -- evaluated at
+        # cos(theta) for each display-grid angle theta. See stats/
+        # fitter.py's fit_gmm_cosangle() docstring for the rationale.
         offset = len(q1_entries)
-        for j, (lbl, actual_deg, means_deg, kappas, weights_arr) in enumerate(q2_entries):
+        _Q2_VAR_FLOOR = 0.0025  # mirrors ik/scorer.py's _GMM_VAR_MIN["Q2"]
+        for j, (lbl, actual_deg, means_cos, vars_cos, weights_arr) in enumerate(q2_entries):
             ax = axes_flat[offset + j]
             ax.set_facecolor("#0F0F1A")
 
             xs_deg = np.linspace(0, 180, 360)
             xs_rad = np.radians(xs_deg)
+            xs_cos = np.cos(xs_rad)
             density = np.zeros_like(xs_rad)
             active = weights_arr > 1e-6
-            for k in range(len(means_deg)):
+            for k in range(len(means_cos)):
                 if not active[k]:
                     continue
-                kappa = float(kappas[k])
-                mu_rad = math.radians(means_deg[k])
-                # See exp.md for detailed rationale
-                lp = kappa * np.cos(xs_rad - mu_rad)
+                var_k = max(float(vars_cos[k]), _Q2_VAR_FLOOR)
+                mu_k = float(means_cos[k])
+                # Relative density (const -0.5*log(2*pi) term omitted, same
+                # as the VMM formula this replaces omitted its log-norm
+                # constant -- both immediately renormalised to max=1 below).
+                lp = -0.5 * math.log(var_k) - 0.5 * (xs_cos - mu_k) ** 2 / var_k
                 density += weights_arr[k] * np.exp(lp - lp.max())  # relative
             if density.max() > 0:
                 density /= density.max()  # normalise to 1 for display

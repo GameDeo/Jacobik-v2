@@ -1437,11 +1437,24 @@ class BenchmarkRecord:
     n_cs_atoms: int = 0                   # atoms used in CS alignment
     max_lig_heavy: int = 0                # heavy atoms in largest ligand
     is_flexible: bool = False             # True if max_lig_heavy > FLEX_THRESHOLD
+    metal_donor_mae: float = float("nan")
+    metal_donor_max_error: float = float("nan")
+    donor_angle_mae_deg: float = float("nan")
+    donor_angle_max_error_deg: float = float("nan")
+    coordination_retained_fraction: float = float("nan")
+    min_nonbonded_distance: float = float("nan")
+    severe_clash_count: int = 0
     # ── xTB energy gap (optional) ────────────────────────────────────────────
     xtb_delta_kj: float = float("nan")      # E(rank1) - E(ref) in kJ/mol
     xtb_best_delta_kj: float = float("nan") # E(best-RMSD conformer) - E(ref)
     xtb_ref_hartree: float = float("nan")   # reference GFN2-xTB energy
     xtb_pred_hartree: float = float("nan")  # rank-1 GFN2-xTB energy
+    # MACE-POLAR-1 matched-level single-point comparison (optional).
+    mace_model: str = ""
+    mace_ref_ev: float = float("nan")
+    mace_pred_ev: float = float("nan")
+    mace_delta_kj: float = float("nan")
+    mace_abs_delta_kj_per_atom: float = float("nan")
     solve_time_s: float = float("nan")      # engine solve() wall time (s)
     suspicious: bool = False       # True if failure likely not attributable to engine
     suspicious_reason: str = ""    # human-readable explanation
@@ -1665,6 +1678,8 @@ def run_benchmark(
     fast_embed: bool = True,
     n_conformers_per_complex: Optional[int] = None,
     use_xtb: bool = False,
+    use_mace: bool = False,
+    mace_model: str = "polar-1-m",
 ) -> BenchmarkSummary:
     """
     Run the full benchmark on a tmQM split.
@@ -1704,6 +1719,10 @@ def run_benchmark(
     data_dir = Path(data_dir)
     parser = TMQMParser(data_dir)
     records: List[BenchmarkRecord] = []
+    _mace = None
+    if use_mace:
+        from jacobik.benchmark.energy import MACEPolarEvaluator
+        _mace = MACEPolarEvaluator(model=mace_model, device=device)
 
     # ── Pre-load stats DB once (avoid re-parsing per complex) ────────────────
     _db_path = constraints_db
@@ -2106,6 +2125,52 @@ def run_benchmark(
         )
         rec.suspicious, rec.suspicious_reason = _is_suspicious(rec)
 
+        # Independent chemistry/coordination audit on the rank-1 matched
+        # heavy-atom structure. This supplements RMSD: a low global RMSD can
+        # still hide a broken M-D bond or a local steric collision.
+        try:
+            from rdkit import Chem
+            from jacobik.benchmark.geometry import evaluate_geometry
+
+            _sym_arrays = build_symmetry_corrected_arrays(
+                mol, result.conformers[0], ligand_groups, max_perms=max_sym_perms
+            )
+            if _sym_arrays is not None:
+                _pm, _rm, _ref_xyz, _ = _sym_arrays
+                _row_of = {xyz: row for row, xyz in enumerate(_ref_xyz)}
+                _metal_row = _row_of[mol.metal_idx]
+                _donor_rows = sorted({
+                    _row_of[idx]
+                    for site in mol.coord_sites for idx in site.donor_indices
+                    if idx in _row_of
+                })
+                _bond_rows = [
+                    (_row_of[b.i], _row_of[b.j]) for b in mol.bonds
+                    if b.i in _row_of and b.j in _row_of
+                ]
+                _sphere_xyz = _graph_distance_atoms(mol, 3)
+                _sphere_rows = [i for i, xyz in enumerate(_ref_xyz) if xyz in _sphere_xyz]
+                _lig_rows = [
+                    [i for i, xyz in enumerate(_ref_xyz) if xyz - 1 in set(lg["xyz_indices_0based"])]
+                    for lg in ligand_groups
+                ]
+                _periodic = Chem.GetPeriodicTable()
+                _z = [_periodic.GetAtomicNumber(mol.get_atom(xyz).symbol) for xyz in _ref_xyz]
+                _gm = evaluate_geometry(
+                    _pm, _rm, donor_indices=_donor_rows, metal_index=_metal_row,
+                    bonds=_bond_rows, atomic_numbers=_z, sphere_indices=_sphere_rows,
+                    ligand_groups=_lig_rows,
+                )
+                rec.metal_donor_mae = _gm.metal_donor_mae_angstrom
+                rec.metal_donor_max_error = _gm.metal_donor_max_error_angstrom
+                rec.donor_angle_mae_deg = _gm.donor_metal_donor_angle_mae_deg
+                rec.donor_angle_max_error_deg = _gm.donor_metal_donor_angle_max_error_deg
+                rec.coordination_retained_fraction = _gm.coordination_retained_fraction
+                rec.min_nonbonded_distance = _gm.min_nonbonded_distance_angstrom
+                rec.severe_clash_count = _gm.severe_clash_count
+        except Exception as exc:
+            log.warning("%s: chemistry metric evaluation failed: %s", code, exc)
+
         # ── Optional xTB energy gap ───────────────────────────────────────
         if use_xtb and result.conformers:
             _uhf = max(0, mol.spin_state - 1)
@@ -2129,6 +2194,28 @@ def run_benchmark(
                 rec.xtb_best_delta_kj = _dkj_best
             else:
                 rec.xtb_best_delta_kj = _dkj  # same conformer
+
+        # Both structures are evaluated on the same MACE-POLAR-1 surface.
+        # tmQM's tabulated DFT energy is intentionally not mixed with an MLIP
+        # absolute energy from a different Hamiltonian/training level.
+        if _mace is not None and result.conformers:
+            try:
+                _pred_complex = result.conformers[0].complex
+                _ec = _mace.compare(
+                    [a.symbol for a in mol.atoms],
+                    np.asarray([a.position for a in mol.atoms]),
+                    np.asarray([a.position for a in _pred_complex.atoms]),
+                    charge=mol.charge,
+                    multiplicity=mol.spin_state,
+                    predicted_symbols=[a.symbol for a in _pred_complex.atoms],
+                )
+                rec.mace_model = _ec.model
+                rec.mace_ref_ev = _ec.reference_ev
+                rec.mace_pred_ev = _ec.predicted_ev
+                rec.mace_delta_kj = _ec.delta_kj_mol
+                rec.mace_abs_delta_kj_per_atom = _ec.absolute_delta_kj_mol_per_atom
+            except Exception as exc:
+                log.warning("%s: MACE-POLAR-1 evaluation failed: %s", code, exc)
 
         records.append(rec)
         _stats.update(rec)
@@ -3177,6 +3264,10 @@ def main():
     ap.add_argument("--log-file", default=None, help="Write per-complex detail log to this path")
     ap.add_argument("--use-xtb", action="store_true", default=False,
                     help="Compute GFN2-xTB single-point energy gap per complex (requires xtb package)")
+    ap.add_argument("--use-mace", action="store_true", default=False,
+                    help="Compute matched MACE-POLAR-1 single-point energy gaps")
+    ap.add_argument("--mace-model", default="polar-1-m",
+                    choices=["polar-1-s", "polar-1-m", "polar-1-l"])
     ap.add_argument("--log-level", default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = ap.parse_args()
@@ -3199,28 +3290,15 @@ def main():
         max_sym_perms=args.max_sym_perms,
         log_file=args.log_file,
         use_xtb=args.use_xtb,
+        use_mace=args.use_mace,
+        mace_model=args.mace_model,
     )
 
     summary.print_summary()
 
     if args.output:
-        out = []
-        for r in summary.records:
-            out.append({
-                "csd_code": r.csd_code,
-                "metal": r.metal,
-                "coord_geom": r.coord_geom,
-                "cn": r.cn,
-                "n_atoms": r.n_atoms,
-                "n_ligands": r.n_ligands,
-                "rank1_rmsd": r.rank1_rmsd,
-                "best_rmsd": r.best_rmsd,
-                "rank1_converged": r.rank1_converged,
-                "n_conformers": r.n_conformers,
-                "n_sym_perms": r.n_sym_perms,
-                "engine_time_s": r.engine_time_s,
-                "error": r.error,
-            })
+        from dataclasses import asdict
+        out = [asdict(r) for r in summary.records]
         Path(args.output).write_text(json.dumps(out, indent=2))
         print(f"Records saved to {args.output}")
 

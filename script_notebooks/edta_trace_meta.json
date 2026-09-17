@@ -1,0 +1,212 @@
+{
+  "steps": 200,
+  "beam_width": 32,
+  "seed": 42,
+  "lr": 0.1,
+  "n_kept": 32,
+  "n_converged": 5,
+  "best_score": -27.002971649169922,
+  "trace_arrays": [
+    "anchor_loss",
+    "grad_norm",
+    "mu_shape",
+    "residual",
+    "score",
+    "sym_angle_penalty",
+    "sym_penalty"
+  ],
+  "kept_conformers": [
+    {
+      "rank": 1,
+      "trial_idx": 13,
+      "score": -27.002971649169922,
+      "converged": false
+    },
+    {
+      "rank": 2,
+      "trial_idx": 46,
+      "score": -27.61502456665039,
+      "converged": false
+    },
+    {
+      "rank": 3,
+      "trial_idx": 3,
+      "score": -27.75962257385254,
+      "converged": false
+    },
+    {
+      "rank": 4,
+      "trial_idx": 14,
+      "score": -27.883743286132812,
+      "converged": false
+    },
+    {
+      "rank": 5,
+      "trial_idx": 219,
+      "score": -27.941282272338867,
+      "converged": false
+    },
+    {
+      "rank": 6,
+      "trial_idx": 193,
+      "score": -28.1109619140625,
+      "converged": false
+    },
+    {
+      "rank": 7,
+      "trial_idx": 21,
+      "score": -28.15427017211914,
+      "converged": false
+    },
+    {
+      "rank": 8,
+      "trial_idx": 240,
+      "score": -28.199024200439453,
+      "converged": true
+    },
+    {
+      "rank": 9,
+      "trial_idx": 158,
+      "score": -28.269813537597656,
+      "converged": false
+    },
+    {
+      "rank": 10,
+      "trial_idx": 176,
+      "score": -28.33510971069336,
+      "converged": false
+    },
+    {
+      "rank": 11,
+      "trial_idx": 54,
+      "score": -28.336679458618164,
+      "converged": false
+    },
+    {
+      "rank": 12,
+      "trial_idx": 10,
+      "score": -28.35854721069336,
+      "converged": false
+    },
+    {
+      "rank": 13,
+      "trial_idx": 25,
+      "score": -28.564584732055664,
+      "converged": false
+    },
+    {
+      "rank": 14,
+      "trial_idx": 93,
+      "score": -28.62864112854004,
+      "converged": false
+    },
+    {
+      "rank": 15,
+      "trial_idx": 143,
+      "score": -28.72902488708496,
+      "converged": false
+    },
+    {
+      "rank": 16,
+      "trial_idx": 136,
+      "score": -28.740690231323242,
+      "converged": false
+    },
+    {
+      "rank": 17,
+      "trial_idx": 208,
+      "score": -28.850238800048828,
+      "converged": false
+    },
+    {
+      "rank": 18,
+      "trial_idx": 62,
+      "score": -28.89264678955078,
+      "converged": true
+    },
+    {
+      "rank": 19,
+      "trial_idx": 68,
+      "score": -28.91065788269043,
+      "converged": false
+    },
+    {
+      "rank": 20,
+      "trial_idx": 48,
+      "score": -28.968109130859375,
+      "converged": false
+    },
+    {
+      "rank": 21,
+      "trial_idx": 183,
+      "score": -28.982328414916992,
+      "converged": false
+    },
+    {
+      "rank": 22,
+      "trial_idx": 132,
+      "score": -29.12120246887207,
+      "converged": false
+    },
+    {
+      "rank": 23,
+      "trial_idx": 80,
+      "score": -29.122018814086914,
+      "converged": false
+    },
+    {
+      "rank": 24,
+      "trial_idx": 126,
+      "score": -29.217180252075195,
+      "converged": true
+    },
+    {
+      "rank": 25,
+      "trial_idx": 67,
+      "score": -29.44855499267578,
+      "converged": false
+    },
+    {
+      "rank": 26,
+      "trial_idx": 49,
+      "score": -29.497268676757812,
+      "converged": false
+    },
+    {
+      "rank": 27,
+      "trial_idx": 239,
+      "score": -29.606403350830078,
+      "converged": true
+    },
+    {
+      "rank": 28,
+      "trial_idx": 39,
+      "score": -29.61393928527832,
+      "converged": false
+    },
+    {
+      "rank": 29,
+      "trial_idx": 41,
+      "score": -29.643722534179688,
+      "converged": true
+    },
+    {
+      "rank": 30,
+      "trial_idx": 55,
+      "score": -29.70781135559082,
+      "converged": false
+    },
+    {
+      "rank": 31,
+      "trial_idx": 53,
+      "score": -29.72261619567871,
+      "converged": false
+    },
+    {
+      "rank": 32,
+      "trial_idx": 75,
+      "score": -29.738706588745117,
+      "converged": false
+    }
+  ]
+}

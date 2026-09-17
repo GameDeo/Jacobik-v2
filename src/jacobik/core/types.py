@@ -232,7 +232,7 @@ class TMComplex:
     # --- identity ---
     csd_code: str
     charge: int  # formal charge q
-    spin_state: int  # spin multiplicity S
+    spin_state: int  # spin multiplicity (2S+1); see stats/parser.py for the tmQM S -> multiplicity conversion
     stoichiometry: str
     mnd: int  # max neighbour distance used in bond inference
     csd_years: str

@@ -56,6 +56,65 @@ Version history
          due to gradient concentrating entirely on whichever term is
          currently worst each step. Reverted to plain mean; see the
          KNOWN ISSUE note on the _vmm/_gmm helpers in _score_components.
+2.7.0 : Q2 (D-M-D angle) and Q3 (donor approach angle) move from VMM to
+         GMM-on-cos(angle). Both are computed via arccos(), bounded
+         [0,180] deg, and never wrap to 360 -- they are not circular
+         quantities, so fitting/scoring them with a von Mises mixture
+         assumed a periodicity that doesn't exist. Concretely: a VMM
+         component whose mean sits near a real physical boundary (e.g.
+         CO's M-C-O approach angle piling up near 180 deg) is forced to
+         "spend" spread on the non-existent far side of that boundary,
+         systematically understating true peakedness there. GMM-on-
+         cos(angle) respects the bound (cos maps [0,180] deg monotonically
+         onto [-1,1]) and lets a component sit sharply peaked right at a
+         boundary. See stats/fitter.py's fit_gmm_cosangle() docstring for
+         the full rationale (that is where the actual model-family switch
+         happens; this version's changes are the score-time counterpart).
+         _q2_kappas/_q3_kappas/_q2_log_norm/_q3_log_norm are replaced by
+         _q2_vars/_q3_vars (raw) and _q2_eff_vars/_q3_eff_vars (floored,
+         precomputed) -- same naming convention as Q1/Q4. Q2/Q3 means are
+         now dimensionless cos-space values in [-1,1], not radians -- the
+         degree->radian conversion at construction time is gone for both.
+         New _GMM_VAR_MIN entries for Q2/Q3 (cos-space units). The local
+         _gmm() helper in _score_components gains the same aggregation/
+         power_p option _vmm() already had, so q2_aggregation="power_mean"
+         keeps working unchanged. q2_score() (post-IK ranking) rewritten
+         to the same GMM-cos form. Backward compatible for every other
+         quantity: Q1/Q4/Q6 untouched; Q5 (torsion dihedral) stays VMM,
+         since it is genuinely circular (0 deg == 360 deg).
+2.8.0 : _score_components/score/score_breakdown gain an optional
+         q3_mode_override: (B, n_q3) int64 tensor, -1 = no override
+         (default; behaviour unchanged), else a hard-selected GMM
+         component index to score that (trial, Q3-term) against
+         EXCLUSIVELY, in place of the full mixture. Implemented by
+         building a batched (B, N, K) log_w (all components -1e30 except
+         the selected one at log-weight 0) and passing it to the local
+         _gmm() helper, which now accepts either the usual static (N, K)
+         log_w (broadcast across the batch as before) or an already-
+         batched (B, N, K) one. Computed and supplied by ik_solver.py
+         2.5.0's mode-committed initialization -- see that module's
+         changelog for the full rationale and why this is needed (a
+         multi-modal Q3 GMM plus sym_angle_weight's mean-tie can land
+         symmetric donors in the low-density valley between two modes,
+         worse than either mode alone). No effect when the caller passes
+         q3_mode_override=None (every existing call site outside
+         ik_solver.py's new logic).
+2.9.0 : Q1 key construction clamps mol.charge to the DB's actual charge
+         buckets, {-1, 0, 1} (verified: every metal, every Q1 arity in the
+         live constraints.json -- confirmed via a live notebook trace
+         showing co_nh3_6_octahedral, charge=+3, falling back from L0 all
+         the way to level 6/10 (Co, N_donor), losing donor-subclass and
+         geometry specificity TOGETHER rather than just charge, because
+         every intermediate fallback level still conditions on the exact
+         (unclamped) charge value and none of them exist for charge=3).
+         Affects any complex with |charge|>1 (also e.g. PtCl4/ZnCl4,
+         charge=-2, though those happen not to show the symptom since
+         their single homoleptic donor type means all sites already share
+         one fallback target regardless of level). See
+         _Q1_CHARGE_BUCKETS/_clamp_q1_charge() just below. Independent of,
+         and unrelated to, the same-session Q2/Q3 GMM-cos refit and Q3
+         mode-commit work (2.7.0/2.8.0) -- this is a Q1-only, charge-
+         dimension-only fix.
 """
 
 from __future__ import annotations
@@ -67,6 +126,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import networkx as nx
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from jacobik.ik.geometry import GeometryExtractor
 from jacobik.ik.kernels import (
@@ -106,12 +166,44 @@ _CHELATE_LONG_MAX = 8
 _GMM_VAR_MIN: Dict[str, float] = {
     "Q1": 0.04,  # Å²   -> sigma floor ~0.2 Å
     "Q4": 4.00,  # deg² -> sigma floor ~2.0 deg
+    # Q2/Q3 (2.7.0): cos-space, dimensionless. sigma_cos=0.05 -> var=0.0025.
+    # Same guard as Q1/Q4: without a floor, a near-delta-function component
+    # fit from duplicate/near-duplicate tmQM structures could crush any
+    # donor a fraction of a degree off its exact angle. 0.05 in cos-space
+    # is roughly a 3 deg sigma near 90 deg and tighter still near a 0/180
+    # deg boundary (where d(cos)/d(angle) is largest), which is generous
+    # enough not to fight legitimately sharp boundary-peaked components
+    # (e.g. CO's near-180 deg approach) while still bounding worst case.
+    "Q2": 0.0025,
+    "Q3": 0.0025,
 }
 
 # Mathematical constants used in the batched VMM/GMM helpers in
 # _score_components.  Defined locally so scorer.py has no hidden
 # dependency on kernels.py internals.
 _LOG_2PI: float = math.log(2.0 * math.pi)
+#: 2.8.0 -- effectively -inf log-weight for GMM components masked out by
+#: q3_mode_override.  A large finite value (not -inf) avoids -inf - -inf
+#: = nan if a masked row's logsumexp ever sees only masked entries.
+_Q3_OVERRIDE_NEG: float = -1.0e30
+
+#: 2.9.0 -- the only charge values present in the live constraints.json's
+#: Q1 entries, for every metal (verified by direct inspection). Query-time
+#: charge is clamped to the nearest of these before building a Q1 key --
+#: see _clamp_q1_charge() and its call site in Scorer.__init__.
+_Q1_CHARGE_BUCKETS: Tuple[int, ...] = (-1, 0, 1)
+
+
+def _clamp_q1_charge(charge: int) -> int:
+    """
+    Clamp a complex's raw charge to the nearest bucket the live Q1
+    database actually contains (2.9.0 -- see module changelog). Without
+    this, any |charge|>1 complex (e.g. [Co(NH3)6]3+) fails to match at
+    every fallback level that still conditions on charge, jumping
+    straight to the fully generic (metal, donor_family) 2-tuple instead
+    of a donor-subclass/geometry-specific one at a nearby charge state.
+    """
+    return min(_Q1_CHARGE_BUCKETS, key=lambda b: abs(b - charge))
 _EPS: float = 1e-7
 
 # See exp.md for detailed rationale
@@ -277,8 +369,11 @@ def _vmm_fields(dist, key: tuple, quantity: str) -> Optional[tuple]:
         # kappas is None but means/weights are present.
         if dist.vars is not None:
             # type='gmm' misfiled for a VMM slot.
-            # The stats pipeline stores Q3/Q5 GMM vars in degrees² (matching
-            # the degree-valued means), but vmm_log_prob works in radians.
+            # (2.7.0: only Q5 routes through _vmm_fields now -- Q2/Q3 moved
+            # to _gmm_fields / GMM-on-cos(angle), see fitter.py's
+            # fit_gmm_cosangle() docstring.) The stats pipeline stores Q5
+            # GMM vars in degrees² (matching the degree-valued means), but
+            # vmm_log_prob works in radians.
             # Convert: var_rad² = var_deg² * (π/180)² before computing κ≈1/var.
             _DEG2RAD_SQ = (math.pi / 180.0) ** 2
             kappas = [
@@ -366,7 +461,37 @@ class Scorer:
         stats: Any,
         device: torch.device,
         quantity_weights: Optional[Dict[str, float]] = None,
+        q2_aggregation: str = "mean",
+        q2_power_p: float = 3.0,
     ) -> None:
+        """
+        q2_aggregation : "mean" (default, unchanged behaviour) or
+                         "power_mean" (EXPERIMENTAL, added to address the
+                         documented Q2 mean-dilution issue -- see the
+                         _score_components._vmm docstring note. Untested
+                         against a full benchmark suite as of introduction;
+                         A/B it against "mean" before trusting it).
+                         "power_mean" aggregates Q2's per-pair badness
+                         (-log_p, softplus'd to stay smooth and non-negative)
+                         via a generalised (power) mean with exponent
+                         q2_power_p instead of a plain arithmetic mean. This
+                         distributes extra gradient weight toward badly
+                         violated pairs continuously, in proportion to
+                         badness**(p-1), across ALL pairs at once -- unlike
+                         a logsumexp soft-min, no pair's gradient goes to
+                         exactly zero just because another pair is
+                         momentarily worse, which is the specific failure
+                         mode ("whack-a-mole") that sank the soft-min
+                         attempts documented in the 2.2.0 changelog. p=1
+                         reduces to (a softplus'd version of) the plain
+                         mean; larger p leans further toward the worst pair.
+        q2_power_p     : exponent for "power_mean" (default 3.0). Ignored
+                         when q2_aggregation="mean".
+        """
+        if q2_aggregation not in ("mean", "power_mean"):
+            raise ValueError(f"q2_aggregation must be 'mean' or 'power_mean', got {q2_aggregation!r}")
+        self._q2_aggregation = q2_aggregation
+        self._q2_power_p = float(q2_power_p)
         self.device = device
         self._ge = ge
         self.mol = mol
@@ -380,7 +505,9 @@ class Scorer:
         metal_sym = mol.metal_symbol
         coord_geom = mol.coord_geom or "octahedral"
         spin = mol.spin_state
-        charge = mol.charge
+        # 2.9.0: clamp to the DB's actual charge buckets -- see
+        # _clamp_q1_charge() docstring / module changelog.
+        charge = _clamp_q1_charge(int(mol.charge))
 
         # Pre-resolve trans partners (needed for Q1 keys)
         trans_map = _trans_partners(mol)  # site_index → subclass str
@@ -437,8 +564,12 @@ class Scorer:
 
         # See exp.md for detailed rationale
 
+        # Q3 (2.7.0): GMM-on-cos(angle), not VMM -- Q3 is bounded [0,180] deg
+        # via arccos and never wraps to 360, see fitter.py's
+        # fit_gmm_cosangle() docstring. Means/vars are dimensionless
+        # cos-space values; no degree->radian conversion needed here.
         q3_means_list: List[List[float]] = []
-        q3_kappas_list: List[List[float]] = []
+        q3_vars_list: List[List[float]] = []
         q3_weights_list: List[List[float]] = []
 
         for s_i, site in enumerate(mol.coord_sites):
@@ -451,21 +582,23 @@ class Scorer:
             key = (subclass, metal_sym, coord_geom)
             try:
                 dist = stats.dist("Q3", key)
-                fields = _vmm_fields(dist, key, "Q3")
+                fields = _gmm_fields(dist, key, "Q3")
             except Exception as exc:
                 log.warning("Q3 stats.dist failed for key %s: %s", key, exc)
                 fields = None
             if fields is not None:
-                q3_means_list.append([m * _DEG2RAD for m in fields[0]])
-                q3_kappas_list.append(fields[1])
-                q3_weights_list.append(fields[2])
+                q3_means_list.append(list(fields[0]))
+                q3_vars_list.append(list(fields[1]))
+                q3_weights_list.append(list(fields[2]))
             else:
-                q3_means_list.append([math.pi])  # 180° — linear default
-                q3_kappas_list.append([1.0])
+                # Fallback: cos(180°) = -1, linear default (mirrors the old
+                # VMM fallback of mean=pi/kappa=1.0 -- moderately tight).
+                q3_means_list.append([-1.0])
+                q3_vars_list.append([0.1])
                 q3_weights_list.append([1.0])
 
         self._q3_means, _ = _pad_and_stack(q3_means_list, device)
-        self._q3_kappas, _ = _pad_and_stack(q3_kappas_list, device)
+        self._q3_vars, _ = _pad_and_stack(q3_vars_list, device)
         self._q3_weights, _ = _pad_and_stack(q3_weights_list, device)
         self._n_q3 = len(q3_means_list)
 
@@ -570,12 +703,15 @@ class Scorer:
             self._q6_sigma = torch.zeros(0, dtype=torch.float32, device=device)
 
         # ==================================================================
-        # Q2 — D–M–D angle VMM per donor pair (for joint scoring only)
+        # Q2 — D–M–D angle GMM-on-cos(angle) per donor pair (2.7.0; was VMM
+        # -- Q2 is bounded [0,180] deg via arccos and never wraps to 360,
+        # see fitter.py's fit_gmm_cosangle() docstring) (for joint scoring
+        # only)
         # ge.q2_dmd_angles(X) → (B, n_pairs) in RADIANS (pairs in i<j order)
         # ==================================================================
 
         q2_means_list: List[List[float]] = []
-        q2_kappas_list: List[List[float]] = []
+        q2_vars_list: List[List[float]] = []
         q2_weights_list: List[List[float]] = []
         # Store pair (site_i, site_j) metadata for key construction
         self._q2_pair_meta: List[Tuple[int, int, str]] = []  # (s_i, s_j, dist_class)
@@ -615,24 +751,24 @@ class Scorer:
                 q2_key = (coord_geom, dist_class, metal_sym, sub_A, sub_B)
                 try:
                     dist_obj = stats.dist("Q2", q2_key)
-                    fields = _vmm_fields(dist_obj, q2_key, "Q2")
+                    fields = _gmm_fields(dist_obj, q2_key, "Q2")
                 except Exception as exc:
                     log.warning("Q2 stats.dist failed for key %s: %s", q2_key, exc)
                     fields = None
                 if fields is not None:
-                    q2_means_list.append([m * _DEG2RAD for m in fields[0]])
-                    q2_kappas_list.append(fields[1])
-                    q2_weights_list.append(fields[2])
+                    q2_means_list.append(list(fields[0]))
+                    q2_vars_list.append(list(fields[1]))
+                    q2_weights_list.append(list(fields[2]))
                 else:
-                    # Broad VMM centred at 90° (κ=0.5 ≈ weakly concentrated)
-                    q2_means_list.append([math.pi / 2])
-                    q2_kappas_list.append([0.5])
+                    # Broad GMM-cos centred at cos(90°)=0 (weakly concentrated)
+                    q2_means_list.append([0.0])
+                    q2_vars_list.append([0.5])
                     q2_weights_list.append([1.0])
 
                 self._q2_pair_meta.append((s_i, s_j, dist_class))
 
         self._q2_means, _ = _pad_and_stack(q2_means_list, device)
-        self._q2_kappas, _ = _pad_and_stack(q2_kappas_list, device)
+        self._q2_vars, _ = _pad_and_stack(q2_vars_list, device)
         self._q2_weights, _ = _pad_and_stack(q2_weights_list, device)
 
         n_q1 = ge.n_donors
@@ -695,14 +831,14 @@ class Scorer:
             self._q1_vars, self._q1_weights, qw["Q1"], _GMM_VAR_MIN["Q1"]
         )
 
-        # Q2 (VMM) — weight already controls whether Q2 contributes at all
-        self._q2_log_norm, self._q2_log_w = _vmm_precomp(
-            self._q2_kappas, self._q2_weights, qw["Q2"]
+        # Q2 (GMM-cos, 2.7.0) — weight already controls whether Q2 contributes
+        self._q2_eff_vars, self._q2_log_w = _gmm_precomp(
+            self._q2_vars, self._q2_weights, qw["Q2"], _GMM_VAR_MIN["Q2"]
         )
 
-        # Q3 (VMM)
-        self._q3_log_norm, self._q3_log_w = _vmm_precomp(
-            self._q3_kappas, self._q3_weights, qw["Q3"]
+        # Q3 (GMM-cos, 2.7.0)
+        self._q3_eff_vars, self._q3_log_w = _gmm_precomp(
+            self._q3_vars, self._q3_weights, qw["Q3"], _GMM_VAR_MIN["Q3"]
         )
 
         # Q4 (GMM)
@@ -728,6 +864,7 @@ class Scorer:
     def _score_components(
         self,
         X: torch.Tensor,
+        q3_mode_override: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Shared internal pass: compute each quantity's NORMALISED value as a
@@ -781,11 +918,17 @@ class Scorer:
         # different fix than a naive aggregation swap (e.g. only fix up
         # egregious outliers, or a curriculum/annealed tau, or address it
         # via better initialization instead) -- not attempted yet.
-        def _vmm(obs, means, kappas, log_norm, log_w, n_terms):
+        def _vmm(obs, means, kappas, log_norm, log_w, n_terms, aggregation="mean", power_p=3.0):
             cos_diff = torch.cos(obs.unsqueeze(-1) - means.unsqueeze(0))  # (B, N, K)
             log_comp = kappas.unsqueeze(0) * cos_diff - log_norm.unsqueeze(0)
             log_p = log_comp + log_w.unsqueeze(0)  # (B, N, K)
-            return torch.logsumexp(log_p, dim=-1).sum(dim=-1) / max(n_terms, 1)
+            per_term = torch.logsumexp(log_p, dim=-1)  # (B, N)
+            if aggregation == "mean":
+                return per_term.sum(dim=-1) / max(n_terms, 1)
+            # "power_mean": see Scorer.__init__ docstring for q2_aggregation.
+            badness = F.softplus(-per_term)  # (B, N) -- smooth, >=0, ~= -per_term when per_term << 0
+            pmean_badness = (badness.pow(power_p).mean(dim=-1) + 1e-12).pow(1.0 / power_p)
+            return -pmean_badness
 
         # ── Batched GMM helper (uses precomputed eff_vars and log_w) ─────────
         # obs      : (B, N)
@@ -793,15 +936,28 @@ class Scorer:
         # eff_vars : (N, K)   precomputed: vars.clamp(min=GMM_VAR_MIN)
         # log_w    : (N, K)   precomputed: log(weights) [+ log(q_weight) baked in]
         # returns (B,) — normalised (sum / N) log-prob (see _vmm note above)
-        def _gmm(obs, means, eff_vars, log_w, n_terms):
+        def _gmm(obs, means, eff_vars, log_w, n_terms, aggregation="mean", power_p=3.0):
             diff = obs.unsqueeze(-1) - means.unsqueeze(0)  # (B, N, K)
             log_comp = (
                 -0.5 * _LOG_2PI
                 - 0.5 * torch.log(eff_vars).unsqueeze(0)
                 - 0.5 * diff**2 / eff_vars.unsqueeze(0)
             )  # (B, N, K)
-            log_p = log_comp + log_w.unsqueeze(0)  # (B, N, K)
-            return torch.logsumexp(log_p, dim=-1).sum(dim=-1) / max(n_terms, 1)
+            # log_w is normally (N, K) -- static, broadcast across the batch.
+            # 2.8.0: Q3's mode-commit override instead passes an already-
+            # batched (B, N, K) log_w (see the Q3 call site below), so only
+            # unsqueeze when it's still the static 2D form.
+            log_w_b = log_w.unsqueeze(0) if log_w.dim() == 2 else log_w  # (B, N, K)
+            log_p = log_comp + log_w_b  # (B, N, K)
+            per_term = torch.logsumexp(log_p, dim=-1)  # (B, N)
+            if aggregation == "mean":
+                return per_term.sum(dim=-1) / max(n_terms, 1)
+            # "power_mean": mirrors _vmm's power-mean aggregation above.
+            # (2.7.0: added so Q2's q2_aggregation="power_mean" option keeps
+            # working now that Q2 is scored via _gmm instead of _vmm.)
+            badness = F.softplus(-per_term)
+            pmean_badness = (badness.pow(power_p).mean(dim=-1) + 1e-12).pow(1.0 / power_p)
+            return -pmean_badness
 
         # ── Q1 ─────────────────────────────────────────────────────────────
         if self._n_q1 > 0 and self._q1_means.shape[0] > 0:
@@ -811,21 +967,47 @@ class Scorer:
         # ── Q2 ─────────────────────────────────────────────────────────────
         # q2_weight baked into _q2_log_w at __init__; skip if weight was 0.0
         if self._n_q2 > 0 and self._q2_means.shape[0] > 0 and self._qweights["Q2"] > 0.0:
-            q2_angles = self._ge.q2_dmd_angles(X)  # (B, n_pairs)
-            comp["Q2"] = _vmm(
-                q2_angles,
+            q2_angles = self._ge.q2_dmd_angles(X)  # (B, n_pairs) radians
+            q2_cos = torch.cos(q2_angles)  # GMM-cos, 2.7.0
+            comp["Q2"] = _gmm(
+                q2_cos,
                 self._q2_means,
-                self._q2_kappas,
-                self._q2_log_norm,
+                self._q2_eff_vars,
                 self._q2_log_w,
                 self._n_q2,
+                aggregation=self._q2_aggregation,
+                power_p=self._q2_power_p,
             )
 
         # ── Q3 ─────────────────────────────────────────────────────────────
         if self._n_q3 > 0 and self._q3_means.shape[0] > 0:
-            q3_a = self._ge.q3_approach_angles(X)  # (B, n_q3)
-            comp["Q3"] = _vmm(
-                q3_a, self._q3_means, self._q3_kappas, self._q3_log_norm, self._q3_log_w, self._n_q3
+            q3_a = self._ge.q3_approach_angles(X)  # (B, n_q3) radians
+            q3_cos = torch.cos(q3_a)  # GMM-cos, 2.7.0
+            q3_log_w_eff = self._q3_log_w
+            # 2.8.0: mode-commit override (see ik_solver.py 2.5.0 changelog).
+            # q3_mode_override is (B, n_q3) int64, -1 = no override. Where
+            # overridden, collapse the mixture to the single named component
+            # by setting every other component's log-weight to
+            # _Q3_OVERRIDE_NEG (effectively zero mixture mass) and the named
+            # one to 0 (log(1)) -- logsumexp then reduces exactly to that
+            # component's own log-density, regardless of its original
+            # fitted mixture weight (we are committing to it as THE target
+            # for this donor/trial, not blending in leftover uncertainty
+            # about whether it's the right mode).
+            if q3_mode_override is not None:
+                Bq = q3_cos.shape[0]
+                Nq, Kq = self._q3_log_w.shape
+                mask = q3_mode_override >= 0  # (B, N)
+                override_log_w = q3_cos.new_full((Bq, Nq, Kq), _Q3_OVERRIDE_NEG)
+                sel = q3_mode_override.clamp(min=0).unsqueeze(-1)  # (B, N, 1) -- safe idx everywhere
+                override_log_w.scatter_(-1, sel, torch.zeros_like(sel, dtype=override_log_w.dtype))
+                q3_log_w_eff = torch.where(
+                    mask.unsqueeze(-1),
+                    override_log_w,
+                    self._q3_log_w.unsqueeze(0).expand(Bq, -1, -1),
+                )
+            comp["Q3"] = _gmm(
+                q3_cos, self._q3_means, self._q3_eff_vars, q3_log_w_eff, self._n_q3
             )
 
         # ── Q4 ─────────────────────────────────────────────────────────────
@@ -867,6 +1049,7 @@ class Scorer:
     def score(
         self,
         X: torch.Tensor,
+        q3_mode_override: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Unified statistical score: one honest, defensible objective.
@@ -881,13 +1064,15 @@ class Scorer:
         Parameters
         ----------
         X : (B, N, 3)
+        q3_mode_override : optional (B, n_q3) int64 tensor -- see 2.8.0
+                           changelog. None (default) = unchanged behaviour.
 
         Returns
         -------
         scalar    : (B,)  — sum of per-quantity weighted values; higher = better
         breakdown : dict with keys "Q1".."Q6", each a (B,) contribution
         """
-        breakdown = self._score_components(X)
+        breakdown = self._score_components(X, q3_mode_override=q3_mode_override)
         scalar = X.new_zeros(X.shape[0])
         for v in breakdown.values():
             scalar = scalar + v
@@ -896,6 +1081,7 @@ class Scorer:
     def score_breakdown(
         self,
         X: torch.Tensor,
+        q3_mode_override: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Backward-compatible alias: return per-quantity breakdown only.
@@ -904,18 +1090,23 @@ class Scorer:
         Parameters
         ----------
         X : (B, N, 3)
+        q3_mode_override : see score(). None (default) = unchanged behaviour.
 
         Returns
         -------
         dict with keys "Q1".."Q6", each a (B,) tensor.
         """
-        _, breakdown = self.score(X)
+        _, breakdown = self.score(X, q3_mode_override=q3_mode_override)
         return breakdown
 
     def q2_score(self, X: torch.Tensor) -> torch.Tensor:
         """
         Q2 (D–M–D angle) log-probability for post-IK joint ranking.
-        Uses precomputed _q2_log_norm and _q2_log_w (no i0e/log per call).
+        Uses precomputed _q2_eff_vars and _q2_log_w (no per-call clamping).
+
+        2.7.0: Q2 moved from VMM to GMM-on-cos(angle) -- see fitter.py's
+        fit_gmm_cosangle() docstring. Evaluated here against cos(angle)
+        directly; means/vars are already in cos-space (dimensionless).
 
         Parameters
         ----------
@@ -929,10 +1120,14 @@ class Scorer:
         if self._q2_means.shape[0] == 0:
             return X.new_zeros(B)
 
-        q2_angles = self._ge.q2_dmd_angles(X)  # (B, n_pairs)
-        phi_e = q2_angles.unsqueeze(-1)  # (B, n_pairs, 1)
-        cos_diff = torch.cos(phi_e - self._q2_means.unsqueeze(0))  # (B, n_pairs, K)
-        log_comp = self._q2_kappas.unsqueeze(0) * cos_diff - self._q2_log_norm.unsqueeze(0)
+        q2_angles = self._ge.q2_dmd_angles(X)  # (B, n_pairs) radians
+        q2_cos = torch.cos(q2_angles).unsqueeze(-1)  # (B, n_pairs, 1)
+        diff = q2_cos - self._q2_means.unsqueeze(0)  # (B, n_pairs, K)
+        log_comp = (
+            -0.5 * _LOG_2PI
+            - 0.5 * torch.log(self._q2_eff_vars).unsqueeze(0)
+            - 0.5 * diff**2 / self._q2_eff_vars.unsqueeze(0)
+        )  # (B, n_pairs, K)
         # Use raw log_w (not quantity-weighted) for post-IK ranking
         log_w = torch.log(self._q2_weights.clamp(min=_EPS))
         log_p = log_comp + log_w.unsqueeze(0)  # (B, n_pairs, K)

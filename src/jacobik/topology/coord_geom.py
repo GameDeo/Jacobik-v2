@@ -34,6 +34,7 @@ GEOM_LABELS = frozenset(
         "trig_pris",
         "pent_bipyr",
         "square_anti",
+        "tricap_pris",
         "other",
     }
 )
@@ -156,6 +157,10 @@ def _cn8() -> str:
     return "square_anti"
 
 
+def _cn9() -> str:
+    return "tricap_pris"
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -193,7 +198,7 @@ def _classify(mol: "TMComplex") -> str:
         return "other"
     if cn == 2:
         return _cn2()
-    if cn >= 9:
+    if cn >= 10:
         return "other"
 
     # Build donor position matrix
@@ -216,5 +221,7 @@ def _classify(mol: "TMComplex") -> str:
         return _cn7()
     if cn == 8:
         return _cn8()
+    if cn == 9:
+        return _cn9()
 
     return "other"  # unreachable given guard above, but satisfies type checker

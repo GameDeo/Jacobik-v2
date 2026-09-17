@@ -107,10 +107,30 @@ def _parse_xyz_comment(comment: str) -> Tuple[str, int, int, str, int, str]:
             csd_years = part.replace("CSD", "").strip()
 
     try:
+        # BUGFIX (session 2026-09-03): tmQM's "S" field is the number of
+        # unpaired electrons (equivalently 2*S_quantum, hence always an
+        # integer) -- e.g. S=0 for a closed-shell/diamagnetic complex.
+        # Every other consumer of TMComplex.spin_state in this codebase
+        # treats it as SPIN MULTIPLICITY (2S+1): engine.py's
+        # ComplexBuilder.solve() docstring says so explicitly, and
+        # vis/benchmark.py independently derives unpaired electrons back
+        # out via `uhf = spin - 1`, the correct inverse of multiplicity.
+        # Passing tmQM's raw S straight through left spin_state one off
+        # from the convention every query site assumed. Confirmed at scale:
+        # 100% of tmQM (501,569 raw Q1 observations) has S=0, and with the
+        # bug, every constraints.json Q1 exact key was filed under spin=0 --
+        # so every real call (which passes spin=1 for the overwhelmingly
+        # common closed-shell case, per the documented API) missed the
+        # exact key entirely and fell back all the way past trans-partner,
+        # coordination geometry, AND spin specificity. Convert to
+        # multiplicity here, once, at the source, so every downstream
+        # consumer (key_builder.py's Q1 keys, TMComplex.spin_state
+        # generally) is self-consistent.
+        spin_multiplicity = int(fields["S"]) + 1
         return (
             fields["CSD_code"],
             int(fields["q"]),
-            int(fields["S"]),
+            spin_multiplicity,
             fields["Stoichiometry"],
             int(fields["MND"]),
             csd_years,
