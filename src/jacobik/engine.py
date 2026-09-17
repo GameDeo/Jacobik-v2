@@ -33,7 +33,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -49,6 +49,31 @@ log = logging.getLogger(__name__)
 #: real distribution feature.  A 10% prominence floor drops it while
 #: keeping all real modes.  (Finding F4 in REWRITE_PLAN.md.)
 _Q1_PROMINENCE_FLOOR: float = 0.10
+
+
+@dataclass
+class AssignmentSearchConfig:
+    """
+    Tunable hyperparameters for ComplexBuilder.solve(use_assignment_search=True).
+
+    k_max          : max candidate donor-to-site assignments (including the
+        baseline) tried. Kept low by default since each candidate costs a
+        full beam+IK solve, not a cheap screen.
+    margin_deg     : "near-tied" threshold (degrees) for flagging a donor as
+        suspect; see ik/assignment_search.py's find_suspect_donors.
+    max_ambiguous_group : cap on how many mutually-suspect donors are
+        jointly permuted when generating candidates.
+    screen_beam_width, screen_n_ik_steps : beam_width / n_ik_steps used for
+        the cheap per-candidate screening pass when >1 candidate survives
+        dedup; each is capped to never exceed the caller's own beam_width /
+        n_ik_steps. Only the screening winner is re-solved at full quality.
+    """
+
+    k_max: int = 4
+    margin_deg: float = 20.0
+    max_ambiguous_group: int = 4
+    screen_beam_width: int = 8
+    screen_n_ik_steps: int = 60
 
 
 def geometry_sites(geometry: str) -> np.ndarray:
@@ -763,33 +788,13 @@ class ComplexBuilder:
         beam_width: int = 16,
         n_ik_steps: int = 200,
         lr: float = 0.1,
-        lambda_init: float = 10.0,
-        shape_rho: float = 8.0,
-        shape_tol: float = 0.02,
-        sym_weight: float = 2.0,
-        sym_angle_weight: float = 1.0,
+        ik_config: Optional[IKSolverConfig] = None,
         q3_mode_commit: bool = True,
-        mu_shape_stall_window: int = 20,
-        mu_shape_stall_atol: float = 0.01,
-        mu_shape_freeze_on_stall: bool = True,
-        mu_shape_max: Optional[float] = None,
-        sym_rho: float = 8.0,
-        sym_tol: float = 0.0,
-        sym_stall_window: int = 20,
-        sym_stall_atol: float = 0.01,
-        sym_freeze_on_stall: bool = True,
-        mu_sym_max: Optional[float] = None,
         enable_bend_dof: bool = True,
-        bend_diversify: bool = True,
-        bend_diversity_scale: float = 1.0,
-        diversify_orientation: bool = True,
-        diversity_scale: float = 1.0,
         n_coord_samples: int = 8,
         quantity_weights: Optional[Dict[str, float]] = None,
         q2_aggregation: str = "mean",
         q2_power_p: float = 3.0,
-        lse_temp: float = 2.0,
-        adam_betas: tuple = (0.9, 0.999),
         device: str = "cpu",
         seed: Optional[int] = None,
         debug: bool = False,
@@ -797,11 +802,7 @@ class ComplexBuilder:
         fast_embed: bool = False,
         n_conformers: Optional[int] = None,
         use_assignment_search: bool = False,
-        assignment_search_k_max: int = 4,
-        assignment_search_margin_deg: float = 20.0,
-        assignment_search_max_ambiguous_group: int = 4,
-        assignment_search_screen_beam_width: int = 8,
-        assignment_search_screen_n_ik_steps: int = 60,
+        assignment_search: Optional[AssignmentSearchConfig] = None,
     ) -> EnsembleResult:
         """
         Solve for a conformer ensemble.
@@ -812,101 +813,28 @@ class ComplexBuilder:
         beam_width       : W — number of torsion seeds per ligand from beam search
         n_ik_steps       : T — gradient descent iterations per solve
         lr               : learning rate for Adam on the combined gradient
-        lambda_init      : initial value of the shape constraint's
-                           Augmented-Lagrangian dual variable mu_shape (see
-                           ik_solver.py's IKSolverConfig).
-        shape_rho        : Augmented-Lagrangian dual-ascent step size for the
-                           shape constraint. Default 8.0 -- starting value,
-                           not empirically fit; tune against the test-suite
-                           notebook.
-        shape_tol        : shape-deviation tolerance below which the
-                           constraint is considered satisfied. Default 0.02
-                           (roughly an 8-degree worst-donor deviation from
-                           the ideal polyhedron -- see JointIKSolver
-                           docstring).
-        sym_weight       : initial value of the M-D distance symmetry-tying
-                           restraint's dual variable mu_sym. Default 2.0.
-        sym_angle_weight : initial value of the Q3 approach-angle symmetry-
-                           tying restraint's dual variable mu_sym_angle.
-                           Same symmetric donor groups as sym_weight, but
-                           ties approach angle instead of M-D distance --
-                           deliberately separate since the two quantities
-                           have different natural scales (Å² vs rad²).
-                           Default 1.0.
-        mu_shape_stall_window : steps of no improvement in shape violation
-                           before mu_shape is frozen (only used when
-                           mu_shape_freeze_on_stall). Default 20.
-        mu_shape_stall_atol : violation range below which, over
-                           mu_shape_stall_window steps, counts as stalled.
-                           Default 0.01.
-        mu_shape_freeze_on_stall : bool, default True. Freezes mu_shape
-                           once shape violation has stalled instead of
-                           letting it grow without bound and drown out
-                           sym_weight/sym_angle_weight.
-        mu_shape_max     : Optional[float], default None. Hard ceiling on
-                           mu_shape regardless of the stall detector.
-        sym_rho          : Augmented-Lagrangian penalty/step-size for the
-                           symmetry-tie dual ascent (shared by mu_sym and
-                           mu_sym_angle). Default 8.0.
-        sym_tol          : violation tolerance below which
-                           sym_penalty/sym_angle_penalty are considered
-                           satisfied (2.10.0). Default 0.0.
-        sym_stall_window : steps of no improvement in sym_penalty's (or
-                           sym_angle_penalty's) violation before its dual
-                           variable is frozen (2.10.0; only used when
-                           sym_freeze_on_stall). Default 20.
-        sym_stall_atol   : violation range below which, over
-                           sym_stall_window steps, counts as stalled
-                           (2.10.0). Default 0.01.
-        sym_freeze_on_stall : bool, default True (2.10.0). Freezes mu_sym
-                           (and independently mu_sym_angle) once that
-                           constraint's own violation has stalled, mirror
-                           of mu_shape_freeze_on_stall.
-        mu_sym_max       : Optional[float], default None (2.10.0). Hard
-                           ceiling on both mu_sym and mu_sym_angle
-                           regardless of the stall detector.
-        enable_bend_dof  : bool, default True (2.11.0). Gives each
-                           branch-point kappa donor (e.g. a tertiary amine
-                           N) independent local control over each of its
-                           outgoing branches via new "bend" joints (see
-                           ik/fk.py's ForwardKinematics 2.4.0 changelog).
-                           False restores pre-2.11.0 behaviour (and joint
-                           count) byte-for-byte.
-        bend_diversify   : bool, default True (2.11.0). Randomises each
-                           beam trial's initial bend-joint angles (only
-                           meaningful when enable_bend_dof=True), since
-                           these joints have no Q5 statistics to sample
-                           diverse starts from otherwise. Mirrors
-                           diversify_orientation's role for the base
-                           transform.
-        bend_diversity_scale : float, default 1.0 (2.11.0). Scales the
-                           random bend-angle range (1.0 -> full +/- pi,
-                           i.e. the entire 2*pi circle, since a bend joint
-                           preserves bond length/angle for any value --
-                           see fk.py 2.4.0).
-        q3_mode_commit   : bool, default True (2.8.0). When a symmetric
-                           donor group's Q3 target is genuinely multi-
-                           modal, commit the whole group to a single GMM
-                           component (chosen from the initial pose) for
-                           the whole solve, instead of letting
-                           sym_angle_weight tie members toward a mean
-                           angle that can fall between two modes. See
-                           ik/ik_solver.py's JointIKSolver 2.5.0 changelog.
-                           False restores pre-2.8.0 behaviour byte-
-                           identically -- useful for A/B comparison.
-        diversify_orientation : bool, default True (BUGFIX 2.5.1 -- was False).
-                           kabsch_init()'s well-posed rank>=2 fits (3+
-                           non-collinear donors -- most polydentate ligands,
-                           incl. EDTA and tris-chelates) have a UNIQUE optimal
-                           rigid-body orientation, so without this every trial
-                           in the batch starts from an identical base pose
-                           regardless of beam_width/n_coord_samples. Measured
-                           on EDTA (ik_solver.py 2.2.0 changelog): 128 raw IK
-                           trials collapsed to 3 distinct final geometries
-                           with this off. Set False to restore the old
-                           (narrower-search) behaviour.
-        diversity_scale  : max perturbation angle (units of pi) when
-                           diversify_orientation is True. Default 1.0.
+        ik_config        : IKSolverConfig (ik/ik_solver.py) with the shape/
+                           symmetry-constraint hyperparameters (lambda_init,
+                           shape_rho/tol, sym_weight/angle_weight, the
+                           mu_shape_*/sym_*/mu_sym_max stall-safeguard
+                           settings, lse_temp, adam_betas). None uses
+                           IKSolverConfig's own defaults.
+        q3_mode_commit   : bool, default True. When a symmetric donor
+                           group's Q3 target is genuinely multi-modal,
+                           commit the whole group to a single GMM component
+                           (chosen from the initial pose) for the whole
+                           solve, instead of letting sym_angle_weight tie
+                           members toward a mean angle that can fall
+                           between two modes. False restores the pre-mode-
+                           commit behaviour -- useful for A/B comparison.
+        enable_bend_dof  : bool, default True. Gives each branch-point
+                           kappa donor (e.g. a tertiary amine N)
+                           independent local control over each of its
+                           outgoing branches via "bend" joints (see
+                           ik/fk.py's ForwardKinematics), diversified per
+                           beam trial the same way the base orientation is.
+                           False restores the pre-bend-DOF joint count and
+                           behaviour byte-for-byte.
         n_coord_samples  : M — coordination sphere samples (diversity of targets)
         quantity_weights : optional dict mapping "Q1".."Q6" → float weight.
                            Controls which quantities contribute and how much.
@@ -922,9 +850,6 @@ class ComplexBuilder:
                            pairs; untested against a full benchmark suite as
                            of introduction.
         q2_power_p       : exponent for q2_aggregation="power_mean" (default 3.0).
-        lse_temp         : temperature for log-sum-exp soft-max over per-donor
-                           squared errors in the anchor loss. Default 2.0.
-        adam_betas        : (β₁, β₂) for Adam. Default (0.9, 0.999).
         device           : "cpu" or "cuda"
         seed             : optional random seed for reproducibility
         debug            : if True, print detailed diagnostics at every stage.
@@ -942,43 +867,18 @@ class ComplexBuilder:
                            results.  Default: max(beam_width, n_coord_samples).
                            Set to 1 to get only the rank-1 conformer and skip
                            all deep-copy overhead for lower-ranked structures.
-        use_assignment_search : bool, default False (2.13.0). Try
-                           alternative donor-to-site assignments (ik/
-                           assignment_search.py) around the baseline
-                           Hungarian solve when it's genuinely ambiguous,
-                           re-running the full solve for each candidate and
-                           keeping whichever scores best. See the 2.13.0
-                           changelog entry above for the full rationale.
-                           Unambiguous cases are unaffected and pay no
-                           extra cost. False restores the always-baseline-
-                           only pre-2.13.0 behaviour byte-identically.
-        assignment_search_k_max : int, default 4 (2.13.0; only used when
-                           use_assignment_search). Max candidate
-                           assignments (including the baseline) tried.
-                           Passed to generate_candidate_assignments as
-                           k_max -- kept lower than that function's own
-                           default of 10 because each candidate here costs
-                           a full beam+IK solve, not a cheap screen.
-        assignment_search_margin_deg : float, default 20.0 (2.13.0; only
-                           used when use_assignment_search). "Near-tied"
-                           threshold for flagging a donor as suspect; see
-                           assignment_search.find_suspect_donors.
-        assignment_search_max_ambiguous_group : int, default 4 (2.13.0;
-                           only used when use_assignment_search). Cap on
-                           how many mutually-suspect donors are jointly
-                           permuted; see generate_candidate_assignments.
-        assignment_search_screen_beam_width : int, default 8 (2.14.0; only
-                           used when use_assignment_search and >1 candidate
-                           survives symmetric-donor dedup). beam_width used
-                           for the cheap per-candidate screening pass;
-                           capped to never exceed the caller's own
-                           beam_width. Only the screening winner gets a
-                           full-quality re-solve.
-        assignment_search_screen_n_ik_steps : int, default 60 (2.14.0;
-                           same conditions as assignment_search_screen_
-                           beam_width). n_ik_steps used for the screening
-                           pass; capped to never exceed the caller's own
-                           n_ik_steps.
+        use_assignment_search : bool, default False. Try alternative
+                           donor-to-site assignments (ik/assignment_search.py)
+                           around the baseline Hungarian solve when it's
+                           genuinely ambiguous, re-running the solve for
+                           each surviving candidate and keeping whichever
+                           scores best. Unambiguous cases are unaffected
+                           and pay no extra cost.
+        assignment_search : AssignmentSearchConfig (k_max, margin_deg,
+                           max_ambiguous_group, screen_beam_width,
+                           screen_n_ik_steps) controlling the search when
+                           use_assignment_search is True. None uses
+                           AssignmentSearchConfig's own defaults.
 
         Returns
         -------
@@ -1232,6 +1132,8 @@ class ComplexBuilder:
         if use_assignment_search and not _is_fully_explicit_assignment:
             from jacobik.ik.assignment_search import generate_candidate_assignments
 
+            _as_cfg = assignment_search or AssignmentSearchConfig()
+
             hop_matrix_full: Optional[np.ndarray] = np.full(
                 (n_donors, n_donors), -1, dtype=int
             )
@@ -1267,9 +1169,9 @@ class ComplexBuilder:
                         geometry_label=self.geometry,
                         chelate_pairs=chelate_pairs_global,
                         hop_matrix=hop_matrix_full,
-                        margin_deg=assignment_search_margin_deg,
-                        max_ambiguous_group=assignment_search_max_ambiguous_group,
-                        k_max=assignment_search_k_max,
+                        margin_deg=_as_cfg.margin_deg,
+                        max_ambiguous_group=_as_cfg.max_ambiguous_group,
+                        k_max=_as_cfg.k_max,
                     )
                 )
             except Exception as exc:
@@ -1703,34 +1605,24 @@ class ComplexBuilder:
 
                 beam_torsions_B = beam_torsions.unsqueeze(0).expand(M, W, J).reshape(B, J)
 
-                # 2.11.0: append the bend joints (fk.py 2.4.0), which beam
-                # search never touches (no Q5 statistics for them -- see
-                # beam.py 2.1.0). Seed each at its own current-conformer
-                # dihedral (zero delta -- exact no-op at t=0, same convention
-                # _apply_torsion uses everywhere else), then optionally
-                # randomise per beam trial so different trials can explore
-                # different local pyramidal configurations at branch-point
-                # donors, mirroring diversify_orientation's role for the base
-                # transform. Left entirely to gradient descent from there.
+                # Append the bend joints (fk.py), which beam search never
+                # touches (no Q5 statistics for them). Seed each at its own
+                # current-conformer dihedral (zero delta -- exact no-op at
+                # t=0), then randomise per beam trial so different trials
+                # explore different local pyramidal configurations at
+                # branch-point donors, mirroring how the base orientation
+                # is diversified below. Left entirely to gradient descent
+                # from there.
                 n_bend = J_full - J
                 if n_bend > 0:
                     bend_seed = fk.bend_seed_angles(X_full)  # (n_bend,)
                     bend_seed_B = bend_seed.unsqueeze(0).expand(B, n_bend).clone()
-                    if bend_diversify:
-                        noise = (
-                            (torch.rand(B, n_bend, device=_device) - 0.5)
-                            * 2.0
-                            * math.pi
-                            * bend_diversity_scale
-                        )
-                        bend_seed_B = bend_seed_B + noise
+                    noise = (torch.rand(B, n_bend, device=_device) - 0.5) * 2.0 * math.pi
+                    bend_seed_B = bend_seed_B + noise
                     beam_torsions_B = torch.cat([beam_torsions_B, bend_seed_B], dim=-1)  # (B, J_full)
 
                 if debug:
-                    print(
-                        f"  bend joints  : {n_bend} (diversify={bend_diversify}, "
-                        f"scale={bend_diversity_scale})"
-                    )
+                    print(f"  bend joints  : {n_bend}")
 
                 # 5f. Donor position indices (indices into GE's global donor list)
                 # We pass the group indices (lig_di) directly instead of atom indices,
@@ -1754,8 +1646,8 @@ class ComplexBuilder:
                     X_ref=X_full,
                     donor_targets=donor_targets_torch,
                     donor_pos_idx=donor_pos_idx_t,
-                    diversify_orientation=diversify_orientation,
-                    diversity_scale=diversity_scale,
+                    diversify_orientation=True,
+                    diversity_scale=1.0,
                 )  # (B, 6)
                 theta_init = torch.cat([base_theta, beam_torsions_B], dim=-1)  # (B, 6+J)
 
@@ -1777,32 +1669,14 @@ class ComplexBuilder:
             # ------------------------------------------------------------------
             log.info("Running joint IK: %d ligands × B=%d × T=%d steps", len(fks), B, n_ik_steps)
 
-            ik_config = IKSolverConfig(
-                n_steps=n_ik_steps,
-                lr=lr,
-                lambda_init=lambda_init,
-                lse_temp=lse_temp,
-                adam_betas=adam_betas,
-                shape_rho=shape_rho,
-                shape_tol=shape_tol,
-                sym_weight=sym_weight,
-                sym_angle_weight=sym_angle_weight,
-                mu_shape_stall_window=mu_shape_stall_window,
-                mu_shape_stall_atol=mu_shape_stall_atol,
-                mu_shape_freeze_on_stall=mu_shape_freeze_on_stall,
-                mu_shape_max=mu_shape_max,
-                sym_rho=sym_rho,
-                sym_tol=sym_tol,
-                sym_stall_window=sym_stall_window,
-                sym_stall_atol=sym_stall_atol,
-                sym_freeze_on_stall=sym_freeze_on_stall,
-                mu_sym_max=mu_sym_max,
-            )
+            # n_ik_steps/lr are the two solve()-level knobs everyone actually
+            # tunes per-call; everything else comes from ik_config.
+            _resolved_ik_config = replace(ik_config or IKSolverConfig(), n_steps=n_ik_steps, lr=lr)
             joint_solver = JointIKSolver(
                 fks=fks,
                 scorer=scorer_joint,
                 ge=ge_joint,
-                config=ik_config,
+                config=_resolved_ik_config,
                 device=_device,
             )
             thetas_final, converged, scores, solve_trace = joint_solver.solve(
@@ -1935,8 +1809,8 @@ class ComplexBuilder:
             # re-solve only the screening winner at full quality -- turns
             # an N-candidate search from N full solves into N cheap
             # screens + 1 full solve. See the 2.14.0 changelog entry.
-            _screen_bw = max(1, min(beam_width, assignment_search_screen_beam_width))
-            _screen_steps = max(1, min(n_ik_steps, assignment_search_screen_n_ik_steps))
+            _screen_bw = max(1, min(beam_width, _as_cfg.screen_beam_width))
+            _screen_steps = max(1, min(n_ik_steps, _as_cfg.screen_n_ik_steps))
             _candidate_results: List[Tuple[int, np.ndarray, EnsembleResult]] = []
             for _ci, _cand in enumerate(_assignment_candidates):
                 log.info(
