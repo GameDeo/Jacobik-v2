@@ -7,7 +7,7 @@ Pure differentiable math kernels for the IK engine.
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 
@@ -43,6 +43,7 @@ def rodrigues(
     pivot: torch.Tensor,  # (B, 3)    — centre of rotation
     axis: torch.Tensor,  # (B, 3)    — rotation axis (need not be unit)
     theta: torch.Tensor,  # (B,)      — rotation angle in radians
+    axis_normalized: bool = False,
 ) -> torch.Tensor:
     """
     Rotate a batch of point sets around a pivot/axis by angle theta.
@@ -52,8 +53,17 @@ def rodrigues(
     ----------
     pts   : (B, n, 3) — points to rotate
     pivot : (B, 3)    — pivot point (subtracted before, added after)
-    axis  : (B, 3)    — rotation axis; normalised internally
+    axis  : (B, 3)    — rotation axis; normalised internally unless
+                        axis_normalized=True
     theta : (B,)      — rotation angle in radians
+    axis_normalized : if True, `axis` is already unit-length (caller's
+                        responsibility) and the internal _safe_normalize
+                        is skipped. Default False preserves all existing
+                        behaviour — callers that already pass a unit axis
+                        (e.g. fk.py's _apply_torsion, which reuses the
+                        b2_hat already computed by dihedral_with_axis for
+                        the same pivot_j->pivot_k bond) can opt in to
+                        avoid recomputing an identical normalisation.
 
     Returns
     -------
@@ -66,7 +76,7 @@ def rodrigues(
     )
 
     # Normalise axis — safe for zero vector (will produce a zero rotation)
-    k = _safe_normalize(axis, dim=-1)  # (B, 3)
+    k = axis if axis_normalized else _safe_normalize(axis, dim=-1)  # (B, 3)
 
     # Translate to pivot frame
     v = pts - pivot[:, None, :]  # (B, n, 3)
@@ -253,6 +263,55 @@ def null_space_keep_projector(
 # ---------------------------------------------------------------------------
 
 
+def dihedral_with_axis(
+    p_i: torch.Tensor,  # (B, 3)
+    p_j: torch.Tensor,  # (B, 3)
+    p_k: torch.Tensor,  # (B, 3)
+    p_l: torch.Tensor,  # (B, 3)
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Same computation as dihedral() below, but also returns the normalised
+    p_k - p_j axis (b2_hat) it computes internally as an intermediate.
+
+    Added (2026-09-18, performance pass) because fk.py's _apply_torsion
+    calls dihedral(p_i, p_j, p_k, p_l) to get the current torsion angle,
+    then immediately calls rodrigues(pts, pivot=p_j, axis=p_k - p_j, ...)
+    to apply the delta rotation — rodrigues normalises that same p_k - p_j
+    vector internally via an identical _safe_normalize call. Exposing
+    b2_hat here lets the caller pass it straight to rodrigues's
+    axis_normalized=True fast path instead of recomputing an identical
+    normalisation a second time. Profiled as a real, measurable chunk of
+    call volume on the CN9 case (kernels.py:_safe_normalize showed ~2x
+    rodrigues's own call count in cProfile, consistent with exactly this
+    duplication) — see script_notebooks/laptop_performance_investigation.ipynb.
+
+    Parameters
+    ----------
+    p_i, p_j, p_k, p_l : (B, 3) atom positions
+
+    Returns
+    -------
+    (phi, b2_hat) : ((B,) signed dihedral in radians ∈ (−π, π], (B, 3) unit vector)
+
+    """
+    b1 = p_j - p_i  # (B, 3)
+    b2 = p_k - p_j  # (B, 3)
+    b3 = p_l - p_k  # (B, 3)
+
+    n1 = torch.linalg.cross(b1, b2, dim=-1)  # (B, 3)
+    n2 = torch.linalg.cross(b2, b3, dim=-1)  # (B, 3)
+
+    b2_hat = _safe_normalize(b2, dim=-1)  # (B, 3)
+
+    # m = n1 × n2, projected onto b2_hat gives the sin component
+    m = torch.linalg.cross(n1, n2, dim=-1)  # (B, 3)
+
+    sin_phi = (m * b2_hat).sum(dim=-1)  # (B,)
+    cos_phi = (n1 * n2).sum(dim=-1)  # (B,)
+
+    return torch.atan2(sin_phi, cos_phi), b2_hat
+
+
 def dihedral(
     p_i: torch.Tensor,  # (B, 3)
     p_j: torch.Tensor,  # (B, 3)
@@ -272,22 +331,8 @@ def dihedral(
     phi : (B,) signed dihedral in radians ∈ (−π, π]
 
     """
-    b1 = p_j - p_i  # (B, 3)
-    b2 = p_k - p_j  # (B, 3)
-    b3 = p_l - p_k  # (B, 3)
-
-    n1 = torch.linalg.cross(b1, b2, dim=-1)  # (B, 3)
-    n2 = torch.linalg.cross(b2, b3, dim=-1)  # (B, 3)
-
-    b2_hat = _safe_normalize(b2, dim=-1)  # (B, 3)
-
-    # m = n1 × n2, projected onto b2_hat gives the sin component
-    m = torch.linalg.cross(n1, n2, dim=-1)  # (B, 3)
-
-    sin_phi = (m * b2_hat).sum(dim=-1)  # (B,)
-    cos_phi = (n1 * n2).sum(dim=-1)  # (B,)
-
-    return torch.atan2(sin_phi, cos_phi)
+    phi, _ = dihedral_with_axis(p_i, p_j, p_k, p_l)
+    return phi
 
 
 # ---------------------------------------------------------------------------

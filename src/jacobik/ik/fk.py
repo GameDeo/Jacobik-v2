@@ -100,6 +100,7 @@ import torch
 
 from jacobik.ik.kernels import axisangle_to_matrix, rodrigues
 from jacobik.ik.kernels import dihedral as _dihedral
+from jacobik.ik.kernels import dihedral_with_axis as _dihedral_with_axis
 
 if TYPE_CHECKING:
     from jacobik.core.types import Ligand, TMComplex
@@ -533,8 +534,13 @@ class ForwardKinematics:
         lig_rotated = torch.bmm(lig_centered, R.transpose(1, 2))  # (B, n_lig, 3)
         lig_new = lig_rotated + pivot[:, None, :] + transl[:, None, :]
 
-        # Scatter back into X (clone not needed — already cloned in _apply_internal)
-        X = X.clone()
+        # Scatter back into X — no clone needed here: _apply_internal already
+        # handed us a freshly-cloned, uniquely-owned X (see its own
+        # X = X_ref.clone() at the top), and nothing else holds a
+        # reference to this X that needs its pre-mutation values later
+        # (the `lig`/`lig_centered`/etc. tensors above were already
+        # materialised by fancy indexing, which copies — they're
+        # unaffected by mutating X afterward).
         X[:, self._lig_pos_t, :] = lig_new
         return X
 
@@ -562,13 +568,15 @@ class ForwardKinematics:
         p_k = X[:, pk, :]
         p_l = X[:, fl, :]
 
-        phi_cur = _dihedral(p_i, p_j, p_k, p_l)  # (B,)
+        # dihedral_with_axis also returns the normalised pivot_j->pivot_k
+        # axis it computes internally (b2_hat) — this is exactly the axis
+        # rodrigues below needs (pivot_j -> pivot_k, unit length), so we
+        # reuse it via axis_normalized=True instead of handing rodrigues
+        # the raw p_k - p_j and making it redo an identical normalisation.
+        phi_cur, axis_unit = _dihedral_with_axis(p_i, p_j, p_k, p_l)  # (B,), (B, 3)
 
         # Delta: how much to rotate to reach the target
         delta = target_phi - phi_cur  # (B,)
-
-        # Rotation axis: normalised pivot_j → pivot_k vector
-        axis = p_k - p_j  # (B, 3) — rodrigues normalises internally
 
         # Downstream atoms
         down_idx = self._downstream[k]  # (n_down,)
@@ -578,7 +586,9 @@ class ForwardKinematics:
         pts = X[:, down_idx, :]  # (B, n_down, 3)
         pivot = p_j  # (B, 3)
 
-        pts_rotated = rodrigues(pts, pivot, axis, delta)  # (B, n_down, 3)
+        pts_rotated = rodrigues(
+            pts, pivot, axis_unit, delta, axis_normalized=True
+        )  # (B, n_down, 3)
 
         X = X.clone()
         X[:, down_idx, :] = pts_rotated

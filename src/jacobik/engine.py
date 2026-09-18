@@ -19,6 +19,15 @@ Notable non-default knobs on solve():
                              assignments and keeps whichever solves best
                              (ik/assignment_search.py). Off by default;
                              unambiguous cases are unaffected either way.
+  use_symmetry_enumeration : proactive alternative to use_assignment_search
+                             (mutually exclusive with it): exhaustively
+                             enumerates every symmetry-distinct donor-to-
+                             site bijection up front (ik/site_enumeration.py,
+                             see its module docstring for the Architector-
+                             style motivation), instead of perturbing the
+                             one baseline Hungarian assignment. Off by
+                             default. See use_symmetry_enumeration's own
+                             parameter docstring below for the tradeoffs.
   q3_mode_commit           : commits a topologically-symmetric donor group
                              to a single Q3 GMM mode (from its initial
                              pose) instead of tying members toward a mean
@@ -40,6 +49,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
+from jacobik.ik.site_enumeration import SiteEnumerationConfig
+
 log = logging.getLogger(__name__)
 
 #: Prominence floor for Q1 GMM modes: modes whose weight is below this
@@ -57,23 +68,31 @@ class AssignmentSearchConfig:
     Tunable hyperparameters for ComplexBuilder.solve(use_assignment_search=True).
 
     k_max          : max candidate donor-to-site assignments (including the
-        baseline) tried. Kept low by default since each candidate costs a
-        full beam+IK solve, not a cheap screen.
+        baseline) tried. Kept low by default -- 2026-09-17: no longer
+        because "each candidate costs a full beam+IK solve" (that was true
+        of the old sequential screen-then-resolve design; see
+        ComplexBuilder._solve_for_assignments's "batched candidate
+        screening" note), but because k_max also bounds how large the
+        single batched solve's B dimension grows
+        (B = k_max * beam_width * n_coord_samples) -- GPU memory, not
+        wall-clock, is the real constraint now.
     margin_deg     : "near-tied" threshold (degrees) for flagging a donor as
         suspect; see ik/assignment_search.py's find_suspect_donors.
     max_ambiguous_group : cap on how many mutually-suspect donors are
         jointly permuted when generating candidates.
-    screen_beam_width, screen_n_ik_steps : beam_width / n_ik_steps used for
-        the cheap per-candidate screening pass when >1 candidate survives
-        dedup; each is capped to never exceed the caller's own beam_width /
-        n_ik_steps. Only the screening winner is re-solved at full quality.
+
+    2026-09-17: screen_beam_width/screen_n_ik_steps (the cheap-screening-
+    pass knobs for the old sequential "screen every candidate cheaply,
+    re-solve only the winner at full quality" design) are gone --
+    every candidate assignment is now solved at the SAME (beam_width,
+    n_ik_steps) quality in one batched call, since batching made the
+    screen/resolve split's whole reason for existing (avoiding N separate
+    full-quality solves) moot. See _solve_for_assignments.
     """
 
     k_max: int = 4
     margin_deg: float = 20.0
     max_ambiguous_group: int = 4
-    screen_beam_width: int = 8
-    screen_n_ik_steps: int = 60
 
 
 def geometry_sites(geometry: str) -> np.ndarray:
@@ -189,6 +208,15 @@ class ConformerResult:
     converged: bool
     rank: int  # 1-based rank (1 = best)
     trial_idx: Optional[int] = None
+    # 2026-09-17: which candidate donor-to-site assignment (index into
+    # EnsembleResult.assignment_search["candidate_assignments"] when set)
+    # this conformer came from. Meaningful once _solve_for_assignments
+    # batches multiple candidates into one solve -- see that method and
+    # the "batched candidate screening" changelog note on
+    # ComplexBuilder.solve(). None for a single-assignment solve (the
+    # common case: use_assignment_search=use_symmetry_enumeration=False,
+    # or either one collapsing to exactly 1 surviving candidate).
+    assignment_idx: Optional[int] = None
 
     def write_xyz(self, path: str | Path) -> None:
         """Write this conformer to an .xyz file."""
@@ -678,6 +706,55 @@ def _build_complex_shell(
 
 
 # ---------------------------------------------------------------------------
+# _SolveContext
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SolveContext:
+    """
+    Bundles everything about one ComplexBuilder.solve() call that is
+    independent of *which* donor-to-site assignment candidate is being
+    tried, so the assignment-candidate-generation and per-candidate solve
+    helper methods below can take one `ctx` argument instead of a dozen
+    loose parameters (refactor, 2026-09-17 -- solve() used to be a single
+    ~1350-line method; see this module's docstring / that changelog entry
+    for the rationale).
+
+    Built once per solve() call, near the top of solve() itself.
+    """
+
+    mol: object  # TMComplex
+    ideal: np.ndarray  # (n_sites, 3)
+    all_donor_groups: List[Tuple[int, int, List[int]]]
+    n_donors: int
+    chelate_pairs_global: List[Tuple[int, int]]
+    heavy_graph: object  # nx.Graph, or None if construction failed
+    #: Donor-index equivalence classes from (SMILES, RDKit
+    #: CanonicalRankAtoms) -- single-atom donor groups only, size >= 2.
+    #: Computed once here and reused everywhere this concept is needed
+    #: (previously recomputed via RDKit up to 3x per solve() call, once
+    #: each in 3a's Fix A dedup, 3a', and _solve_for_assignments's own
+    #: symmetric_groups -- see _symmetric_donor_groups()).
+    symmetric_donor_groups: List[List[int]]
+    stats: object  # StatsLookup
+    device: torch.device
+    np_rng: np.random.Generator
+    lr: float
+    # solve()-level knobs threaded straight through to the per-candidate
+    # solve helpers, unchanged for every candidate in a given solve() call.
+    quantity_weights: Optional[Dict[str, float]]
+    q2_aggregation: str
+    q2_power_p: float
+    n_coord_samples: int
+    enable_bend_dof: bool
+    q3_mode_commit: bool
+    ik_config: Optional[object]  # IKSolverConfig
+    n_conformers: Optional[int]
+    debug: bool
+
+
+# ---------------------------------------------------------------------------
 # ComplexBuilder
 # ---------------------------------------------------------------------------
 
@@ -803,6 +880,8 @@ class ComplexBuilder:
         n_conformers: Optional[int] = None,
         use_assignment_search: bool = False,
         assignment_search: Optional[AssignmentSearchConfig] = None,
+        use_symmetry_enumeration: bool = False,
+        site_enumeration_config: Optional[SiteEnumerationConfig] = None,
     ) -> EnsembleResult:
         """
         Solve for a conformer ensemble.
@@ -870,33 +949,91 @@ class ComplexBuilder:
         use_assignment_search : bool, default False. Try alternative
                            donor-to-site assignments (ik/assignment_search.py)
                            around the baseline Hungarian solve when it's
-                           genuinely ambiguous, re-running the solve for
-                           each surviving candidate and keeping whichever
-                           scores best. Unambiguous cases are unaffected
-                           and pay no extra cost.
+                           genuinely ambiguous. 2026-09-17: every surviving
+                           candidate is now solved TOGETHER with the
+                           baseline, in one batched call spanning
+                           n_candidates x beam_width x n_coord_samples
+                           trials (see _solve_for_assignments) -- not a
+                           sequential re-solve-per-candidate loop -- and the
+                           returned ensemble can contain conformers from
+                           more than one candidate assignment, ranked
+                           together by score. Unambiguous cases are
+                           unaffected and pay no extra cost.
         assignment_search : AssignmentSearchConfig (k_max, margin_deg,
-                           max_ambiguous_group, screen_beam_width,
-                           screen_n_ik_steps) controlling the search when
+                           max_ambiguous_group) controlling the search when
                            use_assignment_search is True. None uses
                            AssignmentSearchConfig's own defaults.
+        use_symmetry_enumeration : bool, default False. Proactive
+                           alternative to use_assignment_search
+                           (ik/site_enumeration.py): instead of perturbing
+                           the one baseline Hungarian assignment, exhaustively
+                           enumerates every symmetry-distinct donor-to-site
+                           bijection consistent with ligand-graph
+                           reachability, up front. Unlike
+                           use_assignment_search, this can discover a
+                           second valid coordination topology even when the
+                           baseline embedding didn't look locally ambiguous
+                           -- see ik/site_enumeration.py's module docstring
+                           for why that's the actual point of the proactive
+                           approach, and for two concrete, unresolved
+                           limitations to be aware of before relying on
+                           this in production: (1) donor-pair reachability
+                           reuses assignment_search.py's REACHABILITY_
+                           BREAKPOINTS completely unchanged, which can make
+                           the physically correct topology UNREACHABLE for
+                           some real ligands (a documented, regression-
+                           tested EDTA case) rather than just under-
+                           explored -- if that happens, enumeration returns
+                           zero candidates and this falls back to the
+                           baseline assignment automatically (a warning is
+                           logged, nothing raises); (2) the combinatorial
+                           blowup risk for CN8/CN9 ligands is real (see
+                           SiteEnumerationConfig's own docstring for
+                           real-CN8/CN9-case raw-search measurements), so
+                           this is OFF BY DEFAULT and should be benchmarked
+                           against your actual ligand set, not enabled
+                           blindly. 2026-09-17: every surviving candidate
+                           bijection is now solved TOGETHER in one batched
+                           call (n_candidates x beam_width x n_coord_samples
+                           trials, see _solve_for_assignments) rather than
+                           a sequential per-candidate re-solve, so the
+                           per-candidate wall-clock cost that used to scale
+                           with n_candidates mostly doesn't anymore (GPU
+                           memory for the larger batch is the real
+                           constraint now); the returned ensemble is no
+                           longer collapsed to one "winning" candidate --
+                           it can and typically will contain conformers
+                           from more than one distinct donor-to-site
+                           assignment, ranked together by score (each
+                           conformer's ConformerResult.assignment_idx says
+                           which). Requires n_donors == the geometry's
+                           n_sites (a fully-saturated complex); silently
+                           falls back to the baseline assignment otherwise
+                           (a partially-explicit or under-coordinated
+                           complex has no well-defined "bijection" for this
+                           enumerator to search over). Mutually exclusive
+                           with use_assignment_search -- if both are True,
+                           use_symmetry_enumeration takes precedence and a
+                           warning is logged; running both together
+                           (enumerate proactively, then still perturb
+                           locally on top) is a documented possible
+                           follow-on in ik/site_enumeration.py's module
+                           docstring, not implemented here.
+        site_enumeration_config : SiteEnumerationConfig (max_candidates,
+                           time_budget_s) controlling both the raw
+                           enumeration AND the dedup pass when
+                           use_symmetry_enumeration is True (see
+                           ik/site_enumeration.py's `dedup_combined`
+                           docstring for why the dedup pass needs its own
+                           budget too, not just the raw search). None uses
+                           SiteEnumerationConfig's own defaults
+                           (max_candidates=5000, time_budget_s=10.0 each,
+                           i.e. up to ~20s combined worst case).
 
         Returns
         -------
         EnsembleResult with conformers sorted best→worst by score.
         """
-        from jacobik.ik.beam import BeamSearch
-        from jacobik.ik.fk import ForwardKinematics
-        from jacobik.ik.geometry import GeometryExtractor
-        from jacobik.ik.ik_solver import kabsch_init
-        from jacobik.ik.scorer import Scorer
-        from jacobik.ik.targets import IDEAL_GEOMETRIES, hungarian_assign
-        from jacobik.stats.stats import StatsLookup, load_db
-        from jacobik.topology.decompose import decompose_ligand
-        from jacobik.topology.donor_classifier import classify
-        from jacobik.topology.graph import build_heavy_ligand_graph
-
-        import networkx as nx
-
         _device = torch.device(device)
         np_rng = np.random.default_rng(seed)  # for Q1 GMM target sampling (§5.3)
 
@@ -917,21 +1054,109 @@ class ComplexBuilder:
             np.random.seed(seed)
 
         # ------------------------------------------------------------------
-        # 1. Load stats DB (or use pre-built StatsLookup from caller)
+        # 1-3. Build the complex, classify donors, and compute the baseline
+        #      (Hungarian or explicit) donor-to-site assignment. See each
+        #      helper's own docstring for its numbered step(s); this used
+        #      to all be inline here before the 2026-09-17 refactor split
+        #      solve() (previously ~1350 lines on its own) into the
+        #      methods below it in this class.
         # ------------------------------------------------------------------
+        stats = self._load_stats(constraints_db, stats)
+        mol, rdmols, lig_positions, donor_idx_full = self._build_shell(fast_embed, debug)
+        ideal, all_donor_groups, n_donors = self._collect_donor_groups(mol, donor_idx_full)
+        chelate_pairs_global, heavy_graph = self._detect_chelate_pairs(
+            mol, all_donor_groups, n_donors
+        )
+        assignment, donor_dirs, subclasses = self._compute_baseline_assignment(
+            mol, ideal, all_donor_groups, n_donors, chelate_pairs_global
+        )
+        log.info("Site assignment: %s", assignment.tolist())
+
+        symmetric_donor_groups = self._symmetric_donor_groups(mol, rdmols, all_donor_groups)
+
+        ctx = _SolveContext(
+            mol=mol,
+            ideal=ideal,
+            all_donor_groups=all_donor_groups,
+            n_donors=n_donors,
+            chelate_pairs_global=chelate_pairs_global,
+            heavy_graph=heavy_graph,
+            symmetric_donor_groups=symmetric_donor_groups,
+            stats=stats,
+            device=_device,
+            np_rng=np_rng,
+            lr=lr,
+            quantity_weights=quantity_weights,
+            q2_aggregation=q2_aggregation,
+            q2_power_p=q2_power_p,
+            n_coord_samples=n_coord_samples,
+            enable_bend_dof=enable_bend_dof,
+            q3_mode_commit=q3_mode_commit,
+            ik_config=ik_config,
+            n_conformers=n_conformers,
+            debug=debug,
+        )
+
+        # ------------------------------------------------------------------
+        # 3a/3a'. OPTIONAL alternative donor-to-site assignment candidates
+        #     around the baseline assignment above -- see
+        #     use_assignment_search / use_symmetry_enumeration's own
+        #     parameter docstrings above for the full rationale, and
+        #     _run_assignment_search / _run_symmetry_enumeration for the
+        #     implementations. Mutually exclusive; symmetry enumeration
+        #     takes precedence if both are requested (a warning is
+        #     logged). Fully explicit (every site caller-pinned)
+        #     assignments skip both -- nothing to search when nothing is
+        #     free.
+        # ------------------------------------------------------------------
+        _assignment_candidates: List[np.ndarray] = [assignment]
+        _is_fully_explicit_assignment = all(lig_inp.sites is not None for lig_inp in self.ligands)
+
+        if use_assignment_search and use_symmetry_enumeration:
+            log.warning(
+                "Both use_assignment_search and use_symmetry_enumeration were "
+                "requested; running only use_symmetry_enumeration (proactive "
+                "enumeration takes precedence -- see ik/site_enumeration.py's "
+                "module docstring for why composing them is not yet implemented)."
+            )
+
+        if (
+            use_assignment_search
+            and not use_symmetry_enumeration
+            and not _is_fully_explicit_assignment
+        ):
+            _assignment_candidates = self._run_assignment_search(
+                ctx, assignment, donor_dirs, subclasses, assignment_search, debug
+            )
+        elif use_symmetry_enumeration and not _is_fully_explicit_assignment:
+            _assignment_candidates = self._run_symmetry_enumeration(
+                ctx, assignment, site_enumeration_config, debug
+            )
+
+        return self._solve_for_assignments(ctx, _assignment_candidates, beam_width, n_ik_steps)
+
+    def _load_stats(self, constraints_db, stats):
+        """Step 1: load the constraints DB (or use the caller's pre-built
+        StatsLookup, skipping load_db() entirely)."""
+        from jacobik.stats.stats import StatsLookup, load_db
+
         if stats is None:
             if constraints_db is None:
                 from importlib import resources
+
                 constraints_db = resources.files("jacobik") / "constraints.json"
             log.info("Loading constraints DB: %s", constraints_db)
             db = load_db(constraints_db)
             stats = StatsLookup(db)
         else:
             log.info("Using pre-built StatsLookup (skipping load_db)")
+        return stats
 
-        # ------------------------------------------------------------------
-        # 2. Build TMComplex shell + run donor classification
-        # ------------------------------------------------------------------
+    def _build_shell(self, fast_embed, debug):
+        """Step 2: build the initial TMComplex shell from each ligand's
+        SMILES, then run donor classification."""
+        from jacobik.topology.donor_classifier import classify
+
         log.info("Building complex shell (%s %s)...", self.metal, self.geometry)
         mol, rdmols, lig_positions, donor_idx_full = _build_complex_shell(
             metal_symbol=self.metal,
@@ -962,10 +1187,13 @@ class ComplexBuilder:
                 "Donor classification produced no coordination sites. "
                 "Check that donor indices point to actual donor atoms."
             )
+        return mol, rdmols, lig_positions, donor_idx_full
 
-        # ------------------------------------------------------------------
-        # 3. Build site assignment (Hungarian or explicit)
-        # ------------------------------------------------------------------
+    def _collect_donor_groups(self, mol, donor_idx_full):
+        """Step 3 (part 1): resolve the geometry's ideal site directions
+        and collect all donor groups, in order, across ligands."""
+        from jacobik.ik.targets import IDEAL_GEOMETRIES
+
         ideal = IDEAL_GEOMETRIES.get(self.geometry)
         if ideal is None:
             # "other" geometry — use identity directions
@@ -980,34 +1208,44 @@ class ComplexBuilder:
                 all_donor_groups.append((li, gi, grp))
 
         n_donors = len(all_donor_groups)
+        return ideal, all_donor_groups, n_donors
 
-        # ------------------------------------------------------------------
-        # 2b. Chelate pairs (short ligand-graph-distance donor pairs, same
-        #     ligand) — passed to hungarian_assign so it can repair
-        #     assignments that put a rigid short chelate on two sites too
-        #     far apart to be kinematically reachable. See BUGFIX note in
-        #     ik/targets.py (_repair_chelate_assignment) for the full
-        #     rationale: a linear per-donor Hungarian cost cannot express
-        #     this pairwise constraint on its own.
-        # ------------------------------------------------------------------
+    def _detect_chelate_pairs(self, mol, all_donor_groups, n_donors):
+        """
+        Step 2b: chelate pairs (short ligand-graph-distance donor pairs,
+        same ligand) — passed to hungarian_assign so it can repair
+        assignments that put a rigid short chelate on two sites too far
+        apart to be kinematically reachable. See BUGFIX note in
+        ik/targets.py (_repair_chelate_assignment) for the full rationale:
+        a linear per-donor Hungarian cost cannot express this pairwise
+        constraint on its own.
+
+        Also returns the heavy-atom ligand graph (or None if it could not
+        be built), reused by _build_hop_matrix below.
+        """
+        import networkx as nx
+
+        from jacobik.topology.graph import build_heavy_ligand_graph
+
         _CHELATE_SHORT_MAX = 4  # ligand-graph bond hops; matches ik/scorer.py
         chelate_pairs_global: List[Tuple[int, int]] = []
+        heavy_graph = None
         try:
-            _heavy_graph = build_heavy_ligand_graph(mol.atoms, mol.bonds, mol.metal_idx)
+            heavy_graph = build_heavy_ligand_graph(mol.atoms, mol.bonds, mol.metal_idx)
             for _di in range(n_donors):
                 _li, _gi, _grp = all_donor_groups[_di]
                 _a0 = _grp[0]
-                if not _heavy_graph.has_node(_a0):
+                if not heavy_graph.has_node(_a0):
                     continue
                 for _dj in range(_di + 1, n_donors):
                     _lj, _gj, _grpj = all_donor_groups[_dj]
                     if _lj != _li:
                         continue  # chelate pairs only within the same ligand
                     _b0 = _grpj[0]
-                    if not _heavy_graph.has_node(_b0):
+                    if not heavy_graph.has_node(_b0):
                         continue
                     try:
-                        _hops = nx.shortest_path_length(_heavy_graph, _a0, _b0)
+                        _hops = nx.shortest_path_length(heavy_graph, _a0, _b0)
                     except nx.NetworkXNoPath:
                         continue
                     if _hops <= _CHELATE_SHORT_MAX:
@@ -1015,8 +1253,82 @@ class ComplexBuilder:
         except Exception as exc:
             log.warning("Chelate-pair detection failed (%s); skipping repair pass.", exc)
             chelate_pairs_global = []
+        return chelate_pairs_global, heavy_graph
 
-        # Determine assignment
+    def _build_hop_matrix(self, n_donors, all_donor_groups, heavy_graph):
+        """
+        Ligand-graph hop-distance matrix between donor atoms (sentinel -1
+        where no path exists), or None if the heavy-atom ligand graph
+        itself could not be built -- callers then treat all donor pairs
+        as reachability-unconstrained. Shared by _run_assignment_search
+        and _run_symmetry_enumeration (2026-09-17 refactor: previously
+        identical ~25-line construction duplicated verbatim in both, per
+        each site's own "keep the two in sync" comment).
+        """
+        import networkx as nx
+
+        if heavy_graph is None:
+            log.warning(
+                "Hop-matrix build skipped: heavy-atom ligand graph was not "
+                "available; treating all donor pairs as reachability-"
+                "unconstrained."
+            )
+            return None
+
+        hop_matrix_full: Optional[np.ndarray] = np.full((n_donors, n_donors), -1, dtype=int)
+        try:
+            for _hi in range(n_donors):
+                _ai = all_donor_groups[_hi][2][0]
+                if not heavy_graph.has_node(_ai):
+                    continue
+                for _hj in range(_hi + 1, n_donors):
+                    _aj = all_donor_groups[_hj][2][0]
+                    if not heavy_graph.has_node(_aj):
+                        continue
+                    try:
+                        _hops = nx.shortest_path_length(heavy_graph, _ai, _aj)
+                    except nx.NetworkXNoPath:
+                        continue
+                    hop_matrix_full[_hi, _hj] = _hops
+                    hop_matrix_full[_hj, _hi] = _hops
+        except Exception as exc:
+            log.warning(
+                "Full hop-matrix build failed (%s); treating all donor "
+                "pairs as reachability-unconstrained.",
+                exc,
+            )
+            hop_matrix_full = None
+        return hop_matrix_full
+
+    def _compute_baseline_assignment(
+        self, mol, ideal, all_donor_groups, n_donors, chelate_pairs_global
+    ):
+        """Step 3 (part 2): the baseline donor-to-site assignment --
+        fully explicit (caller-pinned every site), partially explicit
+        (Hungarian on the rest), or fully Hungarian."""
+        from jacobik.ik.targets import hungarian_assign
+
+        # donor_dirs/subclasses are cheap and assignment-scheme-independent
+        # (2026-09-17 refactor: previously computed only inside the
+        # Hungarian branch below; hoisted so both branches -- and 3a/3a'
+        # downstream, which only ever run in the non-fully-explicit case
+        # anyway -- can rely on them being present without an
+        # Optional/None special case).
+        atom_map = {a.idx: a for a in mol.atoms}
+        metal_pos = mol.atoms[0].position
+
+        donor_dirs = np.zeros((n_donors, 3), dtype=float)
+        for di, (li, gi, grp) in enumerate(all_donor_groups):
+            centroid = np.mean([atom_map[i].position for i in grp], axis=0)
+            vec = centroid - metal_pos
+            norm = np.linalg.norm(vec)
+            donor_dirs[di] = vec / norm if norm > 1e-8 else ideal[di % len(ideal)]
+
+        subclasses = []
+        for li, gi, grp in all_donor_groups:
+            lbl = mol.donor_labels.get(grp[0])
+            subclasses.append(lbl.subclass if lbl else "element_any")
+
         if all(lig_inp.sites is not None for lig_inp in self.ligands):
             # Fully explicit
             assignment = np.empty(n_donors, dtype=int)
@@ -1034,22 +1346,6 @@ class ComplexBuilder:
                     if lig_inp.sites is not None:
                         explicit_map[idx] = lig_inp.sites[gi]
                     idx += 1
-
-            # For donors without explicit sites, run Hungarian on remainder
-            atom_map = {a.idx: a for a in mol.atoms}
-            metal_pos = mol.atoms[0].position
-
-            donor_dirs = np.zeros((n_donors, 3), dtype=float)
-            for di, (li, gi, grp) in enumerate(all_donor_groups):
-                centroid = np.mean([atom_map[i].position for i in grp], axis=0)
-                vec = centroid - metal_pos
-                norm = np.linalg.norm(vec)
-                donor_dirs[di] = vec / norm if norm > 1e-8 else ideal[di % len(ideal)]
-
-            subclasses = []
-            for li, gi, grp in all_donor_groups:
-                lbl = mol.donor_labels.get(grp[0])
-                subclasses.append(lbl.subclass if lbl else "element_any")
 
             if explicit_map:
                 # Partial explicit: fix explicit ones, Hungarian on rest
@@ -1089,341 +1385,506 @@ class ComplexBuilder:
                     chelate_pairs=chelate_pairs_global,
                 )
 
-        log.info("Site assignment: %s", assignment.tolist())
+        return assignment, donor_dirs, subclasses
 
-        # ------------------------------------------------------------------
-        # 3a. Assignment search (2.13.0) -- OPTIONAL alternative donor-to-
-        #     site assignment candidates around the baseline Hungarian
-        #     solve above, via ik/assignment_search.py::
-        #     generate_candidate_assignments (written this session;
-        #     validated standalone in assignment_search_experiments.ipynb
-        #     section 7, but never called from solve() before now).
-        #
-        #     Off by default (use_assignment_search=False): today, exactly
-        #     ONE arbitrary initial ligand embedding feeds exactly one
-        #     Hungarian assignment, with no mechanism for the beam
-        #     search's later torsion/orientation diversification to ever
-        #     revisit it -- see the 2026-09 la_polyester diagnosis that
-        #     module's docstring cites.
-        #
-        #     When enabled: generate_candidate_assignments only proposes
-        #     extra candidates when the baseline is genuinely ambiguous
-        #     (find_suspect_donors flags >=2 donors); the common/clean
-        #     case (PtCl4, EDTA, CO/TBP, etc.) gets back exactly
-        #     [baseline] and pays zero extra solve cost, by construction.
-        #     When it DOES propose alternatives, each is run through the
-        #     full downstream pipeline (_solve_for_assignment, factored
-        #     out below so every candidate gets byte-identical treatment
-        #     to the pre-2.13.0 single-assignment path) and the candidate
-        #     whose best conformer scores highest against Jacobik's own
-        #     fitted Q1-Q6 objective is kept -- the role
-        #     assignment_search.py's docstring assigns to a downstream
-        #     "MLIP single-point energy screen"; Jacobik has no MLIP, so
-        #     its own scorer is the closest available stand-in for that
-        #     final arbitration.
-        #
-        #     Fully explicit (every site caller-pinned) assignments skip
-        #     this entirely -- nothing to search when nothing is free.
-        # ------------------------------------------------------------------
-        _assignment_candidates: List[np.ndarray] = [assignment]
-        _is_fully_explicit_assignment = all(
-            lig_inp.sites is not None for lig_inp in self.ligands
-        )
-        if use_assignment_search and not _is_fully_explicit_assignment:
-            from jacobik.ik.assignment_search import generate_candidate_assignments
+    def _symmetric_donor_groups(self, mol, rdmols, all_donor_groups):
+        """
+        Topologically-equivalent donor groups (2.3.0): RDKit canonical
+        ranking (breakTies=False) detects donor atoms related by a graph
+        automorphism of their own ligand's molecular graph. Two donors
+        are equivalent iff they share a SMILES string AND have the same
+        canonical rank within that SMILES's graph -- true both for
+        donors within one symmetric polydentate ligand (e.g. EDTA's two
+        amine N) and for donors across separate instances of a repeated
+        ligand (e.g. all 4 Cl- in PtCl4, or corresponding N atoms across
+        Co(en)3's three en ligands), since CanonicalRankAtoms is a pure
+        function of molecular-graph topology -- identical SMILES always
+        gives identical ranks. Multi-atom (haptic) donor groups are
+        skipped -- no single canonical rank to key on; excluding a donor
+        from every group only means it's treated as its own singleton
+        class elsewhere, always safe, just possibly under-deduplicated
+        for that donor.
 
-            _as_cfg = assignment_search or AssignmentSearchConfig()
+        Assignment-independent (depends only on ligand topology), so
+        this is computed exactly ONCE per solve() call and reused by
+        _run_assignment_search's Fix A dedup, _run_symmetry_enumeration's
+        donor_equivalence_groups, and _solve_for_assignments's own
+        symmetric_groups/q3_symmetric_groups restraint groups
+        (2026-09-17 refactor: previously identical RDKit ranking code was
+        duplicated in all three of those places -- up to 3x per solve()
+        call -- per each site's own "keep these in sync" comment).
+        """
+        try:
+            from rdkit import Chem
 
-            hop_matrix_full: Optional[np.ndarray] = np.full(
-                (n_donors, n_donors), -1, dtype=int
+            key_to_donors: Dict[Tuple[str, int], List[int]] = {}
+            rank_cache: Dict[int, list] = {}
+            for di, (li, gi, grp) in enumerate(all_donor_groups):
+                if len(grp) != 1:
+                    continue
+                if li not in rank_cache:
+                    rank_cache[li] = list(Chem.CanonicalRankAtoms(rdmols[li], breakTies=False))
+                offset = mol.ligands[li].atom_indices[0]
+                local_idx = grp[0] - offset
+                if local_idx < 0 or local_idx >= len(rank_cache[li]):
+                    continue
+                rank = rank_cache[li][local_idx]
+                smiles = self.ligands[li].smiles
+                key_to_donors.setdefault((smiles, rank), []).append(di)
+            return [v for v in key_to_donors.values() if len(v) >= 2]
+        except Exception as exc:
+            log.warning(
+                "Symmetric-donor-group detection failed (%s); proceeding "
+                "with no donor equivalence groups (may under-dedup / skip "
+                "the similarity restraint, never incorrectly over-dedup).",
+                exc,
             )
-            try:
-                for _hi in range(n_donors):
-                    _ai = all_donor_groups[_hi][2][0]
-                    if not _heavy_graph.has_node(_ai):
-                        continue
-                    for _hj in range(_hi + 1, n_donors):
-                        _aj = all_donor_groups[_hj][2][0]
-                        if not _heavy_graph.has_node(_aj):
-                            continue
-                        try:
-                            _hops = nx.shortest_path_length(_heavy_graph, _ai, _aj)
-                        except nx.NetworkXNoPath:
-                            continue
-                        hop_matrix_full[_hi, _hj] = _hops
-                        hop_matrix_full[_hj, _hi] = _hops
-            except Exception as exc:
-                log.warning(
-                    "Assignment search: full hop-matrix build failed (%s); "
-                    "treating all donor pairs as reachability-unconstrained.",
-                    exc,
+            return []
+
+    def _run_assignment_search(
+        self, ctx, assignment, donor_dirs, subclasses, assignment_search, debug
+    ):
+        """
+        3a. Assignment search (2.13.0) -- OPTIONAL alternative donor-to-
+        site assignment candidates around the baseline Hungarian solve,
+        via ik/assignment_search.py::generate_candidate_assignments.
+        Only called when the baseline assignment is not fully explicit
+        (nothing to search when every site is caller-pinned). See
+        solve()'s use_assignment_search parameter docstring for the full
+        rationale: generate_candidate_assignments only proposes extra
+        candidates when the baseline is genuinely ambiguous
+        (find_suspect_donors flags >=2 donors); the common/clean case
+        gets back exactly [baseline] and pays zero extra solve cost, by
+        construction. Every candidate that does survive gets solved
+        together, in the same batched call -- see _solve_for_assignments.
+        """
+        from jacobik.ik.assignment_search import generate_candidate_assignments
+
+        as_cfg = assignment_search or AssignmentSearchConfig()
+
+        hop_matrix_full = self._build_hop_matrix(
+            ctx.n_donors, ctx.all_donor_groups, ctx.heavy_graph
+        )
+
+        try:
+            _assignment_candidates = list(
+                generate_candidate_assignments(
+                    donor_dirs,
+                    ctx.ideal,
+                    donor_subclasses=subclasses,
+                    geometry_label=self.geometry,
+                    chelate_pairs=ctx.chelate_pairs_global,
+                    hop_matrix=hop_matrix_full,
+                    margin_deg=as_cfg.margin_deg,
+                    max_ambiguous_group=as_cfg.max_ambiguous_group,
+                    k_max=as_cfg.k_max,
                 )
-                hop_matrix_full = None
+            )
+        except Exception as exc:
+            log.warning(
+                "Assignment search failed (%s); falling back to the baseline assignment only.",
+                exc,
+            )
+            _assignment_candidates = [assignment]
 
-            try:
-                _assignment_candidates = list(
-                    generate_candidate_assignments(
-                        donor_dirs,
-                        ideal,
-                        donor_subclasses=subclasses,
-                        geometry_label=self.geometry,
-                        chelate_pairs=chelate_pairs_global,
-                        hop_matrix=hop_matrix_full,
-                        margin_deg=_as_cfg.margin_deg,
-                        max_ambiguous_group=_as_cfg.max_ambiguous_group,
-                        k_max=_as_cfg.k_max,
-                    )
+        # 2.14.0 Fix A: drop candidates that are pure relabelings of an
+        # already-kept candidate among chemically-identical donors (see
+        # the 2.14.0 changelog entry -- this is what made Fe(H2O)6 solve
+        # 4 physically-indistinguishable "candidates" at full cost each).
+        # ctx.symmetric_donor_groups is empty either when there genuinely
+        # are no symmetric donor groups, or when detecting them failed
+        # (see _symmetric_donor_groups) -- both cases correctly skip
+        # dedup and keep every generated candidate, matching this
+        # method's pre-refactor behaviour in both cases.
+        if len(_assignment_candidates) > 1 and ctx.symmetric_donor_groups:
+
+            def _is_trivial_relabeling(cand, base) -> bool:
+                grouped: set = set()
+                for g in ctx.symmetric_donor_groups:
+                    grouped.update(g)
+                    if sorted(int(cand[d]) for d in g) != sorted(int(base[d]) for d in g):
+                        return False
+                return all(
+                    int(cand[d]) == int(base[d]) for d in range(len(cand)) if d not in grouped
                 )
-            except Exception as exc:
-                log.warning(
-                    "Assignment search failed (%s); falling back to the "
-                    "baseline assignment only.",
-                    exc,
+
+            _deduped = [_assignment_candidates[0]]
+            for _cand_raw in _assignment_candidates[1:]:
+                if any(_is_trivial_relabeling(_cand_raw, _kept) for _kept in _deduped):
+                    continue
+                _deduped.append(_cand_raw)
+            if len(_deduped) < len(_assignment_candidates):
+                log.info(
+                    "Assignment search: dropped %d candidate(s) that were "
+                    "pure relabelings among chemically-identical donors "
+                    "(no physical difference); keeping %d distinct "
+                    "candidate(s).",
+                    len(_assignment_candidates) - len(_deduped),
+                    len(_deduped),
                 )
-                _assignment_candidates = [assignment]
+            _assignment_candidates = _deduped
 
-            # 2.14.0 Fix A: drop candidates that are pure relabelings of an
-            # already-kept candidate among chemically-identical donors (see
-            # the 2.14.0 changelog entry above -- this is what made
-            # Fe(H2O)6 solve 4 physically-indistinguishable "candidates" at
-            # full cost each). Reuses the same (SMILES, RDKit
-            # CanonicalRankAtoms) equivalence-class concept as
-            # symmetric_groups below.
-            if len(_assignment_candidates) > 1:
-                try:
-                    from rdkit import Chem as _ChemDedup
+        log.info(
+            "Assignment search: %d candidate assignment(s) (1 == unambiguous, baseline kept as-is)",
+            len(_assignment_candidates),
+        )
+        if debug:
+            print(f"\n[DEBUG] Assignment search: {len(_assignment_candidates)} candidate(s)")
+            for _ci_dbg, _cand_dbg in enumerate(_assignment_candidates):
+                _tag = "(baseline)" if _ci_dbg == 0 else f"(alt {_ci_dbg})"
+                print(f"  {_tag} {_cand_dbg.tolist()}")
 
-                    _dedup_groups: Dict[Tuple[str, int], List[int]] = {}
-                    _rank_cache_dedup: Dict[int, list] = {}
-                    for _di_d, (_li_d, _gi_d, _grp_d) in enumerate(all_donor_groups):
-                        if len(_grp_d) != 1:
-                            continue
-                        if _li_d not in _rank_cache_dedup:
-                            _rank_cache_dedup[_li_d] = list(
-                                _ChemDedup.CanonicalRankAtoms(rdmols[_li_d], breakTies=False)
-                            )
-                        _offset_d = mol.ligands[_li_d].atom_indices[0]
-                        _local_d = _grp_d[0] - _offset_d
-                        if _local_d < 0 or _local_d >= len(_rank_cache_dedup[_li_d]):
-                            continue
-                        _rank_d = _rank_cache_dedup[_li_d][_local_d]
-                        _smiles_d = self.ligands[_li_d].smiles
-                        _dedup_groups.setdefault((_smiles_d, _rank_d), []).append(_di_d)
-                    _dedup_groups_list = [v for v in _dedup_groups.values() if len(v) >= 2]
+        return _assignment_candidates
 
-                    def _is_trivial_relabeling(cand, base) -> bool:
-                        grouped: set = set()
-                        for g in _dedup_groups_list:
-                            grouped.update(g)
-                            if sorted(int(cand[d]) for d in g) != sorted(int(base[d]) for d in g):
-                                return False
-                        return all(
-                            int(cand[d]) == int(base[d])
-                            for d in range(len(cand))
-                            if d not in grouped
-                        )
+    def _run_symmetry_enumeration(self, ctx, assignment, site_enumeration_config, debug):
+        """
+        3a'. Symmetry enumeration (phase 3, 2026-09-17) -- OPTIONAL
+        PROACTIVE alternative to _run_assignment_search, via
+        ik/site_enumeration.py::enumerate_unique_assignments. Feeds the
+        same candidate-list mechanism _run_assignment_search does, so
+        everything downstream (dedup already baked into
+        enumerate_unique_assignments's dedup_combined, then the batched
+        _solve_for_assignments) is reused completely unchanged -- see
+        ik/site_enumeration.py's module docstring, "Proposed
+        architecture" piece 4. Only called when use_symmetry_enumeration
+        is True and the baseline assignment is not fully explicit; see
+        solve()'s use_symmetry_enumeration parameter docstring for the
+        full rationale and its two known limitations. Internally falls
+        back to [assignment] (with an explanatory log message) when the
+        geometry has no fixed IDEAL_GEOMETRIES entry, when n_donors !=
+        the geometry's n_sites, or when enumeration itself finds zero
+        reachable candidates.
+        """
+        from jacobik.ik.targets import IDEAL_GEOMETRIES
 
-                    if _dedup_groups_list:
-                        _deduped = [_assignment_candidates[0]]
-                        for _cand_raw in _assignment_candidates[1:]:
-                            if any(
-                                _is_trivial_relabeling(_cand_raw, _kept)
-                                for _kept in _deduped
-                            ):
-                                continue
-                            _deduped.append(_cand_raw)
-                        if len(_deduped) < len(_assignment_candidates):
-                            log.info(
-                                "Assignment search: dropped %d candidate(s) that were "
-                                "pure relabelings among chemically-identical donors "
-                                "(no physical difference); keeping %d distinct "
-                                "candidate(s).",
-                                len(_assignment_candidates) - len(_deduped),
-                                len(_deduped),
-                            )
-                        _assignment_candidates = _deduped
-                except Exception as exc:
-                    log.warning(
-                        "Assignment search: symmetric-donor dedup failed (%s); "
-                        "keeping all %d generated candidates.",
-                        exc, len(_assignment_candidates),
-                    )
-
+        if self.geometry not in IDEAL_GEOMETRIES:
             log.info(
-                "Assignment search: %d candidate assignment(s) (1 == "
-                "unambiguous, baseline kept as-is)",
+                "Symmetry enumeration requested but geometry %r has no "
+                "fixed IDEAL_GEOMETRIES entry (e.g. 'other') -- "
+                "site_symmetry_group has nothing to compute against; "
+                "falling back to the baseline assignment only.",
+                self.geometry,
+            )
+            return [assignment]
+        if ctx.n_donors != len(ctx.ideal):
+            log.info(
+                "Symmetry enumeration requested but n_donors (%d) != "
+                "geometry %r's n_sites (%d) -- enumerate_unique_assignments "
+                "only handles fully-saturated complexes; falling back to "
+                "the baseline assignment only.",
+                ctx.n_donors,
+                self.geometry,
+                len(ctx.ideal),
+            )
+            return [assignment]
+
+        from jacobik.ik.site_enumeration import enumerate_unique_assignments
+
+        se_cfg = site_enumeration_config or SiteEnumerationConfig()
+        hop_matrix_full = self._build_hop_matrix(
+            ctx.n_donors, ctx.all_donor_groups, ctx.heavy_graph
+        )
+
+        try:
+            se_result = enumerate_unique_assignments(
+                ctx.n_donors,
+                self.geometry,
+                hop_matrix_full,
+                donor_equivalence_groups=ctx.symmetric_donor_groups,
+                config=se_cfg,
+            )
+        except Exception as exc:
+            log.warning(
+                "Symmetry enumeration failed (%s); falling back to the baseline assignment only.",
+                exc,
+            )
+            return [assignment]
+
+        if not se_result.assignments:
+            # n_raw == 0: the reachability model made every complete
+            # bijection unreachable (see use_symmetry_enumeration's
+            # parameter docstring, limitation 1, and
+            # ik/site_enumeration.py's "Findings from standalone
+            # validation against EDTA" -- this is a known, documented
+            # limitation, not a bug in this call site) -- fall back
+            # rather than proceeding with zero candidates.
+            log.warning(
+                "Symmetry enumeration returned zero candidates (the "
+                "reachability model made every complete assignment "
+                "unreachable -- see ik/site_enumeration.py's module "
+                "docstring, 'Findings from standalone validation against "
+                "EDTA', finding 1); falling back to the baseline "
+                "assignment only."
+            )
+            return [assignment]
+
+        _assignment_candidates = list(se_result.assignments)
+        if se_result.truncated or se_result.dedup_truncated:
+            log.warning(
+                "Symmetry enumeration hit its safety budget (raw search "
+                "truncated=%s, dedup truncated=%s) -- the %d candidate(s) "
+                "found are all genuinely valid, but the true symmetry-"
+                "unique set may be incomplete. See site_enumeration_config "
+                "to raise max_candidates / time_budget_s.",
+                se_result.truncated,
+                se_result.dedup_truncated,
                 len(_assignment_candidates),
             )
-            if debug:
-                print(
-                    f"\n[DEBUG] Assignment search: "
-                    f"{len(_assignment_candidates)} candidate(s)"
-                )
-                for _ci_dbg, _cand_dbg in enumerate(_assignment_candidates):
-                    _tag = "(baseline)" if _ci_dbg == 0 else f"(alt {_ci_dbg})"
-                    print(f"  {_tag} {_cand_dbg.tolist()}")
+        log.info(
+            "Symmetry enumeration: %d candidate assignment(s) (n_raw=%d before dedup)",
+            len(_assignment_candidates),
+            se_result.n_raw,
+        )
+        if debug:
+            print(f"\n[DEBUG] Symmetry enumeration: {len(_assignment_candidates)} candidate(s)")
+            for _ci_dbg, _cand_dbg in enumerate(_assignment_candidates):
+                _tag = "(baseline)" if _ci_dbg == 0 else f"(alt {_ci_dbg})"
+                print(f"  {_tag} {_cand_dbg.tolist()}")
 
-        # ------------------------------------------------------------------
-        # 3b-6. Factored into _solve_for_assignment (2.13.0): everything
-        #       from here to the final EnsembleResult assembly, unchanged
-        #       from the pre-2.13.0 single-assignment path, just wrapped so
-        #       3a. above can call it once per candidate donor-to-site
-        #       assignment with byte-identical logic each time. Calling it
-        #       exactly once, with the baseline Hungarian/explicit
-        #       `assignment` computed above, is exactly what solve()
-        #       always did before this refactor -- nothing here changes
-        #       default (use_assignment_search=False) behaviour.
-        # ------------------------------------------------------------------
-        def _solve_for_assignment(
-            assignment: np.ndarray,
-            beam_width: int = beam_width,
-            n_ik_steps: int = n_ik_steps,
-        ) -> EnsembleResult:
-            """Runs steps 3b-6 for one fixed donor-to-site `assignment`
-            array and returns the resulting EnsembleResult. See the
-            2.13.0 changelog entry and the 3a. comment above."""
-            # ------------------------------------------------------------------
-            # 3b. Ideal polyhedron directions in global donor order (2.3.0) --
-            #     feeds JointIKSolver's per-step Augmented-Lagrangian shape
-            #     constraint (ik_solver.py 2.3.0). Replaces the old fixed
-            #     absolute-Cartesian-target anchor, whose target orientation
-            #     went stale as soon as the ligand's free rigid pose or
-            #     torsions moved away from the initial Kabsch fit -- see that
-            #     module's changelog for the full rationale.
-            # ------------------------------------------------------------------
-            ideal_directions_full = np.stack(
-                [ideal[assignment[di]] for di in range(n_donors)], axis=0
-            )  # (n_donors, 3) unit vectors, fixed for the whole solve
-            ideal_directions_full_t = torch.tensor(
-                ideal_directions_full, dtype=torch.float32, device=_device
+        return _assignment_candidates
+
+    def _solve_for_assignments(self, ctx, assignments, beam_width, n_ik_steps):
+        """
+        Runs steps 3b-6 for one OR MANY candidate donor-to-site
+        `assignments`, batched into a SINGLE JointIKSolver.solve() call
+        spanning B_total = len(assignments) * beam_width * n_coord_samples
+        trials, and returns one EnsembleResult whose conformers can come
+        from any of the candidate assignments, ranked together by score
+        (see ConformerResult.assignment_idx).
+
+        BATCHED CANDIDATE SCREENING (2026-09-17, replaces 2.13.0/2.14.0's
+        sequential design): _solve_for_assignment used to be called once
+        per candidate from a Python `for` loop in _resolve_candidates,
+        which first cheaply screened every candidate (small beam_width/
+        n_ik_steps) and then re-solved only the highest-scoring one at
+        full quality -- N sequential beam-search-plus-IK rounds for N
+        candidates, discarding N-1 of them after only a cheap look. That
+        was never actually required by anything in the beam-search/IK
+        machinery: a donor-to-site assignment only changes two things --
+        which coordination-sphere target each donor aims at (built here,
+        below, from the CHEAP per-candidate stats-lookup loop this method
+        keeps) and the `ideal_directions` polyhedron target
+        JointIKSolver aligns against. Everything else -- the ligands'
+        ForwardKinematics graphs, the shared Scorer/GeometryExtractor, the
+        donor symmetry/Q3 groups -- is assignment-independent, and
+        JointIKSolver.solve() was ALREADY a fully batch-item-independent
+        computation across its beam_width x n_coord_samples trial
+        dimension (no step anywhere aggregates across batch items -- see
+        ik_solver.py's per-item Procrustes rotation, shape-deviation, and
+        symmetry-tie math). So "which candidate assignment" is just
+        another trial axis to fold into that same batch, not a reason for
+        an outer sequential loop: this method builds ONE combined batch
+        (candidates are the slowest-varying axis, beam_width x
+        n_coord_samples nested inside each candidate's slice, exactly as
+        a single-assignment solve already nests coord-samples x beam
+        trials -- see _beam_search_all_candidates), solves it in one
+        JointIKSolver.solve() call at FULL (beam_width, n_ik_steps)
+        quality for every candidate, and lets the existing best-to-worst
+        ranking in _assemble_conformers naturally surface the best
+        conformers regardless of which candidate produced them. There is
+        no cheap-screening tier anymore (AssignmentSearchConfig's old
+        screen_beam_width/screen_n_ik_steps are gone) because the whole
+        point of screening -- avoiding N separate full-quality solves --
+        is moot once N candidates cost one batched solve instead of N
+        sequential ones. A single-assignment call (the common case) is
+        just this same code path with len(assignments) == 1.
+        """
+        symmetric_groups, q3_symmetric_groups = self._symmetric_and_q3_groups(ctx)
+        (
+            fks,
+            all_theta_inits,
+            all_donor_pos_idxs,
+            ge_joint,
+            scorer_joint,
+            X_full,
+            ideal_directions_batched,
+            candidate_idx_per_b,
+        ) = self._beam_search_all_candidates(ctx, assignments, beam_width)
+        beam_width_total = beam_width * len(assignments)
+        thetas_final, converged, scores, solve_trace = self._run_joint_ik(
+            ctx,
+            fks,
+            scorer_joint,
+            ge_joint,
+            X_full,
+            all_theta_inits,
+            all_donor_pos_idxs,
+            ideal_directions_batched,
+            symmetric_groups,
+            q3_symmetric_groups,
+            beam_width_total,
+            n_ik_steps,
+        )
+        conformers = self._assemble_conformers(
+            ctx,
+            ctx.mol,
+            fks,
+            X_full,
+            thetas_final,
+            scores,
+            converged,
+            beam_width_total,
+            candidate_idx_per_b,
+        )
+        result = EnsembleResult(conformers=conformers, solve_trace=solve_trace, scorer=scorer_joint)
+        if len(assignments) > 1:
+            result.assignment_search = dict(
+                n_candidates=len(assignments),
+                candidate_assignments=[a.tolist() for a in assignments],
             )
+        return result
 
-            # ------------------------------------------------------------------
-            # 3c. Topologically-equivalent donor groups (2.3.0) -- RDKit
-            #     canonical ranking (breakTies=False) detects donor atoms
-            #     related by a graph automorphism of their own ligand's
-            #     molecular graph. Two donors are equivalent iff they share a
-            #     SMILES string AND have the same canonical rank within that
-            #     SMILES's graph -- true both for donors within one symmetric
-            #     polydentate ligand (e.g. EDTA's two amine N) and for donors
-            #     across separate instances of a repeated ligand (e.g. all 4
-            #     Cl- in PtCl4, or corresponding N atoms across Co(en)3's three
-            #     en ligands), since CanonicalRankAtoms is a pure function of
-            #     molecular-graph topology -- identical SMILES always gives
-            #     identical ranks. Feeds a soft M-D-distance similarity
-            #     restraint (ik_solver.py 2.3.0, mirroring crystallography's
-            #     SIMU/SAME restraints) addressing the observed spurious
-            #     bond-length spread between donors that are chemically
-            #     indistinguishable (e.g. EDTA's ~0.15 A spread between its two
-            #     amine N atoms, or Co(en)3's inconsistent M-N lengths).
-            #     Multi-atom (haptic) donor groups are skipped -- rare and
-            #     untested for this restraint.
-            # ------------------------------------------------------------------
-            symmetric_groups: List[List[int]] = []
-            q3_symmetric_groups: List[List[int]] = []
-            try:
-                from rdkit import Chem as _Chem
+    def _ideal_directions(self, ctx, assignment):
+        """
+        3b. Ideal polyhedron directions in global donor order (2.3.0) --
+        feeds JointIKSolver's per-step Augmented-Lagrangian shape
+        constraint (ik_solver.py 2.3.0). Replaces the old fixed
+        absolute-Cartesian-target anchor, whose target orientation went
+        stale as soon as the ligand's free rigid pose or torsions moved
+        away from the initial Kabsch fit -- see that module's changelog
+        for the full rationale.
+        """
+        ideal_directions_full = np.stack(
+            [ctx.ideal[assignment[di]] for di in range(ctx.n_donors)], axis=0
+        )  # (n_donors, 3) unit vectors, fixed for the whole solve
+        return torch.tensor(ideal_directions_full, dtype=torch.float32, device=ctx.device)
 
-                _sym_key_to_donors: Dict[Tuple[str, int], List[int]] = {}
-                _rank_cache: Dict[int, list] = {}
-                _donor_ligand: Dict[int, int] = {}
-                for _di, (_li, _gi, _grp) in enumerate(all_donor_groups):
-                    if len(_grp) != 1:
-                        continue
-                    _donor_ligand[_di] = _li
-                    if _li not in _rank_cache:
-                        _rank_cache[_li] = list(
-                            _Chem.CanonicalRankAtoms(rdmols[_li], breakTies=False)
-                        )
-                    _offset = mol.ligands[_li].atom_indices[0]
-                    _local_idx = _grp[0] - _offset
-                    if _local_idx < 0 or _local_idx >= len(_rank_cache[_li]):
-                        continue
-                    _rank = _rank_cache[_li][_local_idx]
-                    _smiles = self.ligands[_li].smiles
-                    _sym_key_to_donors.setdefault((_smiles, _rank), []).append(_di)
-                symmetric_groups = [v for v in _sym_key_to_donors.values() if len(v) >= 2]
-                # BUGFIX (2.12.0): q3_symmetric_groups -- a within-single-ligand-
-                # instance restriction of symmetric_groups, used ONLY for the Q3
-                # approach-angle tie/mode-commit (sym_angle_weight, q3_mode_commit),
-                # NOT for the M-D bond-length tie (sym_weight), which keeps using
-                # the unrestricted symmetric_groups. Root cause this addresses:
-                # symmetric_groups groups donors purely by (SMILES, canonical rank),
-                # so N separate instances of the same repeated monodentate ligand
-                # (e.g. 6 independent water molecules on [M(H2O)6]) land in ONE
-                # group exactly like a single ligand's own internally-symmetric
-                # donor arms (e.g. EDTA's 4 carboxylate O, all within one ligand
-                # instance). For EDTA that grouping is correct: the four arms are
-                # mechanically coupled through one shared backbone, so a genuine
-                # "which mode do they jointly commit to" question exists, which is
-                # exactly what q3_mode_commit (2.5.0) was built to answer. For 6
-                # independent water ligands there is no such coupling -- nothing
-                # chemically requires separate, freely-rotating monodentate donors
-                # to share a single Q3 approach-angle mode, and the real fitted
-                # Q3:('O_water', metal, geometry) distribution is itself
-                # genuinely multi-modal (pooled over many different real crystal
-                # environments). Confirmed empirically (this session): committing
-                # all 6 waters of [Fe(H2O)6]3+ to one shared mode via the initial-
-                # pose argmax reliably locked onto a LOW-weight minority mode
-                # (~4% of the fitted mixture) purely because the (arbitrary,
-                # embedding-derived) initial pose happened to sit closest to it --
-                # producing a chemically nonsensical, wildly asymmetric M-O-H
-                # geometry (one H at ~68 deg from the metal, the other at ~172 deg,
-                # instead of the expected symmetric ~120/120) in every trial,
-                # despite a HIGHER solve score than the correct, symmetric
-                # geometry (q3_mode_commit=False on the same case gives clean
-                # ~126/126 deg M-O-H angles). This is very likely the same class
-                # of regression as the "fixed the CO/TBP donor-orientation
-                # straightness, then a later change regressed simple monodentate
-                # ligand orientation again" issue reported this session: 2.5.0
-                # (q3_mode_commit) was layered on top of the Q2/Q3 GMM-cos refit
-                # that made the CO/TBP fix work (2.4.0 changelog), specifically to
-                # fix EDTA's within-ligand carboxylate multi-modality -- it was
-                # never validated (see its own changelog) against a live solve of
-                # a simple repeated-monodentate case like water, CN-, or CO.
-                # Fix: restrict q3_mode_commit's (and the matching Q3 sym_angle_weight
-                # tie's) group membership to donors that share a single ligand
-                # INSTANCE, leaving cross-instance donors to each independently
-                # score against the full (correctly weighted) Q3 mixture instead
-                # of being hard-committed to one one arbitrarily-chosen mode.
-                # EDTA-style single-ligand multidentate cases are completely
-                # unaffected (all their donors already share one instance).
-                q3_symmetric_groups = [
-                    g for g in symmetric_groups
-                    if len({_donor_ligand[_d] for _d in g}) == 1
-                ]
-                if debug and symmetric_groups:
-                    print(f"\n[DEBUG]   Symmetric donor groups (2.3.0): {symmetric_groups}")
-                if debug and symmetric_groups != q3_symmetric_groups:
-                    print(
-                        f"\n[DEBUG]   Q3-eligible symmetric groups, within-ligand-"
-                        f"instance only (2.12.0): {q3_symmetric_groups}"
-                    )
-            except Exception as exc:
-                log.warning(
-                    "Symmetric-donor detection failed (%s); skipping similarity restraint.", exc
-                )
-                symmetric_groups = []
-                q3_symmetric_groups = []
+    def _symmetric_and_q3_groups(self, ctx):
+        """
+        3c. symmetric_groups/q3_symmetric_groups for the M-D bond-length
+        and Q3 approach-angle similarity restraints. symmetric_groups is
+        just ctx.symmetric_donor_groups (computed once per solve() call,
+        assignment-independent -- see _symmetric_donor_groups).
+        q3_symmetric_groups further restricts to donors that share a
+        single ligand INSTANCE.
 
-            # ------------------------------------------------------------------
-            # 4. Build coord-sphere targets (M samples per donor)
-            # ------------------------------------------------------------------
-            # targets_global : (n_donors, M, 3)  metal-centred
-            targets_global = np.zeros((n_donors, n_coord_samples, 3), dtype=float)
+        BUGFIX (2.12.0): q3_symmetric_groups is used ONLY for the Q3
+        approach-angle tie/mode-commit (sym_angle_weight, q3_mode_commit),
+        NOT for the M-D bond-length tie (sym_weight), which keeps using
+        the unrestricted symmetric_groups. Root cause this addresses:
+        symmetric_groups groups donors purely by (SMILES, canonical
+        rank), so N separate instances of the same repeated monodentate
+        ligand (e.g. 6 independent water molecules on [M(H2O)6]) land in
+        ONE group exactly like a single ligand's own internally-
+        symmetric donor arms (e.g. EDTA's 4 carboxylate O, all within one
+        ligand instance). For EDTA that grouping is correct: the four
+        arms are mechanically coupled through one shared backbone, so a
+        genuine "which mode do they jointly commit to" question exists,
+        which is exactly what q3_mode_commit (2.5.0) was built to
+        answer. For 6 independent water ligands there is no such
+        coupling -- nothing chemically requires separate, freely-
+        rotating monodentate donors to share a single Q3 approach-angle
+        mode, and the real fitted Q3:('O_water', metal, geometry)
+        distribution is itself genuinely multi-modal (pooled over many
+        different real crystal environments). Confirmed empirically:
+        committing all 6 waters of [Fe(H2O)6]3+ to one shared mode via
+        the initial-pose argmax reliably locked onto a LOW-weight
+        minority mode (~4% of the fitted mixture) purely because the
+        (arbitrary, embedding-derived) initial pose happened to sit
+        closest to it -- producing a chemically nonsensical, wildly
+        asymmetric M-O-H geometry (one H at ~68 deg from the metal, the
+        other at ~172 deg, instead of the expected symmetric ~120/120)
+        in every trial, despite a HIGHER solve score than the correct,
+        symmetric geometry (q3_mode_commit=False on the same case gives
+        clean ~126/126 deg M-O-H angles). Fix: restrict
+        q3_mode_commit's (and the matching Q3 sym_angle_weight tie's)
+        group membership to donors that share a single ligand INSTANCE,
+        leaving cross-instance donors to each independently score
+        against the full (correctly weighted) Q3 mixture instead of
+        being hard-committed to one arbitrarily-chosen mode. EDTA-style
+        single-ligand multidentate cases are completely unaffected (all
+        their donors already share one instance).
 
-            for di, (li, gi, grp) in enumerate(all_donor_groups):
+        (2026-09-17 refactor: RDKit ranking itself, and its own failure
+        handling, now live once in _symmetric_donor_groups -- this
+        method no longer needs its own try/except around that.)
+        """
+        symmetric_groups = ctx.symmetric_donor_groups
+        q3_symmetric_groups = [
+            g for g in symmetric_groups if len({ctx.all_donor_groups[d][0] for d in g}) == 1
+        ]
+        if ctx.debug and symmetric_groups:
+            print(f"\n[DEBUG]   Symmetric donor groups (2.3.0): {symmetric_groups}")
+        if ctx.debug and symmetric_groups != q3_symmetric_groups:
+            print(
+                f"\n[DEBUG]   Q3-eligible symmetric groups, within-ligand-"
+                f"instance only (2.12.0): {q3_symmetric_groups}"
+            )
+        return symmetric_groups, q3_symmetric_groups
+
+    def _beam_search_all_candidates(self, ctx, assignments, beam_width):
+        """
+        Steps 4 + 5a-5g, batched across every candidate donor-to-site
+        `assignments` at once (2026-09-17 -- replaces the old
+        _beam_search_all_ligands, called once per candidate from a
+        sequential loop; see _solve_for_assignments' "BATCHED CANDIDATE
+        SCREENING" docstring for the full rationale). A donor-to-site
+        assignment only changes two things: which coordination-sphere
+        target each donor aims at, and the ideal_directions polyhedron
+        JointIKSolver aligns against -- both built here PER CANDIDATE
+        (cheap: n_candidates x n_donors numpy/stats-lookup work, not
+        GPU-bound) and then tiled beam_width x n_coord_samples trials
+        inside each candidate's own slice of one combined batch, exactly
+        as a single-assignment solve already tiles n_coord_samples x
+        beam_width trials -- candidates are just the new, outermost axis.
+        FK, the shared GeometryExtractor/Scorer, and the W conformational
+        beam-search torsion seeds are assignment-independent and are
+        therefore each built ONCE and shared across every candidate's
+        slice (previously rebuilt once per candidate, purely as a side
+        effect of this method itself being called once per candidate --
+        not by design; sharing them removes that redundant work too, on
+        top of the IK solve batching itself). Torsion seeds being shared
+        across candidates means every candidate now explores the
+        IDENTICAL set of W conformational hypotheses (apples to apples),
+        rather than an arbitrary RNG-order-dependent set each; per-trial
+        orientation diversity is unaffected -- kabsch_init below still
+        injects an independent random rotation per batch row.
+
+        Returns everything _run_joint_ik needs to run ONE shared
+        JointIKSolver call over the full combined batch: the per-ligand
+        ForwardKinematics objects, their theta seeds/donor-position
+        indices, the shared GeometryExtractor/Scorer built on the full
+        complex, the flattened reference coordinates, the per-batch-item
+        ideal_directions tensor (see ik_solver.py's 2026-09-17 batched-
+        Procrustes change), and candidate_idx_per_b -- a (B_total,) int
+        array saying which candidate (index into `assignments`) each
+        batch row belongs to, for _assemble_conformers's assignment_idx
+        bookkeeping.
+        """
+        from jacobik.ik.beam import BeamSearch
+        from jacobik.ik.fk import ForwardKinematics
+        from jacobik.ik.geometry import GeometryExtractor
+        from jacobik.ik.ik_solver import kabsch_init
+        from jacobik.ik.scorer import Scorer
+        from jacobik.topology.decompose import decompose_ligand
+
+        mol = ctx.mol
+        debug = ctx.debug
+        n_candidates = len(assignments)
+
+        # ------------------------------------------------------------------
+        # 4. Build coord-sphere targets + ideal_directions PER CANDIDATE
+        #    (cheap CPU/numpy stats-lookup work -- see this method's
+        #    docstring for why this loop being O(n_candidates) is fine).
+        # ------------------------------------------------------------------
+        targets_global_per_cand: List[np.ndarray] = []  # each: (n_donors, M, 3)
+        ideal_directions_per_cand: List[torch.Tensor] = []  # each: (n_donors, 3)
+
+        for assignment in assignments:
+            targets_global = np.zeros((ctx.n_donors, ctx.n_coord_samples, 3), dtype=float)
+
+            for di, (li, gi, grp) in enumerate(ctx.all_donor_groups):
                 lbl = mol.donor_labels.get(grp[0])
                 subclass = lbl.subclass if lbl else "element_any"
                 family = lbl.family if lbl else "element_any"
-                site_vec = ideal[assignment[di]]  # (3,) unit vector
+                site_vec = ctx.ideal[assignment[di]]  # (3,) unit vector
 
                 # Trans partner
                 trans_p = "none"
-                for dj, (lj, gj, grpj) in enumerate(all_donor_groups):
+                for dj, (lj, gj, grpj) in enumerate(ctx.all_donor_groups):
                     if dj == di:
                         continue
-                    dot = float(np.dot(site_vec, ideal[assignment[dj]]))
+                    dot = float(np.dot(site_vec, ctx.ideal[assignment[dj]]))
                     if dot < -0.7:
                         lblj = mol.donor_labels.get(grpj[0])
                         trans_p = lblj.subclass if lblj else "element_any"
@@ -1439,15 +1900,18 @@ class ComplexBuilder:
                 )
                 # See exp.md for detailed rationale
                 sampled_dists = _q1_sample_distances(
-                    stats,
+                    ctx.stats,
                     q1_key,
                     family,
-                    n_coord_samples,
-                    np_rng,
+                    ctx.n_coord_samples,
+                    ctx.np_rng,
                 )  # (M,)
                 targets_global[di] = site_vec[None, :] * sampled_dists[:, None]
 
-                if debug:
+                # Per-donor debug printout only for the common single-
+                # candidate case -- n_candidates x n_donors of this would
+                # be unreadable for a real multi-candidate run.
+                if debug and n_candidates == 1:
                     print(f"\n[DEBUG] ── Donor {di} (lig={li} grp={gi}) ──────────────")
                     print(f"  subclass={subclass!r}  family={family!r}  trans_partner={trans_p!r}")
                     print(f"  Q1 key   : {q1_key}")
@@ -1455,7 +1919,7 @@ class ComplexBuilder:
                         f"  sampled M-D lengths: mean={float(np.mean(sampled_dists)):.4f} "
                         f"min={float(np.min(sampled_dists)):.4f} "
                         f"max={float(np.max(sampled_dists)):.4f} Å "
-                        f"(M={n_coord_samples})"
+                        f"(M={ctx.n_coord_samples})"
                     )
                     print(f"  site_vec : {site_vec}")
                     print(
@@ -1463,417 +1927,474 @@ class ComplexBuilder:
                         f"(norm={np.linalg.norm(targets_global[di][0]):.4f} Å)"
                     )
 
-            # See exp.md for detailed rationale
+            targets_global_per_cand.append(targets_global)
+            ideal_directions_per_cand.append(self._ideal_directions(ctx, assignment))
 
-            from jacobik.ik.ik_solver import IKSolverConfig, JointIKSolver
-
-            # See exp.md for detailed rationale
-            for lig_obj in mol.ligands:
-                decompose_ligand(mol, lig_obj)
-
-            # Build the shared GE and scorer once on the full complex.
-            # quantity_weights are baked into Scorer at construction time —
-            # no per-step overhead during the solve loop.
-            ge_joint = GeometryExtractor(mol, _device)
-            scorer_joint = Scorer(
-                mol, ge_joint, stats, device=_device, quantity_weights=quantity_weights,
-                q2_aggregation=q2_aggregation, q2_power_p=q2_power_p,
+        if debug and n_candidates > 1:
+            print(
+                f"\n[DEBUG] Built coordination-sphere targets for "
+                f"{n_candidates} candidate assignments."
             )
 
-            X_full = torch.tensor(
-                np.stack([a.position for a in mol.atoms]),
-                dtype=torch.float32,
-                device=_device,
-            )  # (N_total, 3)
+        # See exp.md for detailed rationale
+        for lig_obj in mol.ligands:
+            decompose_ligand(mol, lig_obj)
 
-            W = beam_width
-            M = n_coord_samples
-            B = M * W
+        # Build the shared GE and scorer once on the full complex --
+        # assignment-independent, so shared across every candidate.
+        # quantity_weights are baked into Scorer at construction time —
+        # no per-step overhead during the solve loop.
+        ge_joint = GeometryExtractor(mol, ctx.device)
+        scorer_joint = Scorer(
+            mol,
+            ge_joint,
+            ctx.stats,
+            device=ctx.device,
+            quantity_weights=ctx.quantity_weights,
+            q2_aggregation=ctx.q2_aggregation,
+            q2_power_p=ctx.q2_power_p,
+        )
 
-            fks: List = []
-            all_theta_inits: List[torch.Tensor] = []
-            all_donor_pos_idxs: List[torch.Tensor] = []
-            all_lig_di: List[List[int]] = []
-            _fk_n_joints: List[int] = []  # cache: n_joints per ligand, built incrementally
+        X_full = torch.tensor(
+            np.stack([a.position for a in mol.atoms]),
+            dtype=torch.float32,
+            device=ctx.device,
+        )  # (N_total, 3)
 
-            for li, (lig_inp, lig_obj) in enumerate(zip(self.ligands, mol.ligands)):
-                log.info("Ligand %d/%d: FK + beam search...", li + 1, len(self.ligands))
+        W = beam_width
+        M = ctx.n_coord_samples
+        B_per_cand = M * W
+        B = B_per_cand * n_candidates
 
-                # 5a. FK for this ligand (decomposition already done above, before
-                #     ge_joint/scorer_joint were constructed)
-                fk = ForwardKinematics(mol, lig_obj, _device, enable_bend_dof=enable_bend_dof)
-                fks.append(fk)
-                # 2.11.0: cache n_joints_base (not the possibly bend-inflated
-                # n_joints) -- this feeds the Q5 offset/slicing below, and Q5
-                # has no data for bend joints (see fk.py 2.4.0 / beam.py 2.1.0).
-                _fk_n_joints.append(fk.n_joints_base)
+        # (B,): which candidate each batch row belongs to -- candidates
+        # are the slowest-varying axis, exactly like M is slower than W
+        # within one candidate's own B_per_cand-sized slice below.
+        candidate_idx_per_b = np.repeat(np.arange(n_candidates), B_per_cand)
 
-                if debug:
-                    print(f"\n[DEBUG] ── Ligand {li} ─────────────────────────────────")
-                    print(f"  SMILES       : {lig_inp.smiles}")
-                    print(f"  J (joints)   : {fk.n_joints}")
-                    print(f"  n_donors(GE) : {ge_joint.n_donors}")
-                    _X_smoke = X_full.unsqueeze(0)
-                    try:
-                        _s_smoke, _bd_smoke = scorer_joint.score(_X_smoke)
-                        print(
-                            f"  scorer smoke : score={_s_smoke[0].item():.4f}  "
-                            f"nan={torch.isnan(_s_smoke).any().item()}"
-                        )
-                    except Exception as _e:
-                        print(f"  scorer smoke : EXCEPTION → {_e}")
+        ideal_directions_batched = torch.cat(
+            [d.unsqueeze(0).expand(B_per_cand, -1, -1) for d in ideal_directions_per_cand],
+            dim=0,
+        )  # (B, n_donors, 3)
 
-                # 5b. Donor targets for this ligand
-                lig_di = [di for di, (l, g, grp) in enumerate(all_donor_groups) if l == li]
-                n_d_lig = len(lig_di)
-                all_lig_di.append(lig_di)
+        fks: List = []
+        all_theta_inits: List[torch.Tensor] = []
+        all_donor_pos_idxs: List[torch.Tensor] = []
+        all_lig_di: List[List[int]] = []
+        _fk_n_joints: List[int] = []  # cache: n_joints per ligand, built incrementally
 
-                if n_d_lig == 0:
-                    log.warning("Ligand %d has no donor groups — using zero theta", li)
-                    J_full = fk.n_joints  # full count incl. any bend joints
-                    all_theta_inits.append(torch.zeros(B, 6 + J_full, device=_device))
-                    all_donor_pos_idxs.append(torch.zeros(1, dtype=torch.long, device=_device))
-                    continue
-
-                donor_targets_np = np.stack(
-                    [targets_global[di] for di in lig_di], axis=1
-                )  # (M, n_d_lig, 3)
-
-                if debug:
-                    print(f"  n_d_lig={n_d_lig}  lig_di={lig_di}")
-                    print(f"  donor_targets_np shape : {donor_targets_np.shape}")
-                    print(
-                        "  target norms (sample 0): "
-                        + "  ".join(
-                            f"{np.linalg.norm(donor_targets_np[0, d]):.3f} Å" for d in range(n_d_lig)
-                        )
-                    )
-
-                # See exp.md for detailed rationale
-                # 2.11.0: J is pinned to n_joints_base for Q5 sizing/offsets
-                # (see fk.py 2.4.0 / beam.py 2.1.0 changelogs) -- bend joints
-                # have no Q5 data and are handled separately below via J_full.
-                J = fk.n_joints_base
-                J_full = fk.n_joints
-                log.info(
-                    "  Ligand %d: J=%d joints (%d bend), beam_width=%d",
-                    li, J_full, J_full - J, beam_width,
-                )
-                ge_li = GeometryExtractor(mol, _device)
-                scorer_li = Scorer(
-                    mol, ge_li, stats, device=_device, quantity_weights=quantity_weights,
-                    q2_aggregation=q2_aggregation, q2_power_p=q2_power_p,
-                )
-                # ge_li sees the same complex but its _q5_keys covers all ligands;
-                # BeamSearch needs only this ligand's joints in rows 0..J-1.
-                # Compute the joint offset: sum of n_joints for ligands 0..li-1.
-                _joint_offset = sum(_fk_n_joints[:li])  # O(1): cached from FK build loop
-                _q5_m = scorer_li._q5_means[_joint_offset : _joint_offset + J]  # (J, K)
-                _q5_k = scorer_li._q5_kappas[_joint_offset : _joint_offset + J]
-                _q5_w = scorer_li._q5_weights[_joint_offset : _joint_offset + J]
-                beam = BeamSearch(fk, beam_width=beam_width, device=_device)
-                beam_torsions, _ = beam.search(
-                    X_ref=X_full,
-                    base_theta=torch.zeros(1, 6, device=_device),
-                    q5_means=_q5_m,
-                    q5_kappas=_q5_k,
-                    q5_weights=_q5_w,
-                    q6_mu=scorer_li._q6_mu,
-                    q6_sigma=scorer_li._q6_sigma,
-                    q6_pairs=getattr(ge_li, "_q6_idx_pairs", None),
-                )  # (W, J)
-
-                if debug:
-                    print(f"\n[DEBUG]   Beam search → shape={tuple(beam_torsions.shape)}")
-                    if J > 0:
-                        print(
-                            f"  torsion range : [{beam_torsions.min().item():.3f}, "
-                            f"{beam_torsions.max().item():.3f}] rad"
-                        )
-
-                # 5e. Tile M × W → B parallel seeds
-                donor_targets_torch = (
-                    torch.tensor(
-                        donor_targets_np,
-                        dtype=torch.float32,
-                        device=_device,
-                    )
-                    .unsqueeze(1)
-                    .expand(M, W, n_d_lig, 3)
-                    .reshape(B, n_d_lig, 3)
-                )
-
-                beam_torsions_B = beam_torsions.unsqueeze(0).expand(M, W, J).reshape(B, J)
-
-                # Append the bend joints (fk.py), which beam search never
-                # touches (no Q5 statistics for them). Seed each at its own
-                # current-conformer dihedral (zero delta -- exact no-op at
-                # t=0), then randomise per beam trial so different trials
-                # explore different local pyramidal configurations at
-                # branch-point donors, mirroring how the base orientation
-                # is diversified below. Left entirely to gradient descent
-                # from there.
-                n_bend = J_full - J
-                if n_bend > 0:
-                    bend_seed = fk.bend_seed_angles(X_full)  # (n_bend,)
-                    bend_seed_B = bend_seed.unsqueeze(0).expand(B, n_bend).clone()
-                    noise = (torch.rand(B, n_bend, device=_device) - 0.5) * 2.0 * math.pi
-                    bend_seed_B = bend_seed_B + noise
-                    beam_torsions_B = torch.cat([beam_torsions_B, bend_seed_B], dim=-1)  # (B, J_full)
-
-                if debug:
-                    print(f"  bend joints  : {n_bend}")
-
-                # 5f. Donor position indices (indices into GE's global donor list)
-                # We pass the group indices (lig_di) directly instead of atom indices,
-                # so the solver can correctly fetch centroids for haptic groups.
-                donor_pos_idx_t = torch.tensor(lig_di, dtype=torch.long, device=_device)
-
-                if debug:
-                    print(f"  donor_pos_idx  : {lig_di}")
-                    _actual_all = ge_joint.donor_positions(X_full.unsqueeze(0))[0].cpu().numpy()
-                    _actual = _actual_all[lig_di]
-                    for _d, (_act, _tgt) in enumerate(zip(_actual, donor_targets_np[0])):
-                        print(
-                            f"    donor[{_d}] current={np.array2string(_act, precision=3)}  "
-                            f"target={np.array2string(_tgt, precision=3)}  "
-                            f"dist={np.linalg.norm(_act - _tgt):.3f} Å"
-                        )
-
-                # 5g. Kabsch init (per-ligand)
-                base_theta = kabsch_init(
-                    ge=ge_joint,
-                    X_ref=X_full,
-                    donor_targets=donor_targets_torch,
-                    donor_pos_idx=donor_pos_idx_t,
-                    diversify_orientation=True,
-                    diversity_scale=1.0,
-                )  # (B, 6)
-                theta_init = torch.cat([base_theta, beam_torsions_B], dim=-1)  # (B, 6+J)
-
-                if debug:
-                    print(
-                        f"\n[DEBUG]   Kabsch init → shape={tuple(theta_init.shape)}"
-                        f"  nan={torch.isnan(theta_init).any().item()}"
-                    )
-                    print(
-                        f"  translation norm: min={base_theta[:, :3].norm(dim=-1).min():.3f}"
-                        f"  max={base_theta[:, :3].norm(dim=-1).max():.3f} Å"
-                    )
-
-                all_theta_inits.append(theta_init)
-                all_donor_pos_idxs.append(donor_pos_idx_t)
-
-            # ------------------------------------------------------------------
-            # 5h. Joint IK solve — all ligands optimised simultaneously
-            # ------------------------------------------------------------------
-            log.info("Running joint IK: %d ligands × B=%d × T=%d steps", len(fks), B, n_ik_steps)
-
-            # n_ik_steps/lr are the two solve()-level knobs everyone actually
-            # tunes per-call; everything else comes from ik_config.
-            _resolved_ik_config = replace(ik_config or IKSolverConfig(), n_steps=n_ik_steps, lr=lr)
-            joint_solver = JointIKSolver(
-                fks=fks,
-                scorer=scorer_joint,
-                ge=ge_joint,
-                config=_resolved_ik_config,
-                device=_device,
+        for li, (lig_inp, lig_obj) in enumerate(zip(self.ligands, mol.ligands)):
+            log.info(
+                "Ligand %d/%d: FK + beam search (%d candidate assignment(s))...",
+                li + 1,
+                len(self.ligands),
+                n_candidates,
             )
-            thetas_final, converged, scores, solve_trace = joint_solver.solve(
-                theta_inits=all_theta_inits,
-                X_ref=X_full,
-                donor_pos_idxs=all_donor_pos_idxs,
-                ideal_directions=ideal_directions_full_t,
-                debug=debug,
-                symmetric_groups=symmetric_groups,
-                q3_symmetric_groups=q3_symmetric_groups,
-                q3_mode_commit=q3_mode_commit,
+
+            # 5a. FK for this ligand (decomposition already done above, before
+            #     ge_joint/scorer_joint were constructed)
+            fk = ForwardKinematics(mol, lig_obj, ctx.device, enable_bend_dof=ctx.enable_bend_dof)
+            fks.append(fk)
+            # 2.11.0: cache n_joints_base (not the possibly bend-inflated
+            # n_joints) -- this feeds the Q5 offset/slicing below, and Q5
+            # has no data for bend joints (see fk.py 2.4.0 / beam.py 2.1.0).
+            _fk_n_joints.append(fk.n_joints_base)
+
+            if debug:
+                print(f"\n[DEBUG] ── Ligand {li} ─────────────────────────────────")
+                print(f"  SMILES       : {lig_inp.smiles}")
+                print(f"  J (joints)   : {fk.n_joints}")
+                print(f"  n_donors(GE) : {ge_joint.n_donors}")
+                _X_smoke = X_full.unsqueeze(0)
+                try:
+                    _s_smoke, _bd_smoke = scorer_joint.score(_X_smoke)
+                    print(
+                        f"  scorer smoke : score={_s_smoke[0].item():.4f}  "
+                        f"nan={torch.isnan(_s_smoke).any().item()}"
+                    )
+                except Exception as _e:
+                    print(f"  scorer smoke : EXCEPTION → {_e}")
+
+            # 5b. Donor targets for this ligand, across ALL candidates
+            lig_di = [di for di, (l, g, grp) in enumerate(ctx.all_donor_groups) if l == li]
+            n_d_lig = len(lig_di)
+            all_lig_di.append(lig_di)
+
+            if n_d_lig == 0:
+                log.warning("Ligand %d has no donor groups — using zero theta", li)
+                J_full = fk.n_joints  # full count incl. any bend joints
+                all_theta_inits.append(torch.zeros(B, 6 + J_full, device=ctx.device))
+                all_donor_pos_idxs.append(torch.zeros(1, dtype=torch.long, device=ctx.device))
+                continue
+
+            # (n_candidates, M, n_d_lig, 3)
+            donor_targets_np = np.stack(
+                [
+                    np.stack([targets_global[di] for di in lig_di], axis=1)
+                    for targets_global in targets_global_per_cand
+                ],
+                axis=0,
             )
 
             if debug:
-                n_conv = int(converged.sum().item())
+                print(f"  n_d_lig={n_d_lig}  lig_di={lig_di}")
                 print(
-                    f"\n[DEBUG] Joint IK done: {n_conv}/{B} converged"
-                    f"  score min={scores.min().item():.4f}"
-                    f"  max={scores.max().item():.4f}"
+                    "  donor_targets_np shape (n_candidates, M, n_d_lig, 3): "
+                    f"{donor_targets_np.shape}"
+                )
+                print(
+                    "  target norms (candidate 0, sample 0): "
+                    + "  ".join(
+                        f"{np.linalg.norm(donor_targets_np[0, 0, d]):.3f} Å" for d in range(n_d_lig)
+                    )
                 )
 
-                # See exp.md for detailed rationale
-                _scores_sorted_idx = np.argsort(-scores.cpu().numpy())
-                print(f"\n[DEBUG] ── All {B} raw IK trials (sorted by score) ──────────────")
-                print(f"  {'trial':>6}  {'score':>12}  {'converged':>9}")
-                for b in _scores_sorted_idx.tolist():
+            # See exp.md for detailed rationale
+            # 2.11.0: J is pinned to n_joints_base for Q5 sizing/offsets
+            # (see fk.py 2.4.0 / beam.py 2.1.0 changelogs) -- bend joints
+            # have no Q5 data and are handled separately below via J_full.
+            J = fk.n_joints_base
+            J_full = fk.n_joints
+            log.info(
+                "  Ligand %d: J=%d joints (%d bend), beam_width=%d",
+                li,
+                J_full,
+                J_full - J,
+                beam_width,
+            )
+            ge_li = GeometryExtractor(mol, ctx.device)
+            scorer_li = Scorer(
+                mol,
+                ge_li,
+                ctx.stats,
+                device=ctx.device,
+                quantity_weights=ctx.quantity_weights,
+                q2_aggregation=ctx.q2_aggregation,
+                q2_power_p=ctx.q2_power_p,
+            )
+            # ge_li sees the same complex but its _q5_keys covers all ligands;
+            # BeamSearch needs only this ligand's joints in rows 0..J-1.
+            # Compute the joint offset: sum of n_joints for ligands 0..li-1.
+            _joint_offset = sum(_fk_n_joints[:li])  # O(1): cached from FK build loop
+            _q5_m = scorer_li._q5_means[_joint_offset : _joint_offset + J]  # (J, K)
+            _q5_k = scorer_li._q5_kappas[_joint_offset : _joint_offset + J]
+            _q5_w = scorer_li._q5_weights[_joint_offset : _joint_offset + J]
+            beam = BeamSearch(fk, beam_width=beam_width, device=ctx.device)
+            # Computed ONCE, shared across every candidate's slice of the
+            # batch (see this method's docstring) -- not redrawn per
+            # candidate.
+            beam_torsions, _ = beam.search(
+                X_ref=X_full,
+                base_theta=torch.zeros(1, 6, device=ctx.device),
+                q5_means=_q5_m,
+                q5_kappas=_q5_k,
+                q5_weights=_q5_w,
+                q6_mu=scorer_li._q6_mu,
+                q6_sigma=scorer_li._q6_sigma,
+                q6_pairs=getattr(ge_li, "_q6_idx_pairs", None),
+            )  # (W, J)
+
+            if debug:
+                print(f"\n[DEBUG]   Beam search → shape={tuple(beam_torsions.shape)}")
+                if J > 0:
                     print(
-                        f"  {b:>6}  {scores[b].item():>12.4f}  "
-                        f"{'yes' if converged[b].item() else 'no':>9}"
+                        f"  torsion range : [{beam_torsions.min().item():.3f}, "
+                        f"{beam_torsions.max().item():.3f}] rad"
                     )
 
-            # ------------------------------------------------------------------
-            # 6. Assemble full complexes from joint results
-            # ------------------------------------------------------------------
-            _n_conformers = n_conformers if n_conformers is not None else max(beam_width, n_coord_samples)
-            conformers: List[ConformerResult] = []
-
-            score_np = scores.cpu().numpy()
-            sorted_b = np.argsort(-score_np)
-
-            for ci, b in enumerate(sorted_b[:_n_conformers]):
-                mol_copy = _shallow_copy_mol_for_conformer(mol)
-
-                X_assembled = X_full.unsqueeze(0)  # (1, N, 3)
-                for li, fk_li in enumerate(fks):
-                    theta_b = thetas_final[li][b : b + 1]  # (1, 6+Ji)
-                    with torch.no_grad():
-                        X_assembled = fk_li.apply(theta_b, X_assembled)  # (1, N, 3)
-
-                X_np = X_assembled[0].cpu().numpy()
-                for atom_pos_idx, atom in enumerate(mol_copy.atoms):
-                    atom.position = X_np[atom_pos_idx].copy()
-
-                # See exp.md for detailed rationale
-                _refresh_coord_geometry(mol_copy)
-
-                conformers.append(
-                    ConformerResult(
-                        complex=mol_copy,
-                        score=float(score_np[b]),
-                        converged=bool(converged[b].item()),
-                        rank=ci + 1,
-                        trial_idx=int(b),
-                    )
+            # 5e. Tile n_candidates × M × W → B parallel seeds
+            donor_targets_torch = (
+                torch.tensor(
+                    donor_targets_np,
+                    dtype=torch.float32,
+                    device=ctx.device,
                 )
-
-            # Sort and re-rank
-            conformers.sort(key=lambda c: c.score, reverse=True)
-            for i, c in enumerate(conformers):
-                c.rank = i + 1
-
-            n_conv = sum(1 for c in conformers if c.converged)
-            log.info(
-                "Engine done: %d conformers, %d converged, best score=%.4f",
-                len(conformers),
-                n_conv,
-                conformers[0].score if conformers else float("nan"),
+                .unsqueeze(2)  # (n_candidates, M, 1, n_d_lig, 3)
+                .expand(n_candidates, M, W, n_d_lig, 3)
+                .reshape(B, n_d_lig, 3)
             )
 
-            if debug and len(conformers) > 1:
-                # See exp.md for detailed rationale
+            beam_torsions_B = (
+                beam_torsions.unsqueeze(0)
+                .unsqueeze(0)  # (1, 1, W, J)
+                .expand(n_candidates, M, W, J)
+                .reshape(B, J)
+            )
+
+            # Append the bend joints (fk.py), which beam search never
+            # touches (no Q5 statistics for them). Seed each at its own
+            # current-conformer dihedral (zero delta -- exact no-op at
+            # t=0), then randomise per beam trial so different trials
+            # explore different local pyramidal configurations at
+            # branch-point donors, mirroring how the base orientation
+            # is diversified below. Left entirely to gradient descent
+            # from there.
+            n_bend = J_full - J
+            if n_bend > 0:
+                bend_seed = fk.bend_seed_angles(X_full)  # (n_bend,)
+                bend_seed_B = bend_seed.unsqueeze(0).expand(B, n_bend).clone()
+                noise = (torch.rand(B, n_bend, device=ctx.device) - 0.5) * 2.0 * math.pi
+                bend_seed_B = bend_seed_B + noise
+                beam_torsions_B = torch.cat([beam_torsions_B, bend_seed_B], dim=-1)  # (B, J_full)
+
+            if debug:
+                print(f"  bend joints  : {n_bend}")
+
+            # 5f. Donor position indices (indices into GE's global donor list)
+            # We pass the group indices (lig_di) directly instead of atom indices,
+            # so the solver can correctly fetch centroids for haptic groups.
+            donor_pos_idx_t = torch.tensor(lig_di, dtype=torch.long, device=ctx.device)
+
+            if debug:
+                print(f"  donor_pos_idx  : {lig_di}")
+                _actual_all = ge_joint.donor_positions(X_full.unsqueeze(0))[0].cpu().numpy()
+                _actual = _actual_all[lig_di]
+                for _d, (_act, _tgt) in enumerate(zip(_actual, donor_targets_np[0, 0])):
+                    print(
+                        f"    donor[{_d}] current={np.array2string(_act, precision=3)}  "
+                        f"target (candidate 0)={np.array2string(_tgt, precision=3)}  "
+                        f"dist={np.linalg.norm(_act - _tgt):.3f} Å"
+                    )
+
+            # 5g. Kabsch init (per-ligand, ALL candidates in one call --
+            # kabsch_init already loops independently over its batch
+            # dimension, so passing B = n_candidates*M*W here needs no
+            # change to it whatsoever).
+            base_theta = kabsch_init(
+                ge=ge_joint,
+                X_ref=X_full,
+                donor_targets=donor_targets_torch,
+                donor_pos_idx=donor_pos_idx_t,
+                diversify_orientation=True,
+                diversity_scale=1.0,
+            )  # (B, 6)
+            theta_init = torch.cat([base_theta, beam_torsions_B], dim=-1)  # (B, 6+J)
+
+            if debug:
                 print(
-                    "\n[DEBUG] ── Pairwise RMSD between kept conformers "
-                    "(heavy atoms, Kabsch-aligned) ──"
+                    f"\n[DEBUG]   Kabsch init → shape={tuple(theta_init.shape)}"
+                    f"  nan={torch.isnan(theta_init).any().item()}"
                 )
-                heavy_idx = [
-                    i
-                    for i, a in enumerate(conformers[0].complex.atoms)
-                    if a.symbol != "H" and a.idx != conformers[0].complex.metal_idx
-                ]
-                coords = [
-                    np.array([c.complex.atoms[i].position for i in heavy_idx]) for c in conformers
-                ]
-                n_c = len(conformers)
-                header = "        " + "".join(f"{i + 1:>8}" for i in range(n_c))
-                print(header)
-                for i in range(n_c):
-                    row = f"  rank{i + 1:>3} "
-                    for j in range(n_c):
-                        if j < i:
-                            row += " " * 8
-                            continue
-                        if i == j:
-                            row += f"{0.0:>8.3f}"
-                            continue
-                        Pc = coords[i] - coords[i].mean(axis=0)
-                        Qc = coords[j] - coords[j].mean(axis=0)
-                        Hm = Pc.T @ Qc
-                        Uu, _, Vt = np.linalg.svd(Hm)
-                        dsign = np.sign(np.linalg.det(Vt.T @ Uu.T))
-                        sign_fix = np.eye(3)
-                        sign_fix[-1, -1] = dsign
-                        Rm = Vt.T @ sign_fix @ Uu.T
-                        Pc_aligned = Pc @ Rm.T
-                        rmsd = float(np.sqrt(((Pc_aligned - Qc) ** 2).sum(axis=-1).mean()))
-                        row += f"{rmsd:>8.3f}"
-                    print(row)
                 print(
-                    "  (columns/rows are final rank; 0.000 on the diagonal; "
-                    "values near 0 off-diagonal mean two kept conformers are "
-                    "essentially the same geometry)"
+                    f"  translation norm: min={base_theta[:, :3].norm(dim=-1).min():.3f}"
+                    f"  max={base_theta[:, :3].norm(dim=-1).max():.3f} Å"
                 )
 
-            return EnsembleResult(conformers=conformers, solve_trace=solve_trace, scorer=scorer_joint)
+            all_theta_inits.append(theta_init)
+            all_donor_pos_idxs.append(donor_pos_idx_t)
 
-        if len(_assignment_candidates) == 1:
-            result = _solve_for_assignment(_assignment_candidates[0])
-        else:
-            # 2.14.0 Fix B: screen every surviving candidate cheaply, then
-            # re-solve only the screening winner at full quality -- turns
-            # an N-candidate search from N full solves into N cheap
-            # screens + 1 full solve. See the 2.14.0 changelog entry.
-            _screen_bw = max(1, min(beam_width, _as_cfg.screen_beam_width))
-            _screen_steps = max(1, min(n_ik_steps, _as_cfg.screen_n_ik_steps))
-            _candidate_results: List[Tuple[int, np.ndarray, EnsembleResult]] = []
-            for _ci, _cand in enumerate(_assignment_candidates):
-                log.info(
-                    "Assignment search: screening candidate %d/%d "
-                    "(beam_width=%d, n_ik_steps=%d)...",
-                    _ci + 1, len(_assignment_candidates), _screen_bw, _screen_steps,
-                )
-                try:
-                    _cand_result = _solve_for_assignment(
-                        _cand, beam_width=_screen_bw, n_ik_steps=_screen_steps
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "Assignment search: candidate %d/%d failed to screen "
-                        "(%s); skipping it.",
-                        _ci + 1, len(_assignment_candidates), exc,
-                    )
-                    continue
-                _candidate_results.append((_ci, _cand, _cand_result))
+        return (
+            fks,
+            all_theta_inits,
+            all_donor_pos_idxs,
+            ge_joint,
+            scorer_joint,
+            X_full,
+            ideal_directions_batched,
+            candidate_idx_per_b,
+        )
 
-            if not _candidate_results:
-                raise RuntimeError(
-                    "Assignment search: every candidate donor-to-site "
-                    "assignment failed to solve."
-                )
+    def _run_joint_ik(
+        self,
+        ctx,
+        fks,
+        scorer_joint,
+        ge_joint,
+        X_full,
+        all_theta_inits,
+        all_donor_pos_idxs,
+        ideal_directions_full_t,
+        symmetric_groups,
+        q3_symmetric_groups,
+        beam_width,
+        n_ik_steps,
+    ):
+        """
+        5h. Joint IK solve — all ligands (and, since 2026-09-17, every
+        candidate donor-to-site assignment being explored) optimised
+        simultaneously against the shared Scorer/GeometryExtractor built
+        by _beam_search_all_candidates. `beam_width` here is the caller's
+        TOTAL beam width across all candidates (see
+        _solve_for_assignments), so B = beam_width * n_coord_samples
+        already comes out as the full combined batch size -- no other
+        change was needed here for multi-candidate batching to work.
+        """
+        from jacobik.ik.ik_solver import IKSolverConfig, JointIKSolver
 
-            _best_ci, _best_cand, _screen_result = max(
-                _candidate_results,
-                key=lambda t: (
-                    t[2].best.score if t[2].best is not None else float("-inf")
-                ),
+        debug = ctx.debug
+        B = beam_width * ctx.n_coord_samples
+        log.info("Running joint IK: %d ligands × B=%d × T=%d steps", len(fks), B, n_ik_steps)
+
+        # n_ik_steps/lr are the two solve()-level knobs everyone actually
+        # tunes per-call; everything else comes from ik_config.
+        _resolved_ik_config = replace(
+            ctx.ik_config or IKSolverConfig(), n_steps=n_ik_steps, lr=ctx.lr
+        )
+        joint_solver = JointIKSolver(
+            fks=fks,
+            scorer=scorer_joint,
+            ge=ge_joint,
+            config=_resolved_ik_config,
+            device=ctx.device,
+        )
+        thetas_final, converged, scores, solve_trace = joint_solver.solve(
+            theta_inits=all_theta_inits,
+            X_ref=X_full,
+            donor_pos_idxs=all_donor_pos_idxs,
+            ideal_directions=ideal_directions_full_t,
+            debug=debug,
+            symmetric_groups=symmetric_groups,
+            q3_symmetric_groups=q3_symmetric_groups,
+            q3_mode_commit=ctx.q3_mode_commit,
+        )
+
+        if debug:
+            n_conv = int(converged.sum().item())
+            print(
+                f"\n[DEBUG] Joint IK done: {n_conv}/{B} converged"
+                f"  score min={scores.min().item():.4f}"
+                f"  max={scores.max().item():.4f}"
             )
-            log.info(
-                "Assignment search: candidate %d/%d won screening (score=%s); "
-                "re-solving at full quality (beam_width=%d, n_ik_steps=%d)...",
-                _best_ci + 1,
-                len(_assignment_candidates),
-                f"{_screen_result.best.score:.4f}" if _screen_result.best is not None else "n/a",
-                beam_width, n_ik_steps,
-            )
-            try:
-                result = _solve_for_assignment(_best_cand)
-            except Exception as exc:
-                log.warning(
-                    "Assignment search: full-quality re-solve of the screening "
-                    "winner failed (%s); falling back to its screening-quality "
-                    "result.",
-                    exc,
+
+            # See exp.md for detailed rationale
+            _scores_sorted_idx = np.argsort(-scores.cpu().numpy())
+            print(f"\n[DEBUG] ── All {B} raw IK trials (sorted by score) ──────────────")
+            print(f"  {'trial':>6}  {'score':>12}  {'converged':>9}")
+            for b in _scores_sorted_idx.tolist():
+                print(
+                    f"  {b:>6}  {scores[b].item():>12.4f}  "
+                    f"{'yes' if converged[b].item() else 'no':>9}"
                 )
-                result = _screen_result
-            result.assignment_search = dict(
-                n_candidates=len(_assignment_candidates),
-                winning_candidate_idx=_best_ci,
-                winning_assignment=_best_cand.tolist(),
-                screen_beam_width=_screen_bw,
-                screen_n_ik_steps=_screen_steps,
-                screening_scores=[
-                    (
-                        _ci2,
-                        float(_r2.best.score) if _r2.best is not None else None,
-                    )
-                    for _ci2, _c2, _r2 in _candidate_results
-                ],
+
+        return thetas_final, converged, scores, solve_trace
+
+    def _assemble_conformers(
+        self,
+        ctx,
+        mol,
+        fks,
+        X_full,
+        thetas_final,
+        scores,
+        converged,
+        beam_width,
+        candidate_idx_per_b=None,
+    ):
+        """
+        6. Assemble full 3D complexes (deep-copied per kept conformer)
+        from the joint IK solve's final thetas, sorted best-to-worst by
+        score. `candidate_idx_per_b` (2026-09-17, optional, (B,) int
+        array) tags each kept conformer with which candidate donor-to-
+        site assignment it came from, via ConformerResult.assignment_idx
+        -- see _solve_for_assignments. None (the pre-2026-09-17 default,
+        still what every single-assignment solve effectively gets) means
+        every conformer shares the one assignment the caller used, so
+        assignment_idx is left None throughout -- nothing downstream that
+        doesn't care about multi-candidate batching needs to change.
+        """
+        debug = ctx.debug
+        _n_conformers = (
+            ctx.n_conformers
+            if ctx.n_conformers is not None
+            else max(beam_width, ctx.n_coord_samples)
+        )
+        conformers: List[ConformerResult] = []
+
+        score_np = scores.cpu().numpy()
+        sorted_b = np.argsort(-score_np)
+
+        for ci, b in enumerate(sorted_b[:_n_conformers]):
+            mol_copy = _shallow_copy_mol_for_conformer(mol)
+
+            X_assembled = X_full.unsqueeze(0)  # (1, N, 3)
+            for li, fk_li in enumerate(fks):
+                theta_b = thetas_final[li][b : b + 1]  # (1, 6+Ji)
+                with torch.no_grad():
+                    X_assembled = fk_li.apply(theta_b, X_assembled)  # (1, N, 3)
+
+            X_np = X_assembled[0].cpu().numpy()
+            for atom_pos_idx, atom in enumerate(mol_copy.atoms):
+                atom.position = X_np[atom_pos_idx].copy()
+
+            # See exp.md for detailed rationale
+            _refresh_coord_geometry(mol_copy)
+
+            conformers.append(
+                ConformerResult(
+                    complex=mol_copy,
+                    score=float(score_np[b]),
+                    converged=bool(converged[b].item()),
+                    rank=ci + 1,
+                    trial_idx=int(b),
+                    assignment_idx=(
+                        int(candidate_idx_per_b[b]) if candidate_idx_per_b is not None else None
+                    ),
+                )
             )
 
-        return result
+        # Sort and re-rank
+        conformers.sort(key=lambda c: c.score, reverse=True)
+        for i, c in enumerate(conformers):
+            c.rank = i + 1
+
+        n_conv = sum(1 for c in conformers if c.converged)
+        log.info(
+            "Engine done: %d conformers, %d converged, best score=%.4f",
+            len(conformers),
+            n_conv,
+            conformers[0].score if conformers else float("nan"),
+        )
+
+        if debug and len(conformers) > 1:
+            # See exp.md for detailed rationale
+            print(
+                "\n[DEBUG] ── Pairwise RMSD between kept conformers "
+                "(heavy atoms, Kabsch-aligned) ──"
+            )
+            heavy_idx = [
+                i
+                for i, a in enumerate(conformers[0].complex.atoms)
+                if a.symbol != "H" and a.idx != conformers[0].complex.metal_idx
+            ]
+            coords = [
+                np.array([c.complex.atoms[i].position for i in heavy_idx]) for c in conformers
+            ]
+            n_c = len(conformers)
+            header = "        " + "".join(f"{i + 1:>8}" for i in range(n_c))
+            print(header)
+            for i in range(n_c):
+                row = f"  rank{i + 1:>3} "
+                for j in range(n_c):
+                    if j < i:
+                        row += " " * 8
+                        continue
+                    if i == j:
+                        row += f"{0.0:>8.3f}"
+                        continue
+                    Pc = coords[i] - coords[i].mean(axis=0)
+                    Qc = coords[j] - coords[j].mean(axis=0)
+                    Hm = Pc.T @ Qc
+                    Uu, _, Vt = np.linalg.svd(Hm)
+                    dsign = np.sign(np.linalg.det(Vt.T @ Uu.T))
+                    sign_fix = np.eye(3)
+                    sign_fix[-1, -1] = dsign
+                    Rm = Vt.T @ sign_fix @ Uu.T
+                    Pc_aligned = Pc @ Rm.T
+                    rmsd = float(np.sqrt(((Pc_aligned - Qc) ** 2).sum(axis=-1).mean()))
+                    row += f"{rmsd:>8.3f}"
+                print(row)
+            print(
+                "  (columns/rows are final rank; 0.000 on the diagonal; "
+                "values near 0 off-diagonal mean two kept conformers are "
+                "essentially the same geometry)"
+            )
+
+        return conformers
+
+    # 2026-09-17: _resolve_candidates (the old single-vs-multi-candidate
+    # dispatch, and the 2.14.0 "screen every candidate cheaply, re-solve
+    # only the winner" logic it dispatched to) is gone -- both cases are
+    # now the SAME call, _solve_for_assignments(ctx, assignment_candidates,
+    # beam_width, n_ik_steps), since batching made "single vs. multiple
+    # candidates" no longer a meaningfully different code path. See that
+    # method's docstring for the full rationale and solve()'s own call
+    # site below.

@@ -865,6 +865,7 @@ class Scorer:
         self,
         X: torch.Tensor,
         q3_mode_override: Optional[torch.Tensor] = None,
+        donor_pos: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Shared internal pass: compute each quantity's NORMALISED value as a
@@ -961,13 +962,13 @@ class Scorer:
 
         # ── Q1 ─────────────────────────────────────────────────────────────
         if self._n_q1 > 0 and self._q1_means.shape[0] > 0:
-            q1_d = self._ge.q1_distances(X)  # (B, n_donors)
+            q1_d = self._ge.q1_distances(X, donor_pos=donor_pos)  # (B, n_donors)
             comp["Q1"] = _gmm(q1_d, self._q1_means, self._q1_eff_vars, self._q1_log_w, self._n_q1)
 
         # ── Q2 ─────────────────────────────────────────────────────────────
         # q2_weight baked into _q2_log_w at __init__; skip if weight was 0.0
         if self._n_q2 > 0 and self._q2_means.shape[0] > 0 and self._qweights["Q2"] > 0.0:
-            q2_angles = self._ge.q2_dmd_angles(X)  # (B, n_pairs) radians
+            q2_angles = self._ge.q2_dmd_angles(X, donor_pos=donor_pos)  # (B, n_pairs) radians
             q2_cos = torch.cos(q2_angles)  # GMM-cos, 2.7.0
             comp["Q2"] = _gmm(
                 q2_cos,
@@ -1050,6 +1051,7 @@ class Scorer:
         self,
         X: torch.Tensor,
         q3_mode_override: Optional[torch.Tensor] = None,
+        donor_pos: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Unified statistical score: one honest, defensible objective.
@@ -1066,13 +1068,23 @@ class Scorer:
         X : (B, N, 3)
         q3_mode_override : optional (B, n_q3) int64 tensor -- see 2.8.0
                            changelog. None (default) = unchanged behaviour.
+        donor_pos : optional precomputed self._ge.donor_positions(X) (B,
+                           n_donors, 3) -- passed through to Q1/Q2. Callers
+                           that already need donor_positions(X) for their
+                           own purposes (e.g. ik_solver.py's per-step
+                           symmetry-tie computation) can compute it once
+                           and pass it here instead of having Q1 and Q2
+                           each recompute an identical value internally.
+                           None (default) = unchanged behaviour.
 
         Returns
         -------
         scalar    : (B,)  — sum of per-quantity weighted values; higher = better
         breakdown : dict with keys "Q1".."Q6", each a (B,) contribution
         """
-        breakdown = self._score_components(X, q3_mode_override=q3_mode_override)
+        breakdown = self._score_components(
+            X, q3_mode_override=q3_mode_override, donor_pos=donor_pos
+        )
         scalar = X.new_zeros(X.shape[0])
         for v in breakdown.values():
             scalar = scalar + v
@@ -1082,6 +1094,7 @@ class Scorer:
         self,
         X: torch.Tensor,
         q3_mode_override: Optional[torch.Tensor] = None,
+        donor_pos: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Backward-compatible alias: return per-quantity breakdown only.
@@ -1091,12 +1104,13 @@ class Scorer:
         ----------
         X : (B, N, 3)
         q3_mode_override : see score(). None (default) = unchanged behaviour.
+        donor_pos : see score(). None (default) = unchanged behaviour.
 
         Returns
         -------
         dict with keys "Q1".."Q6", each a (B,) tensor.
         """
-        _, breakdown = self.score(X, q3_mode_override=q3_mode_override)
+        _, breakdown = self.score(X, q3_mode_override=q3_mode_override, donor_pos=donor_pos)
         return breakdown
 
     def q2_score(self, X: torch.Tensor) -> torch.Tensor:

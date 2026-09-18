@@ -288,12 +288,20 @@ def _optimal_rotation_nocentroid(A: torch.Tensor, B: torch.Tensor) -> torch.Tens
     origin, so subtracting a centroid would break that physical meaning).
 
     For each batch element b, finds the rotation R[b] minimising
-    sum_i || R[b] @ A[i] - B[b, i] ||^2.
+    sum_i || R[b] @ A[b, i] - B[b, i] ||^2.
 
     Parameters
     ----------
-    A : (n, 3) fixed reference unit vectors (ideal polyhedron directions),
-        static across the whole solve.
+    A : (Batch, n, 3) reference unit vectors (ideal polyhedron directions).
+        2026-09-17: promoted from a single (n, 3) shared across the whole
+        batch to per-batch-item, so that a batch spanning MULTIPLE candidate
+        donor-to-site assignments (engine.py's use_symmetry_enumeration /
+        use_assignment_search, now solved as one batched call instead of a
+        sequential per-candidate loop -- see engine.py's
+        _solve_for_assignments) can give each batch item its OWN target
+        polyhedron. A caller solving a single fixed assignment simply
+        repeats that one (n, 3) tensor Batch times -- functionally
+        identical to the old shared-A behaviour, just explicit about it.
     B : (Batch, n, 3) current unit vectors, recomputed every step.
 
     Returns
@@ -307,7 +315,7 @@ def _optimal_rotation_nocentroid(A: torch.Tensor, B: torch.Tensor) -> torch.Tens
     near-degenerate inputs.
     """
     Bsz = B.shape[0]
-    H = torch.einsum("ni,bnj->bij", A, B)  # (Batch, 3, 3) = A^T @ B[b]
+    H = torch.einsum("bni,bnj->bij", A, B)  # (Batch, 3, 3) = A[b]^T @ B[b]
     U, S, Vh = torch.linalg.svd(H)
     V = Vh.transpose(-2, -1)
     Ut = U.transpose(-2, -1)
@@ -447,7 +455,7 @@ class JointIKSolver:
         theta_inits: list,  # [Tensor(B, 6+Ji), ...]
         X_ref: torch.Tensor,  # (N, 3)
         donor_pos_idxs: list,  # [LongTensor(n_d_i), ...]
-        ideal_directions: torch.Tensor,  # (n_donors_total, 3)
+        ideal_directions: torch.Tensor,  # (B, n_donors_total, 3)
         debug: bool = False,
         symmetric_groups: Optional[List[List[int]]] = None,
         q3_symmetric_groups: Optional[List[List[int]]] = None,
@@ -462,12 +470,21 @@ class JointIKSolver:
                          All must have the same batch size B.
         X_ref          : (N, 3) full-complex reference atom positions.
         donor_pos_idxs : list of (n_d_i,) LongTensors of pos-indices into X_ref.
-        ideal_directions : (n_donors_total, 3) fixed unit vectors, one per
+        ideal_directions : (B, n_donors_total, 3) unit vectors, one per
                          donor in ge.donor_positions()'s global donor order
-                         (= ideal[assignment[di]] from engine.py's Hungarian
-                         assignment). Donors are pulled toward the best-fit
-                         rotation of this ideal polyhedron, recomputed every
-                         step (see module docstring).
+                         (= ideal[assignment[di]] from engine.py's chosen
+                         donor-to-site assignment), given PER BATCH ITEM
+                         (2026-09-17, was a single (n_donors_total, 3)
+                         shared across the whole batch before batched
+                         multi-candidate solving existed). A single-
+                         assignment solve just repeats the same (n_donors,
+                         3) row B times; a batch spanning several candidate
+                         assignments (engine.py's _solve_for_assignments)
+                         gives each candidate's own sub-batch its own
+                         target polyhedron, so donors are pulled toward the
+                         best-fit rotation of THEIR batch item's ideal
+                         polyhedron, recomputed every step (see module
+                         docstring).
         debug          : print per-step diagnostics.
         symmetric_groups : list of donor-index groups (each a list of
                          indices into the same global donor order as
@@ -574,9 +591,7 @@ class JointIKSolver:
         # step of the T-loop below. Uses the caller's narrower
         # q3_symmetric_groups for the Q3 tie/mode-commit when given, else
         # falls back to symmetric_groups.
-        _q3_groups = (
-            q3_symmetric_groups if q3_symmetric_groups is not None else symmetric_groups
-        )
+        _q3_groups = q3_symmetric_groups if q3_symmetric_groups is not None else symmetric_groups
 
         q3_site_to_idx: Dict[int, int] = {}
         if symmetric_groups:
@@ -608,14 +623,10 @@ class JointIKSolver:
                         X_init = _fk_li.apply(_theta_li, X_init)
                     q3_cos_init = torch.cos(self.ge.q3_approach_angles(X_init))  # (B, n_q3)
                     n_q3_total = q3_means_static.shape[0]
-                    override = torch.full(
-                        (B, n_q3_total), -1, dtype=torch.long, device=device
-                    )
+                    override = torch.full((B, n_q3_total), -1, dtype=torch.long, device=device)
                     any_group_qualifies = False
                     for group in _q3_groups:
-                        q3_idxs = [
-                            q3_site_to_idx[g] for g in group if g in q3_site_to_idx
-                        ]
+                        q3_idxs = [q3_site_to_idx[g] for g in group if g in q3_site_to_idx]
                         if len(q3_idxs) < 2:
                             continue
                         any_group_qualifies = True
@@ -628,12 +639,13 @@ class JointIKSolver:
                         # argmax over k matters, and the -0.5*log(2*pi) term
                         # is a k-independent constant that drops out).
                         diff_g = obs_g.unsqueeze(-1) - m_g.unsqueeze(0)  # (B, G, K)
-                        log_comp_g = (
-                            -0.5 * torch.log(v_g).unsqueeze(0)
-                            - 0.5 * diff_g**2 / v_g.unsqueeze(0)
-                        )
+                        log_comp_g = -0.5 * torch.log(v_g).unsqueeze(
+                            0
+                        ) - 0.5 * diff_g**2 / v_g.unsqueeze(0)
                         log_p_g = log_comp_g + lw_g.unsqueeze(0)  # (B, G, K)
-                        group_log_p_per_k = log_p_g.sum(dim=1)  # (B, K) -- total if ALL members forced to k
+                        group_log_p_per_k = log_p_g.sum(
+                            dim=1
+                        )  # (B, K) -- total if ALL members forced to k
                         best_k = group_log_p_per_k.argmax(dim=-1)  # (B,)
                         override[:, idx_t] = best_k.unsqueeze(-1).expand(-1, len(q3_idxs))
                     if any_group_qualifies:
@@ -659,8 +671,24 @@ class JointIKSolver:
             for li, (fk_li, theta_li) in enumerate(zip(self.fks, thetas)):
                 X_current = fk_li.apply(theta_li, X_current)  # (B, N, 3)
 
+            # --- Donor positions: computed once, reused below ---
+            # PERF (2026-09-18): this used to be computed a second time,
+            # separately, right after scorer.score() below -- but score()
+            # needs the exact same donor_positions(X_current) internally
+            # for its Q1/Q2 terms (geometry.py's q1_distances/q2_dmd_angles
+            # each called self.ge.donor_positions(X) on their own). Same
+            # deterministic function of the same X_current, so computing it
+            # once here and threading it into score() (which now accepts an
+            # optional donor_pos) is bit-for-bit identical to before, just
+            # without the redundant recomputation -- donor_positions() is
+            # itself a per-donor Python loop, so this was real, avoidable
+            # work on every one of the T solve steps.
+            all_donor_pos_grad = self.ge.donor_positions(X_current)  # (B, n_donors, 3)
+
             # --- Unified score: one call, one number, honest objective ---
-            stat_score, _ = self.scorer.score(X_current, q3_mode_override=q3_mode_override)
+            stat_score, _ = self.scorer.score(
+                X_current, q3_mode_override=q3_mode_override, donor_pos=all_donor_pos_grad
+            )
             # stat_score : (B,)  — the scalar optimised and reported
 
             # --- Shape constraint + symmetry ties ---
@@ -669,7 +697,6 @@ class JointIKSolver:
             # theorem d(loss)/dR = 0 at R's own optimum, so detaching it
             # costs nothing to first order while avoiding SVD-backward
             # instability on near-degenerate inputs.
-            all_donor_pos_grad = self.ge.donor_positions(X_current)  # (B, n_donors, 3)
             all_donor_pos_det = all_donor_pos_grad.detach()
             sym_penalty = X_ref.new_zeros(B)
             sym_angle_penalty = X_ref.new_zeros(B)
@@ -682,7 +709,7 @@ class JointIKSolver:
                 )  # (B, 3, 3): R_opt @ ideal_i ~= donor_unit_i
 
             aligned_ideal = torch.einsum(
-                "bij,nj->bni", R_opt, ideal_directions_dev
+                "bij,bnj->bni", R_opt, ideal_directions_dev
             )  # (B, n_donors, 3)
             per_donor_sq = ((aligned_ideal - donor_unit_vecs) ** 2).sum(-1)  # (B, n_donors)
 
@@ -694,9 +721,7 @@ class JointIKSolver:
                 shape_dev = per_donor_sq.mean(dim=-1)
 
             violation = (shape_dev - self.shape_tol).clamp(min=0.0)  # (B,)
-            constraint_loss = (
-                mu_shape.detach() * violation + 0.5 * self.shape_rho * violation**2
-            )
+            constraint_loss = mu_shape.detach() * violation + 0.5 * self.shape_rho * violation**2
             anchor_loss = shape_dev  # kept as solve_trace's diagnostic name
 
             if symmetric_groups:
@@ -951,11 +976,15 @@ class JointIKSolver:
             solve_trace = {
                 "residual": torch.stack(history_residuals, dim=0).cpu().numpy(),  # (T, B)
                 "score": torch.stack(history_scores, dim=0).cpu().numpy(),  # (T, B)
-                "anchor_loss": torch.stack(history_anchors, dim=0).cpu().numpy(),  # (T, B) -- shape_dev
+                "anchor_loss": torch.stack(history_anchors, dim=0)
+                .cpu()
+                .numpy(),  # (T, B) -- shape_dev
                 "grad_norm": torch.stack(history_grad_norms, dim=0).cpu().numpy(),  # (T, B)
                 "mu_shape": torch.stack(history_mu_shape, dim=0).cpu().numpy(),  # (T, B)
                 "sym_penalty": torch.stack(history_sym_penalty, dim=0).cpu().numpy(),  # (T, B)
-                "sym_angle_penalty": torch.stack(history_sym_angle_penalty, dim=0).cpu().numpy(),  # (T, B)
+                "sym_angle_penalty": torch.stack(history_sym_angle_penalty, dim=0)
+                .cpu()
+                .numpy(),  # (T, B)
                 "mu_sym": torch.stack(history_mu_sym, dim=0).cpu().numpy(),  # (T, B)
                 "mu_sym_angle": torch.stack(history_mu_sym_angle, dim=0).cpu().numpy(),  # (T, B)
             }

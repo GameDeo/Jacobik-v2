@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Dict, FrozenSet, List, Set, Tuple
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import networkx as nx
 import torch
@@ -568,24 +568,33 @@ class GeometryExtractor:
             return torch.cat(parts, dim=1)  # (B, n_donors, 3)
         return X.new_zeros(B, 0, 3)
 
-    def q1_distances(self, X: torch.Tensor) -> torch.Tensor:
+    def q1_distances(
+        self, X: torch.Tensor, donor_pos: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Metal–donor distances for all coordination sites.
 
         Parameters
         ----------
         X : (B, N, 3)
+        donor_pos : optional precomputed self.donor_positions(X) — pass it
+            when the caller already has it (e.g. ik_solver.py's per-step
+            loop, which needs it separately anyway) to skip recomputing an
+            identical value. None (default) = unchanged behaviour, computed
+            internally.
 
         Returns
         -------
         (B, n_donors)  — Euclidean distances in Å
         """
         metal = X[:, self.metal_pos_idx, :]  # (B, 3)
-        donor = self.donor_positions(X)  # (B, n_donors, 3)
+        donor = donor_pos if donor_pos is not None else self.donor_positions(X)  # (B, n_donors, 3)
         diff = donor - metal[:, None, :]  # (B, n_donors, 3)
         return torch.linalg.norm(diff, dim=-1)  # (B, n_donors)
 
-    def q2_dmd_angles(self, X: torch.Tensor) -> torch.Tensor:
+    def q2_dmd_angles(
+        self, X: torch.Tensor, donor_pos: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         All pairwise D–M–D angles in radians.
 
@@ -597,6 +606,9 @@ class GeometryExtractor:
         Parameters
         ----------
         X : (B, N, 3)
+        donor_pos : optional precomputed self.donor_positions(X) — see
+            q1_distances() above for why. None (default) = unchanged
+            behaviour, computed internally.
 
         Returns
         -------
@@ -607,7 +619,7 @@ class GeometryExtractor:
             return X.new_zeros(X.shape[0], 0)
 
         metal = X[:, self.metal_pos_idx, :]  # (B, 3)
-        donors = self.donor_positions(X)  # (B, n_d, 3)
+        donors = donor_pos if donor_pos is not None else self.donor_positions(X)  # (B, n_d, 3)
         vecs = donors - metal[:, None, :]  # (B, n_d, 3)
         vecs = _safe_normalize(vecs, dim=-1)  # (B, n_d, 3)
 
