@@ -1,6 +1,0 @@
-[
-  {"arm":"control","flags":{}},
-  {"arm":"cap","flags":{"embed_haptic_li_cap":true}},
-  {"arm":"donor","flags":{"q6_donor_pairs":{"hh":0.95,"ho":0.90,"oo":0.80}}},
-  {"arm":"combined","flags":{"embed_haptic_li_cap":true,"q6_donor_pairs":{"hh":0.95,"ho":0.90,"oo":0.80}}}
-]

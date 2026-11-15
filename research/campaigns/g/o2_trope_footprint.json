@@ -1,8 +1,0 @@
-{
-  "name": "O2 full trope screen",
-  "parents": ["SUQWEG", "CAFWIQ", "MUNSUJ", "SIKNAE", "RIGWAJ", "YUNPIG", "SUXROT", "CANXAQ", "SISKAJ"],
-  "tags": [],
-  "fingerprint_change_ok": true,
-  "seed_override": [11],
-  "note": "Experiment flags intentionally change the profile fingerprint; only paired control-versus-flag deltas are interpreted. Owner-directed one-seed unrelaxed gate across all nine trope parents. Tail and cal remain closed pending this screen."
-}
