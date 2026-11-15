@@ -1,0 +1,1206 @@
+commit 3d75c5770a409614406bc2649ee60abd98547880
+Author: GameDeo <alanchen310@gmail.com>
+Date:   Sun Oct 25 00:23:26 2026 -0700
+
+    wip(jgen): input-consistency classifier and HOXJUZ/failure diagnostics (d14-d19)
+    
+    Partial work for the roadmap rev2. The roadmap document is not yet revised; surface-fit labels and
+    the revised-rule runs are still pending.
+    
+    Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01Qb7HXozrZnm11PtHayUqz9
+
+diff --git a/tools/jgen/diag/ctxio.py b/tools/jgen/diag/ctxio.py
+new file mode 100644
+index 0000000..8498274
+--- /dev/null
++++ b/tools/jgen/diag/ctxio.py
+@@ -0,0 +1,107 @@
++"""Shared CPU helpers for the input-consistency and failure diagnostics (d14 onward). Read-only.
++
++Paths point at the shared data tree of the main checkout, because the worktree has no data/ directory.
++Nothing here writes under data/. Only CSD_code, SMILES and geometry are read from tmQM; the QM property
++fields (Electronic_E, Dispersion_E, Dipole_M, Metal_q, HL_Gap, HOMO/LUMO, Polarizability) are never touched.
++
++Environment for every Python process that uses this module:
++    CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2
++"""
++import json
++import os
++from pathlib import Path
++
++import numpy as np
++
++REPO = Path(__file__).resolve().parents[3]                     # worktree root (contains src/, refit/, tools/)
++DATA = Path(os.environ.get("JACOBIK_DATA", "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/data"))
++SCALED = DATA / "refit" / "nci_v2" / "scaled_v1"
++CLEAN = DATA / "refit" / "clean"
++CONSTRAINTS = DATA / "refit" / "final" / "constraints_2026-10-18.json"
++
++# Covalent radii (A) as in d03_bond_distortion.py; LIGHT is the set of ligand-capable elements.
++COV = {"H": .31, "B": .84, "C": .76, "N": .71, "O": .66, "F": .57, "Si": 1.11, "P": 1.07, "S": 1.05,
++       "Cl": 1.02, "Se": 1.20, "Br": 1.20, "I": 1.39, "As": 1.19, "Ge": 1.20, "Te": 1.38, "Sn": 1.39,
++       "Sb": 1.39, "Bi": 1.48}
++LIGHT = set(COV) - {"H"}
++
++# Formal-charge windows (predeclared, reference-free). A SMILES formal charge outside the window is absurd.
++# Light atoms: common windows (oxo O(-2), nitride N(-3) and the like are inside). Metals: the highest common
++# oxidation state written as a formal charge in tmQM-style SMILES; the lowest is -2 (metal anions are rare).
++LIGHT_QWIN = {"C": (-1, 1), "N": (-3, 2), "O": (-2, 1), "S": (-2, 2), "Se": (-2, 2), "Te": (-2, 2),
++              "P": (-3, 3), "As": (-3, 3), "B": (-3, 1), "F": (-1, 1), "Cl": (-1, 1), "Br": (-1, 1), "I": (-1, 1),
++              "Si": (-2, 2), "Ge": (-2, 2), "Sn": (-2, 2), "Sb": (-3, 5), "Bi": (-3, 5)}
++MAX_OX = {"Li": 1, "Na": 1, "K": 1, "Rb": 1, "Cs": 1, "Mg": 2, "Ca": 2, "Sr": 2, "Ba": 2, "Sc": 3, "Y": 3,
++          "La": 3, "Ti": 4, "Zr": 4, "Hf": 4, "V": 5, "Nb": 5, "Ta": 5, "Cr": 6, "Mo": 6, "W": 6, "Mn": 7,
++          "Re": 7, "Fe": 6, "Ru": 8, "Os": 8, "Co": 5, "Rh": 6, "Ir": 6, "Ni": 4, "Pd": 4, "Pt": 6, "Cu": 4,
++          "Ag": 3, "Au": 5, "Zn": 2, "Cd": 2, "Hg": 2, "Al": 3, "Ga": 3, "In": 3, "Tl": 3, "Sn": 4, "Pb": 4,
++          "Bi": 5, "Sb": 5}
++MAX_OX_DEFAULT = 4          # lanthanides (other than the listed ones) and the rest of the table
++
++
++def absurd_light(sym, q):
++    lo, hi = LIGHT_QWIN.get(sym, (-2, 2))
++    return q < lo or q > hi
++
++
++def absurd_metal(sym, q):
++    return q > MAX_OX.get(sym, MAX_OX_DEFAULT) or q < -2
++
++
++def frame_index():
++    """code -> {split, shard, dataset, stratum} from frame.json (representative code of each group)."""
++    f = json.load(open(SCALED / "frame.json"))
++    out = {}
++    for split, groups in f["main_allocation"]["splits"].items():
++        for g in groups:
++            out[g["representative_code"]] = dict(split=split, shard=g["representative_shard"],
++                                                 dataset=g["dataset"], stratum=g.get("stratum"))
++    return out
++
++
++def pool_parents():
++    """Codes with a successful control pool in calibration or motion_validation (manifest order)."""
++    m = json.load(open(SCALED / "manifest.json"))
++    seen = {}
++    for key, rec in m["tasks"].items():
++        if rec.get("status") == "success" and rec.get("split") in ("calibration", "motion_validation"):
++            seen.setdefault(rec["code"], rec["split"])
++    return seen
++
++
++def load_parent(code, idx=None):
++    """Assembled TMComplex for one parent, or None. Uses the frame's shard and dataset."""
++    from refit.nci_v2_pilot import load_mol
++    if idx is None:
++        idx = frame_index()
++    rec = idx.get(code)
++    if rec is None:
++        return None
++    return load_mol(code, rec["shard"], rec["dataset"], clean_root=CLEAN)
++
++
++def load_ctx(mol, seed=11):
++    """Builder, pre-beam solver context and assignments for one seed, CPU, as in tools/jdev/multiseed.py."""
++    from refit.nci_v2_pilot import build_builder_and_inputs
++    from tools.jdev import multiseed
++    from jacobik.stats.stats import StatsLookup, load_db
++    builder, _, err = build_builder_and_inputs(mol)
++    if builder is None:
++        return None, None, None, err
++    stats = StatsLookup(load_db(str(CONSTRAINTS)))
++    ctx, asg, W, _ = multiseed.prepare(builder, seed, stats=stats, device="cpu", angle_bends=True)
++    return builder, ctx, (asg, W), None
++
++
++def to_json(obj):
++    def conv(o):
++        if isinstance(o, (np.integer,)):
++            return int(o)
++        if isinstance(o, (np.floating,)):
++            return float(o)
++        if isinstance(o, np.ndarray):
++            return o.tolist()
++        if isinstance(o, (set, tuple)):
++            return list(o)
++        return str(o)
++    return json.dumps(obj, indent=1, default=conv)
+diff --git a/tools/jgen/diag/d14_input_consistency.py b/tools/jgen/diag/d14_input_consistency.py
+new file mode 100644
+index 0000000..5e60e8f
+--- /dev/null
++++ b/tools/jgen/diag/d14_input_consistency.py
+@@ -0,0 +1,349 @@
++"""Input-consistency audit: does the SMILES agree with the reference geometry? (evaluation only, CPU)
++
++NOT a generator rule. The generator never rejects an input (roadmap_generation_v1.md section 2.0). This script
++labels each parent so that scoreboards can be split by label. The reference geometry is used here, so the label
++is an evaluation label. Section 2.0 of the roadmap defines the reference-free production status that D14b
++compares against it.
++
++Method
++  1. SMILES side (RDKit, metal atoms removed, sanitised): bond orders, formal charges, valences, rings.
++  2. Geometry side: the reference coordinates of the parent (mol.atoms position). Heavy non-metal atoms are
++     bonded when d < 1.20 * (r_i + r_j) (covalent radii of ctxio.COV).
++  3. Graph isomorphism (networkx) between the two heavy non-metal graphs with element labels. A failed match
++     gives label 'ambiguous' (reason 'unmatched_graph'); no geometry check is possible then.
++  4. Checks on the matched graph (thresholds below).
++
++Thresholds (frozen for the reported run; the revision history is stated here, not hidden)
++  SPREAD_AROM   = 0.03 A   max-min of ring C-C bond lengths: at or below = aromatic geometry
++  SPREAD_LOCAL  = 0.10 A   at or above = localised geometry; between = intermediate (partial alternation)
++  BOND_SOFT     = 0.08 A   distance outside the order's length band above this is a soft mismatch
++  BOND_HARD     = 0.15 A   above this (and not charge-adjacent) it is a hard mismatch
++  Formal-charge windows: ctxio.LIGHT_QWIN (per element) and ctxio.MAX_OX (highest common oxidation state of a
++  metal, written as a formal charge; lower limit -2). Oxo O(-2), nitride N(-3) are inside their windows.
++  Revision history. Run 1 used point ideal lengths (C-C single 1.53 A, C-N single 1.47 A, ...). Its soft flags were
++  dominated by conjugated and heteroaromatic single bonds, so bands (BANDS) replaced the point ideals. The
++  charge-adjacent cap and the SMILES-aromatic skip were added while prototyping on 10 named parents, before the
++  first full run.
++  The first full run (232 parents) is reproduced by --point-ideal: it already had the SMILES-aromatic skip and the
++  charge-adjacent cap. Both runs are reported; the label is the band run's label.
++
++Flags
++  hard  quinoid_written_aromatic  ring of 5/6 C/N atoms, geometry aromatic (spread <= SPREAD_AROM), SMILES has an
++                                  exocyclic double bond on a ring atom and fewer than floor(n/2) ring-internal doubles
++  hard  bond_contradicts_order    bond outside its length band by more than BOND_HARD, not charge-adjacent
++  hard  hypervalent_S             S/Se/Te with valence 4, neutral, and no O neighbour
++  hard  absurd_light_charge       formal charge outside the element window (ctxio.LIGHT_QWIN) on a ligand atom
++  hard  absurd_metal_charge       formal charge above the metal's highest common oxidation state (ctxio.MAX_OX)
++  hard  charge_imbalance_N        neutral N with >= 2 O- neighbours (nitro written as N([O-])[O-])
++  soft  partial_alternation       quinoid pattern on an intermediate-geometry ring
++  soft  bond_soft_mismatch        distance outside the band in (BOND_SOFT, BOND_HARD]
++  soft  donor_typing              S donor typed by SMILES (thiocarbonyl / thiolate / thioether) disagrees with C-S length
++  soft  sanitize_failed           RDKit sanitisation of the metal-free ligand graph failed
++
++Label: inconsistent if any hard flag; ambiguous if any soft flag or an unmatched graph; otherwise consistent.
++
++    python tools/jgen/diag/d14_input_consistency.py --split all --out-json <path>
++    python tools/jgen/diag/d14_input_consistency.py --codes HOXJUZ,NEPNEF --verbose
++"""
++import argparse
++import os
++import sys
++from collections import Counter
++
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++from ctxio import absurd_light, absurd_metal  # noqa: E402
++
++SPREAD_AROM, SPREAD_LOCAL = 0.03, 0.10
++BOND_SOFT, BOND_HARD = 0.08, 0.15
++ADJ = 1.20
++
++# Length bands (A) per element pair and SMILES bond order (1, 1.5 aromatic, 2). A bond is consistent with its
++# order when its length lies inside the band; the mismatch is the distance outside the band. Bands cover
++# conjugated single bonds (C-C about 1.44-1.48 A), heteroaromatic single bonds (C-N about 1.33-1.37 A) and
++# charge-separated groups (see the charged-atom cap). The bands are textbook ranges, not fitted to the parents.
++# The first run used point ideals (C-C single 1.53, C-N single 1.47, ...); its results are kept as a sensitivity
++# run (flag --point-ideal), because the change came after seeing that conjugated singles dominated the soft flags.
++BANDS = {
++    ("C", "C"): {1.0: (1.40, 1.60), 1.5: (1.33, 1.42), 2.0: (1.28, 1.40)},
++    ("C", "N"): {1.0: (1.33, 1.52), 1.5: (1.31, 1.38), 2.0: (1.25, 1.36)},
++    ("C", "O"): {1.0: (1.30, 1.48), 2.0: (1.19, 1.28)},
++    ("C", "S"): {1.0: (1.70, 1.85), 2.0: (1.60, 1.70)},
++    ("N", "N"): {1.0: (1.30, 1.50), 2.0: (1.20, 1.32)},
++    ("N", "O"): {1.0: (1.30, 1.50), 2.0: (1.15, 1.25)},
++    ("N", "S"): {1.0: (1.60, 1.78), 2.0: (1.50, 1.60)},
++    ("O", "S"): {1.0: (1.50, 1.70), 2.0: (1.40, 1.50)},
++    ("S", "S"): {1.0: (1.95, 2.15)},
++}
++# Sensitivity run only (--point-ideal): the v1 point ideals, each as a zero-width band.
++POINT_IDEAL = {
++    ("C", "C"): {1.0: 1.53, 1.5: 1.40, 2.0: 1.34},
++    ("C", "N"): {1.0: 1.47, 1.5: 1.34, 2.0: 1.29},
++    ("C", "O"): {1.0: 1.43, 2.0: 1.22},
++    ("C", "S"): {1.0: 1.77, 2.0: 1.67},
++    ("N", "N"): {1.0: 1.45, 2.0: 1.25},
++    ("N", "O"): {1.0: 1.42, 2.0: 1.21},
++    ("N", "S"): {1.0: 1.70, 2.0: 1.55},
++    ("O", "S"): {1.0: 1.60, 2.0: 1.45},
++    ("S", "S"): {1.0: 2.05},
++}
++BANDS_POINT = {k: {o: (v, v) for o, v in d.items()} for k, d in POINT_IDEAL.items()}
++
++
++def pair_key(a, b):
++    return tuple(sorted((a, b)))
++
++
++def classify(mol, point_ideal=False):
++    """Return a dict with the label, flags and per-ring / per-bond evidence for one parent."""
++    import networkx as nx
++    from networkx.algorithms import isomorphism as iso
++    from rdkit import Chem
++    from rdkit.Chem import rdchem
++
++    out = dict(code=mol.csd_code, label=None, hard=[], soft=[], reasons=[], rings=[], n_heavy=0)
++    smi = mol.smiles
++    m = Chem.MolFromSmiles(smi, sanitize=False)
++    if m is None:
++        out.update(label="ambiguous", soft=["unparseable_smiles"])
++        return out
++    m.UpdatePropertyCache(strict=False)
++    metal_charges = [(a.GetSymbol(), a.GetFormalCharge()) for a in m.GetAtoms()
++                     if a.GetSymbol() not in ctxio.LIGHT and a.GetSymbol() != "H"]
++    if any(absurd_metal(sym_m, q) for sym_m, q in metal_charges):
++        out["hard"].append("absurd_metal_charge")
++        out["metal_charges"] = [list(x) for x in metal_charges]
++    if any(a.GetSymbol() == "H" for a in m.GetAtoms()):
++        out["explicit_H_atoms_in_smiles"] = True
++    # Implicit H counts are taken before metal atoms are removed.
++    nH = {a.GetIdx(): a.GetNumImplicitHs() + a.GetNumExplicitHs() for a in m.GetAtoms()}
++    rw = Chem.RWMol(m)
++    for a in sorted(rw.GetAtoms(), key=lambda x: -x.GetIdx()):
++        if a.GetSymbol() not in ctxio.LIGHT:
++            rw.RemoveAtom(a.GetIdx())
++    lig = rw.GetMol()
++    smi_index = {}
++    kept = [a.GetIdx() for a in m.GetAtoms() if a.GetSymbol() in ctxio.LIGHT]
++    for new, old in enumerate(kept):
++        smi_index[old] = new
++    try:
++        Chem.SanitizeMol(lig)
++    except Exception as exc:  # RDKit raises on valence or kekulisation failures
++        out["soft"].append("sanitize_failed")
++        out["reasons"].append("sanitize: %s" % str(exc).splitlines()[0][:120])
++    # Aromaticity as perceived from the SMILES, before Kekulisation clears the aromatic flags.
++    smiles_aromatic_atoms = {a.GetIdx() for a in lig.GetAtoms() if a.GetIsAromatic()}
++    smiles_aromatic_bonds = {(min(b.GetBeginAtomIdx(), b.GetEndAtomIdx()), max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()))
++                             for b in lig.GetBonds() if b.GetIsAromatic()}
++    charged_atoms = {a.GetIdx() for a in lig.GetAtoms() if a.GetFormalCharge() != 0}
++    try:
++        Chem.Kekulize(lig, clearAromaticFlags=True)
++    except Exception as exc:
++        out["soft"].append("kekulize_failed")
++        out["reasons"].append("kekulize: %s" % str(exc).splitlines()[0][:120])
++
++    # Geometry: heavy light atoms of the reference complex.
++    heavy = [a for a in mol.atoms if a.symbol in ctxio.LIGHT]
++    pos = np.array([a.position for a in heavy], float)
++    sym = [a.symbol for a in heavy]
++    n_s, n_g = lig.GetNumAtoms(), len(heavy)
++    out["n_heavy"] = n_g
++    Gg = nx.Graph()
++    for i in range(n_g):
++        Gg.add_node(i, sym=sym[i])
++    for i in range(n_g):
++        for j in range(i + 1, n_g):
++            d = float(np.linalg.norm(pos[i] - pos[j]))
++            if d < ADJ * (ctxio.COV[sym[i]] + ctxio.COV[sym[j]]):
++                Gg.add_edge(i, j)
++    Gs = nx.Graph()
++    for a in lig.GetAtoms():
++        Gs.add_node(a.GetIdx(), sym=a.GetSymbol())
++    for b in lig.GetBonds():
++        Gs.add_edge(b.GetBeginAtomIdx(), b.GetEndAtomIdx(), order=b.GetBondTypeAsDouble())
++    if n_s != n_g:
++        out.update(label="ambiguous", soft=out["soft"] + ["heavy_count_mismatch"],
++                   reasons=out["reasons"] + ["smiles %d vs geometry %d heavy atoms" % (n_s, n_g)])
++        return out
++    gm = iso.GraphMatcher(Gg, Gs, node_match=lambda x, y: x["sym"] == y["sym"])
++    if not gm.is_isomorphic():
++        out.update(label="ambiguous", soft=out["soft"] + ["unmatched_graph"],
++                   reasons=out["reasons"] + ["SMILES and geometry heavy graphs not isomorphic"])
++        return out
++    g2s = gm.mapping                                  # geometry index -> SMILES index
++    s2g = {v: k for k, v in g2s.items()}
++
++    def dist(gi, gj):
++        return float(np.linalg.norm(pos[gi] - pos[gj]))
++
++    # Bond-order checks on bonds that are not inside an aromatic or intermediate ring.
++    ring_info = lig.GetRingInfo()
++    ring_atoms_sets = [set(r) for r in ring_info.AtomRings()]
++    ring_status = {}
++    for r in ring_atoms_sets:
++        rl = sorted(r)
++        n = len(rl)
++        if n not in (5, 6):
++            continue
++        if not all(lig.GetAtomWithIdx(s).GetSymbol() in ("C", "N") for s in rl):
++            continue
++        cc = []
++        for b in lig.GetBonds():
++            u, v = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
++            if u in r and v in r and lig.GetAtomWithIdx(u).GetSymbol() == "C" and lig.GetAtomWithIdx(v).GetSymbol() == "C":
++                cc.append(dist(s2g[u], s2g[v]))
++        if len(cc) < 3:
++            continue
++        spread = max(cc) - min(cc)
++        ring_double = 0
++        exo_double = 0
++        for b in lig.GetBonds():
++            u, v = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
++            if b.GetBondType() != rdchem.BondType.DOUBLE:
++                continue
++            if u in r and v in r:
++                ring_double += 1
++            elif u in r or v in r:
++                exo_double += 1
++        quinoid_pattern = exo_double >= 1 and ring_double < n // 2
++        if spread <= SPREAD_AROM:
++            geom = "aromatic"
++        elif spread < SPREAD_LOCAL:
++            geom = "intermediate"
++        else:
++            geom = "localised"
++        key = tuple(rl)
++        ring_status[key] = geom
++        rec = dict(atoms=[int(s2g[s]) + 1 for s in rl], size=n, spread=round(spread, 3), geom=geom,
++                   ring_double=ring_double, exo_double=exo_double, quinoid_pattern=quinoid_pattern)
++        out["rings"].append(rec)
++        if quinoid_pattern and geom == "aromatic":
++            out["hard"].append("quinoid_written_aromatic")
++        elif quinoid_pattern and geom == "intermediate":
++            out["soft"].append("partial_alternation")
++
++    # Bond-order check. Bonds that the SMILES itself perceives as aromatic are skipped (their order is not
++    # written). Bonds touching a formally charged atom are capped at soft: charge-separated resonance forms
++    # (nitro, N-oxide, carbanion-bearing groups) make single-bond ideals unreliable there.
++    worst = []
++    for b in lig.GetBonds():
++        u, v = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
++        if (min(u, v), max(u, v)) in smiles_aromatic_bonds:
++            continue
++        if b.GetBondType() == rdchem.BondType.DATIVE:
++            continue
++        su, sv = lig.GetAtomWithIdx(u).GetSymbol(), lig.GetAtomWithIdx(v).GetSymbol()
++        order = b.GetBondTypeAsDouble()
++        table = BANDS_POINT.get(pair_key(su, sv)) if point_ideal else BANDS.get(pair_key(su, sv))
++        if table is None or order not in table:
++            continue
++        d = dist(s2g[u], s2g[v])
++        lo, hi = table[order]
++        diff = max(lo - d, d - hi, 0.0)                 # distance outside the band (0 when inside)
++        capped = u in charged_atoms or v in charged_atoms
++        if diff > BOND_HARD and not capped:
++            out["hard"].append("bond_contradicts_order")
++            worst.append((round(diff, 3), int(s2g[u]) + 1, su, int(s2g[v]) + 1, sv, order, round(d, 3), "hard"))
++        elif diff > BOND_SOFT:
++            out["soft"].append("bond_charged_soft" if capped and diff > BOND_HARD else "bond_soft_mismatch")
++            worst.append((round(diff, 3), int(s2g[u]) + 1, su, int(s2g[v]) + 1, sv, order, round(d, 3),
++                          "charged" if capped else "soft"))
++
++    # Valence, charge and donor checks on the SMILES graph.
++    for a in lig.GetAtoms():
++        s = a.GetSymbol()
++        q = a.GetFormalCharge()
++        if absurd_light(a.GetSymbol(), q):
++            out["hard"].append("absurd_light_charge")
++        if s in ("S", "Se", "Te"):
++            val = a.GetTotalValence()
++            has_o = any(n.GetSymbol() == "O" for n in a.GetNeighbors())
++            if val == 4 and q == 0 and not has_o:
++                out["hard"].append("hypervalent_S")
++        if s == "N" and q == 0:
++            n_om = sum(1 for n in a.GetNeighbors() if n.GetSymbol() == "O" and n.GetFormalCharge() == -1)
++            if n_om >= 2:
++                out["hard"].append("charge_imbalance_N")
++    # Donor typing: sulfur donors bonded to a metal in the reference geometry.
++    metal_pos = [np.asarray(a.position, float) for a in mol.atoms if a.symbol not in ctxio.LIGHT and a.symbol != "H"]
++    donor_types = []
++    for gi, sy in enumerate(sym):
++        if sy != "S" or not metal_pos:
++            continue
++        near_metal = any(np.linalg.norm(pos[gi] - mp) <= 1.15 * (ctxio.COV["S"] + 1.4) for mp in metal_pos)
++        if not near_metal:
++            continue
++        a = lig.GetAtomWithIdx(g2s[gi])
++        cs = [n for n in a.GetNeighbors() if n.GetSymbol() == "C"]
++        if not cs:
++            donor_types.append(dict(atom=gi + 1, smiles_type="none", c_s=None, geom="n/a"))
++            continue
++        c = cs[0]
++        bo = lig.GetBondBetweenAtoms(a.GetIdx(), c.GetIdx()).GetBondTypeAsDouble()
++        dcs = dist(gi, s2g[c.GetIdx()])
++        if bo == 2.0:
++            stype = "thiocarbonyl"
++        elif a.GetFormalCharge() == -1:
++            stype = "thiolate"
++        else:
++            stype = "thioether"
++        geom_type = "double-like" if dcs <= 1.71 else ("single-like" if dcs >= 1.74 else "ambiguous")
++        donor_types.append(dict(atom=gi + 1, smiles_type=stype, c_s=round(dcs, 3), geom=geom_type))
++        if (stype == "thiocarbonyl" and geom_type == "single-like") or \
++           (stype in ("thiolate", "thioether") and geom_type == "double-like"):
++            out["soft"].append("donor_typing")
++    out["donor_types"] = donor_types
++    out["worst_bonds"] = sorted(worst, reverse=True)[:6]
++
++    hard_flags = sorted(set(out["hard"]))
++    soft_flags = sorted(set(out["soft"]))
++    out["hard"], out["soft"] = hard_flags, soft_flags
++    if hard_flags:
++        out["label"] = "inconsistent"
++    elif soft_flags:
++        out["label"] = "ambiguous"
++    else:
++        out["label"] = "consistent"
++    return out
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--codes", default=None, help="comma-separated; default: all parents of --split")
++    ap.add_argument("--split", default="pools", help="pools (232 pool parents), all (pools + failure cases), or a frame split name")
++    ap.add_argument("--out-json", default=None)
++    ap.add_argument("--verbose", action="store_true")
++    ap.add_argument("--point-ideal", action="store_true", help="sensitivity run with v1 point ideals")
++    a = ap.parse_args()
++    idx = ctxio.frame_index()
++    if a.codes:
++        codes = a.codes.split(",")
++    elif a.split == "pools":
++        codes = list(ctxio.pool_parents().keys())
++    else:
++        codes = [c for c, r in idx.items() if r["split"] == a.split]
++    results = []
++    for code in codes:
++        mol = ctxio.load_parent(code, idx)
++        if mol is None:
++            results.append(dict(code=code, label="ambiguous", hard=[], soft=["not_loadable"], reasons=["no mol"]))
++            continue
++        res = classify(mol, point_ideal=a.point_ideal)
++        res["split"] = idx.get(code, {}).get("split")
++        res["stratum"] = idx.get(code, {}).get("stratum")
++        results.append(res)
++        if a.verbose:
++            print(res["code"], res["label"], res["hard"], res["soft"], res["rings"], res.get("worst_bonds"))
++    cnt = Counter(r["label"] for r in results)
++    flag_cnt = Counter(f for r in results for f in set(r.get("hard", []) + r.get("soft", [])))
++    summary = dict(n=len(results), labels=dict(cnt), flags=dict(flag_cnt))
++    print(ctxio.to_json(dict(summary=summary)))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(dict(summary=summary, parents=results)))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d15_hoxjuz_stage_trace.py b/tools/jgen/diag/d15_hoxjuz_stage_trace.py
+new file mode 100644
+index 0000000..b70d25c
+--- /dev/null
++++ b/tools/jgen/diag/d15_hoxjuz_stage_trace.py
+@@ -0,0 +1,161 @@
++"""HOXJUZ ring-angle puzzle: at which stage does the ring crush appear? (CPU only, read-only)
++
++Question. In HOXJUZ the ligand is rigid (no rotatable bonds, no macrocycle), each pool has one embed, and yet the
++bonded angles of the ring atoms move between rows (d13: 8 moving ring angles). Is the distortion born in the
++embed (E), in the beam and Kabsch starting poses (S), or in the joint solve (F, the stored final rows)?
++
++Stages, seed 11 (same ligand atoms in every stage):
++  E  the free-ligand embed the solver starts from: ctx.mol.atoms after multiseed.prepare. The solver takes
++     X_full = positions of ctx.mol.atoms (engine.py:2012) for every candidate row.
++  S  the starting pose of every beam row: fk.apply(theta_init, X_full) for the ligand that owns the ring, where
++     theta_init is the per-row output of _beam_search_all_candidates (torsion seeds plus Kabsch base pose,
++     engine.py:2160-2185). These are the rows multiseed.seed_rows produces before the IK solve.
++  F  the stored final rows of the seed-11 control pool (effective pool, poolio.py), in reference order
++     (X[:, gen_to_ref_idx]).
++  R  the reference geometry, reference order.
++
++Metric. For each five- or six-membered ring of a ligand (rings from the minimum cycle basis of the bonded heavy
++graph of the stage's own coordinates), the internal angles theta_k in the ring's cyclic order. The regular
++polygon angle is 180(n-2)/n. The deviation RMS over the ring's angles needs no atom mapping, and each ring is
++compared inside its own stage. Summaries are min / median / max over rows. Ring angles are not compared
++atom by atom across stages, because the index spaces differ (shell, seed rows and pool are different orders).
++
++Rigidity check. Max over ligand heavy-atom pairs (pairs in one ligand only, ligands = connected components of the
++reference heavy graph) of the spread of their distance across the stored rows, in A. The metal and other ligands
++are excluded, because the whole complex is not rigid.
++
++Usage (from the worktree; no GPU):
++    python tools/jgen/diag/d15_hoxjuz_stage_trace.py --code HOXJUZ --seed 11 --out-json <path>
++"""
++import argparse
++import json
++import os
++import sys
++
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++from poolio import Repairs, load_effective  # noqa: E402
++
++
++def heavy_graph(X, sym, cov_scale=1.20):
++    import networkx as nx
++    G = nx.Graph()
++    idx = [i for i, s in enumerate(sym) if s in ctxio.LIGHT and s != "H"]
++    G.add_nodes_from(idx)
++    for ii, i in enumerate(idx):
++        for j in idx[ii + 1:]:
++            if np.linalg.norm(X[i] - X[j]) < cov_scale * (ctxio.COV[sym[i]] + ctxio.COV[sym[j]]):
++                G.add_edge(i, j)
++    return G
++
++
++def ring_list(G):
++    import networkx as nx
++    return [list(c) for c in nx.minimum_cycle_basis(G) if len(c) in (5, 6)] if G.number_of_edges() else []
++
++
++def ring_dev(X, ring):
++    """RMS deviation (deg) of the internal angles of one ring from the regular polygon angle."""
++    n = len(ring)
++    dev = []
++    for k in range(n):
++        a, b, c = ring[k - 1], ring[k], ring[(k + 1) % n]
++        u, v = X[a] - X[b], X[c] - X[b]
++        cosv = np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v) + 1e-12)
++        dev.append(np.degrees(np.arccos(np.clip(cosv, -1, 1))) - 180.0 * (n - 2) / n)
++    return float(np.sqrt(np.mean(np.square(dev))))
++
++
++def stats(vals):
++    v = np.asarray(vals, float)
++    return dict(min=round(float(v.min()), 2), median=round(float(np.median(v)), 2), max=round(float(v.max()), 2),
++                rows=int(v.size))
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--code", default="HOXJUZ")
++    ap.add_argument("--seed", type=int, default=11)
++    ap.add_argument("--out-json", default=None)
++    ap.add_argument("--pools", default=os.path.join(str(ctxio.SCALED), "pools"))
++    a = ap.parse_args()
++
++    idx = ctxio.frame_index()
++    mol = ctxio.load_parent(a.code, idx)
++    builder, ctx, asg_w, err = ctxio.load_ctx(mol, a.seed)
++    if ctx is None:
++        print(ctxio.to_json(dict(code=a.code, error=err)))
++        return
++    asg, W = asg_w
++    shell = ctx.mol
++    E = np.array([at.position for at in shell.atoms], float)
++    sym_e = [at.symbol for at in shell.atoms]
++    rings_e = ring_list(heavy_graph(E, sym_e))
++    out = dict(code=a.code, seed=a.seed, n_atoms_shell=len(E), n_ligands=len(shell.ligands))
++
++    # E: embed.
++    out["E"] = {str(r): round(ring_dev(E, r), 2) for r in rings_e}
++
++    # S: starting poses of every beam row, per ligand (fks from _beam_search_all_candidates).
++    from tools.jdev import multiseed
++    import torch
++    shared, per_seed = multiseed.seed_rows(builder, ctx, asg, W, [a.seed])
++    fks, _, _, _ = shared
++    th_list, X_seed, _, cand = per_seed[0]
++    X_full = torch.tensor(E, dtype=torch.float32)
++    S_dev = {}
++    for li, th in enumerate(th_list):
++        Xl = fks[li].apply(th, X_full).detach().cpu().numpy()          # (B, N, 3)
++        lig_atoms = set()
++        for r in rings_e:
++            lig_atoms.update(r)
++        comp = None
++        for r in rings_e:
++            # ring belongs to ligand li if the ligand's apply moved its atoms (checked by coordinate change)
++            moved = np.linalg.norm(Xl[0][r] - E[r], axis=1).max() > 1e-6
++            if not moved:
++                continue
++            S_dev.setdefault(str(r), []).extend([ring_dev(Xl[k], r) for k in range(Xl.shape[0])])
++    out["S"] = {k: stats(v) for k, v in S_dev.items()}
++    out["S_candidates"] = int(len(set(np.asarray(cand).tolist())))
++
++    # F and R: stored pool (effective) and reference.
++    rep = Repairs(str(ctxio.SCALED))
++    pool = load_effective(a.pools, rep, a.code, a.seed)
++    ref = np.asarray(pool["ref_X"], float)
++    sym_r = list(pool["ref_symbols"])
++    rings_r = ring_list(heavy_graph(ref, sym_r))
++    F = pool["X"][:, pool["gen_to_ref"], :]
++    de = pool["dE"]
++    top, flo = int(np.argmax(pool["score"])), int(np.argmin(de))
++    out["R"] = {str(r): round(ring_dev(ref, r), 2) for r in rings_r}
++    out["F"] = {str(r): stats([ring_dev(F[k], r) for k in range(F.shape[0])]) for r in rings_r}
++    out["F_top1_ring_dev"] = {str(r): round(ring_dev(F[top], r), 2) for r in rings_r}
++    out["F_floor_ring_dev"] = {str(r): round(ring_dev(F[flo], r), 2) for r in rings_r}
++    out["pool_rows"] = int(F.shape[0])
++    out["top1_dE"] = round(float(de[top]), 1)
++    out["floor_dE"] = round(float(de[flo]), 1)
++
++    # Rigidity: intra-ligand heavy pair distance spread across stored rows.
++    import networkx as nx
++    Gr = heavy_graph(ref, sym_r)
++    comps = [sorted(c) for c in nx.connected_components(Gr)]
++    spreads = []
++    for c in comps:
++        if len(c) < 2:
++            continue
++        Fc = F[:, c, :]
++        D = np.linalg.norm(Fc[:, :, None, :] - Fc[:, None, :, :], axis=-1)
++        spreads.append(float((D.max(0) - D.min(0)).max()))
++    out["intra_ligand_pair_spread_A"] = [round(s, 3) for s in spreads]
++    out["ligand_components_heavy"] = [len(c) for c in comps]
++    print(ctxio.to_json(out))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(out))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d16_ring_dof_ablation.py b/tools/jgen/diag/d16_ring_dof_ablation.py
+new file mode 100644
+index 0000000..6f6bcb6
+--- /dev/null
++++ b/tools/jgen/diag/d16_ring_dof_ablation.py
+@@ -0,0 +1,161 @@
++"""Which solver DOF moves the ring angles? Column ablation on the stored S2b rows (CPU, read-only).
++
++For one parent and seed, the stored S2b state holds each pool row's final DOF vector (thetas_flat, per ligand,
++offsets thetas_lig_offsets). The rebuild uses the CPU embed of the same ligand (multiseed.prepare, which runs the
++GFN2 refinement when xtb is on PATH; the pixi bin is put first on PATH by the runner), and the solver's own FK
++(fk.apply, which includes the angle-bend columns).
++
++Steps
++  1. Rebuild each stored row: X_rec = fk_lig.apply(theta_lig, X) applied ligand by ligand from the embed.
++     Check against the stored generated-order coordinates X (max abs difference over ligand atoms, A).
++  2. Ring deviation (RMS over the ring's internal angles from the regular polygon angle, deg) of each ring in the
++     rebuilt and in the stored rows. Rings come from the embed's own bonded heavy graph (shell order).
++  3. Ablation: for every theta column c of every ligand, set that column to zero (the embed value for bend
++     columns, the reference torsion for torsions) and recompute the ring deviations. Report the columns whose
++     zeroing moves any ring by more than RING_TOL_DEG on the top-1 or the floor row, with the ring affected.
++  4. Zeroing all bend columns together (the embed angles of every bend) gives the ring deviation that the
++     torsion and base joints alone produce.
++
++Usage (no GPU; CPU embed):
++    python tools/jgen/diag/d16_ring_dof_ablation.py --code HOXJUZ --seed 11 --out-json <path>
++"""
++import argparse
++import json
++import os
++import sys
++
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++from d15_hoxjuz_stage_trace import heavy_graph, ring_list, ring_dev  # noqa: E402
++
++RING_TOL_DEG = 0.5
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--code", default="HOXJUZ")
++    ap.add_argument("--seed", type=int, default=11)
++    ap.add_argument("--out-json", default=None)
++    a = ap.parse_args()
++    import torch
++
++    idx = ctxio.frame_index()
++    mol = ctxio.load_parent(a.code, idx)
++    builder, ctx, asg_w, err = ctxio.load_ctx(mol, a.seed)
++    if ctx is None:
++        print(ctxio.to_json(dict(code=a.code, error=err)))
++        return
++    shell = ctx.mol
++    E = np.array([at.position for at in shell.atoms], float)
++    sym = [at.symbol for at in shell.atoms]
++    rings = ring_list(heavy_graph(E, sym))
++
++    from tools.jdev import multiseed
++    shared, _ = multiseed.seed_rows(builder, ctx, asg_w[0], asg_w[1], [a.seed])
++    fks = shared[0]
++    lig_atoms = [list(getattr(lig, "atom_indices", [])) for lig in shell.ligands]
++
++    z = np.load(os.path.join(str(ctxio.SCALED), "s2b_eval_state_v1", "pools", "%s_%d_control.npz" % (a.code, a.seed)),
++                allow_pickle=True)
++    th = np.asarray(z["thetas_flat"], float)
++    off = np.asarray(z["thetas_lig_offsets"], int)
++    Xst = np.asarray(z["X"], float)
++    score = np.asarray(z["score"], float)
++    top, flo = int(np.argmax(score)), None
++    m = json.load(open(os.path.join(str(ctxio.SCALED), "pools", "%s_%d_control.mace64.json" % (a.code, a.seed))))
++    de = np.asarray(m["energies_kj"], float) - float(m["ref_energy_kj"])
++    flo = int(np.argmin(de))
++    n_lig = len(off) - 1                       # thetas_lig_offsets holds the start of each ligand plus the end
++    widths = [int(off[i + 1] - off[i]) for i in range(n_lig)]
++
++    def rebuild(thetas_row):
++        X = torch.tensor(E, dtype=torch.float32)[None]
++        for li in range(n_lig):
++            seg = thetas_row[off[li]: off[li] + widths[li]]
++            X = fks[li].apply(torch.tensor(seg, dtype=torch.float32)[None], X[0])
++        return X[0].double().numpy()
++
++    out = dict(code=a.code, seed=a.seed, rings=[str(r) for r in rings], widths=widths, rows=int(th.shape[0]),
++               top1=top, floor=flo, n_bend_columns=[int(getattr(f, "n_angle_bends", 0)) for f in fks])
++    # 1. reproduction
++    recon_err = []
++    for r in range(th.shape[0]):
++        Xr = rebuild(th[r])
++        recon_err.append(float(np.abs(Xr - Xst[r]).max()))
++    out["reconstruction_max_abs_err_A"] = [round(x, 4) for x in recon_err]
++    # 2. ring deviations, rebuilt (R) and stored (S)
++    out["ring_dev_stored"] = {str(r): [round(ring_dev(Xst[k], r), 2) for k in range(th.shape[0])] for r in rings}
++    base_dev = {str(r): [round(ring_dev(rebuild(th[k]), r), 2) for k in range(th.shape[0])] for r in rings}
++    out["ring_dev_rebuilt"] = base_dev
++    # 3. column ablation for the top-1 and the floor row
++    effects = []
++    for li in range(n_lig):
++        for c in range(widths[li]):
++            for label, row in (("top1", top), ("floor", flo)):
++                t = th[row].copy()
++                t[off[li] + c] = 0.0
++                X = rebuild(t)
++                d = {str(r): round(ring_dev(X, r) - ring_dev(rebuild(th[row]), r), 2) for r in rings}
++                big = {k: v for k, v in d.items() if abs(v) > RING_TOL_DEG}
++                if big:
++                    effects.append(dict(lig=li, col=c, row=label, delta_ring_dev_deg=big))
++    out["ablation_effects"] = effects
++    # 3b. invariants of the rigid-motion claim (angle_bends.py header): bond lengths and ring internals.
++    import networkx as nx
++    Gh = heavy_graph(E, sym)
++    edges = list(Gh.edges())
++    d_e = {e: np.linalg.norm(E[e[0]] - E[e[1]]) for e in edges}
++    inv = {}
++    for label, row in (("top1", top), ("floor", flo)):
++        X = rebuild(th[row])
++        changes = sorted(((abs(np.linalg.norm(X[u] - X[v]) - d_e[(u, v)]), u, v) for u, v in edges), reverse=True)
++        inv[label] = dict(max_heavy_bond_change_A=round(float(changes[0][0]), 4),
++                          top5_edges=[dict(i=int(u), j=int(v), sym=[sym[u], sym[v]], d_embed=round(float(d_e[(u, v)]), 3),
++                                           change_A=round(float(c), 3)) for c, u, v in changes[:5]],
++                          n_edges_changed_over_0p05=int(sum(1 for c, _, _ in changes if c > 0.05)),
++                          n_edges=len(edges))
++    out["invariants_rebuilt_rows"] = inv
++    # 3c. for each bend column of ligand 0 with a stored non-zero value: which atoms it displaces, and whether it
++    # displaces part of a ring (a ring with some atoms displaced and some not).
++    moves = []
++    for li in range(n_lig):
++        for c in range(widths[li]):
++            vals = th[:, off[li] + c]
++            if not np.any(np.abs(vals) > 1e-9):
++                continue
++            t_zero = th[top].copy()
++            t_zero[off[li] + c] = 0.0
++            dX = rebuild(th[top]) - rebuild(t_zero)
++            moved = np.where(np.linalg.norm(dX, axis=1) > 1e-4)[0]
++            partial = []
++            for r in rings:
++                mv = [a in set(moved.tolist()) for a in r]
++                if any(mv) and not all(mv):
++                    partial.append([int(a) for a in r])
++            moves.append(dict(lig=li, col=c, stored_abs_max_rad=round(float(np.abs(vals).max()), 4),
++                              n_moved_atoms=int(len(moved)), moved_atoms=[int(i) for i in moved],
++                              partial_rings=partial))
++    out["bend_column_displacements_top1"] = moves
++    # 4. all bend columns zeroed (torsion and base joints only): which ring deviation remains
++    nb_zeroed = {}
++    for label, row in (("top1", top), ("floor", flo)):
++        t = th[row].copy()
++        for li, f in enumerate(fks):
++            nb = int(getattr(f, "n_angle_bends", 0))
++            if nb:
++                t[off[li] + widths[li] - nb: off[li] + widths[li]] = 0.0
++        X = rebuild(t)
++        nb_zeroed[label] = {str(r): round(ring_dev(X, r), 2) for r in rings}
++    out["all_bends_zeroed_ring_dev"] = nb_zeroed
++    out["top1_dE"] = round(float(de[top]), 1)
++    out["floor_dE"] = round(float(de[flo]), 1)
++    print(ctxio.to_json(out))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(out))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d17_label_scoreboard.py b/tools/jgen/diag/d17_label_scoreboard.py
+new file mode 100644
+index 0000000..3101d9e
+--- /dev/null
++++ b/tools/jgen/diag/d17_label_scoreboard.py
+@@ -0,0 +1,150 @@
++"""Scoreboards split by input label, failures on consistent inputs, and the score's separation (CPU, read-only).
++
++Inputs: the label JSON written by d14_input_consistency.py (--split pools) and the effective Step 2 pools
++(poolio.py, S2.1 overlays applied). Nothing is written under data/.
++
++Outputs
++  1. Per label (consistent / ambiguous / inconsistent): parents, pools, top-1 and floor means and medians,
++     regret, the share of pools with top-1 above 100 / 200 / 500 kJ/mol, and the median seed range.
++  2. Failures on consistent inputs: pools with top-1 above 200 kJ/mol, parents with seed range above 50 kJ/mol,
++     and the tail parents (top-1 above 500 in some seed), each with its label.
++  3. Score separation (D): AUC of the native top-1 score and of the pool's maximum score for separating
++     inconsistent from consistent parents, and the same AUC for the energy failure (top-1 above 200 kJ/mol),
++     so that the score's relation to the energy can be read next to its relation to the label. The AUC is the
++     probability that a randomly chosen consistent pool scores higher than a randomly chosen inconsistent pool
++     (ties count one half). Pool-level, seeds pooled.
++
++    python tools/jgen/diag/d17_label_scoreboard.py --labels <d14 json> --out-json <path>
++"""
++import argparse
++import collections
++import json
++import os
++import sys
++
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++from poolio import Repairs, control_tasks, load_effective  # noqa: E402
++
++
++def auc(pos, neg):
++    """P(score(pos) > score(neg)) with ties counted one half."""
++    pos, neg = np.asarray(pos, float), np.asarray(neg, float)
++    if len(pos) == 0 or len(neg) == 0:
++        return None
++    gt = (pos[:, None] > neg[None, :]).sum()
++    eq = (pos[:, None] == neg[None, :]).sum()
++    return round(float((gt + 0.5 * eq) / (len(pos) * len(neg))), 3)
++
++
++def summ(x):
++    x = np.asarray(x, float)
++    if x.size == 0:
++        return None
++    return dict(n=int(x.size), mean=round(float(x.mean()), 1), median=round(float(np.median(x)), 1),
++                p90=round(float(np.percentile(x, 90)), 1))
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--labels", required=True)
++    ap.add_argument("--root", default=str(ctxio.SCALED))
++    ap.add_argument("--out-json", default=None)
++    a = ap.parse_args()
++    lab = {p["code"]: p["label"] for p in json.load(open(a.labels))["parents"]}
++    rep = Repairs(a.root)
++    pools_dir = os.path.join(a.root, "pools")
++    rows = []
++    for code, seed, rec in control_tasks(os.path.join(a.root, "manifest.json")):
++        if code not in lab:
++            continue
++        p = load_effective(pools_dir, rep, code, seed)
++        if p is None:
++            continue
++        de = p["dE"]
++        score = p["score"]
++        top = int(np.argmax(score))
++        ci = p["coord_intact"]
++        rows.append(dict(code=code, seed=int(seed), label=lab[code], top1=float(de[top]), floor=float(de.min()),
++                         top1_score=float(score[top]), max_score=float(score.max()), n_rows=int(len(de)),
++                         n_classes=int(len(set(np.asarray(p["asg"]).tolist()))),
++                         top1_intact=None if ci is None else bool(ci[top]),
++                         pool_intact_share=None if ci is None else round(float(np.mean(ci)), 3),
++                         repaired=bool(p["repairs"])))
++    out = dict(pools=len(rows), parents=len({r["code"] for r in rows}))
++    by_label = collections.defaultdict(list)
++    for r in rows:
++        by_label[r["label"]].append(r)
++    out["per_label"] = {}
++    for L in ("consistent", "ambiguous", "inconsistent"):
++        rs = by_label.get(L, [])
++        T = np.array([r["top1"] for r in rs])
++        F = np.array([r["floor"] for r in rs])
++        codes = sorted({r["code"] for r in rs})
++        rng = []
++        for c in codes:
++            v = [r["top1"] for r in rs if r["code"] == c]
++            if len(v) == 3:
++                rng.append(max(v) - min(v))
++        if len(T) == 0:
++            out["per_label"][L] = dict(parents=0, pools=0)
++            continue
++        out["per_label"][L] = dict(
++            parents=len(codes), pools=int(len(T)), top1=summ(T), floor=summ(F), regret=summ(T - F),
++            share_top1_gt_100=round(float(np.mean(T > 100)), 3), share_top1_gt_200=round(float(np.mean(T > 200)), 3),
++            share_top1_gt_500=round(float(np.mean(T > 500)), 3), parents_3_seeds=len(rng),
++            seed_range_median=round(float(np.median(rng)), 1) if rng else None,
++            seed_range_gt_50=int(sum(1 for x in rng if x > 50)))
++
++    # 2. failures on consistent inputs (and where the other labels fall).
++    cons = [r for r in rows if r["label"] == "consistent"]
++    out["consistent_pools_top1_gt_200"] = [dict(code=r["code"], seed=r["seed"], top1=round(r["top1"], 1),
++                                                floor=round(r["floor"], 1), top1_intact=r["top1_intact"],
++                                                pool_intact_share=r["pool_intact_share"], n_rows=r["n_rows"])
++                                           for r in cons if r["top1"] > 200]
++    cats = collections.Counter()
++    for d in out["consistent_pools_top1_gt_200"]:
++        if d["top1_intact"]:
++            c = "top1_intact"
++        elif (d["pool_intact_share"] or 0) > 0:
++            c = "top1_nonintact_intact_row_exists"
++        else:
++            c = "top1_nonintact_no_intact_row"
++        cats[c + ("_few_rows" if d["n_rows"] <= 4 else "")] += 1
++    out["consistent_top1_gt_200_categories"] = dict(cats)
++    by_code = collections.defaultdict(list)
++    for r in rows:
++        by_code[r["code"]].append(r)
++    rng_all = {c: max(x["top1"] for x in v) - min(x["top1"] for x in v) for c, v in by_code.items() if len(v) == 3}
++    out["seed_range_gt_50"] = sorted([dict(code=c, label=lab[c], range=round(v, 1)) for c, v in rng_all.items() if v > 50],
++                                     key=lambda d: -d["range"])
++    tails = sorted({r["code"] for r in rows if r["top1"] > 500})
++    out["tail_parents"] = [dict(code=c, label=lab[c]) for c in tails]
++    out["seed_range_gt_50_by_label"] = dict(collections.Counter(d["label"] for d in out["seed_range_gt_50"]))
++
++    # 3. score separation.
++    bad = [r for r in rows if r["label"] == "inconsistent"]
++    good = [r for r in rows if r["label"] == "consistent"]
++    amb = [r for r in rows if r["label"] == "ambiguous"]
++    fail = lambda r: r["top1"] > 200
++    out["auc"] = dict(
++        top1_score_inconsistent_vs_consistent=auc([r["top1_score"] for r in good], [r["top1_score"] for r in bad]),
++        max_score_inconsistent_vs_consistent=auc([r["max_score"] for r in good], [r["max_score"] for r in bad]),
++        top1_score_ambiguous_vs_consistent=auc([r["top1_score"] for r in good], [r["top1_score"] for r in amb]),
++        energy_fail_auc_by_top1_score=auc([-r["top1_score"] for r in rows if fail(r)],
++                                          [-r["top1_score"] for r in rows if not fail(r)]),
++        energy_fail_auc_by_max_score=auc([-r["max_score"] for r in rows if fail(r)],
++                                         [-r["max_score"] for r in rows if not fail(r)]),
++        energy_fail_auc_by_label_inconsistent=auc([1 if r["label"] == "inconsistent" else 0 for r in rows if fail(r)],
++                                                  [1 if r["label"] == "inconsistent" else 0 for r in rows if not fail(r)]),
++        n_bad=len(bad), n_good=len(good), n_amb=len(amb))
++    print(ctxio.to_json(out))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(out))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d18_failed_parent_repro.py b/tools/jgen/diag/d18_failed_parent_repro.py
+new file mode 100644
+index 0000000..a0b474a
+--- /dev/null
++++ b/tools/jgen/diag/d18_failed_parent_repro.py
+@@ -0,0 +1,78 @@
++"""CPU reproduction of the failed control solves: BODCAY, LIYTAQ, OBABAX (read-only, CPU only).
++
++Manifest status (scaled_v1/manifest.json): BODCAY and LIYTAQ failed with 'Solver exception: ValueError: Bad
++Conformer Id' (no pool); OBABAX ended as 'oom' ('CUDA Out of Memory on solve_seeds after retrying max_rows down to
++128'), no pool. For each code this script (i) labels the SMILES with d14, (ii) runs the builder and the pre-beam
++set-up for seed 11 on CPU (multiseed.prepare, the same path the control solve takes), catching any exception, and
++(iii) when prepare succeeds, runs multiseed.seed_rows to see whether the beam stage reaches the same error.
++The exception type, message and the innermost repository frame are recorded. The OBABAX OOM is a GPU memory
++event and is not reproduced on CPU; the CPU result only says whether the set-up stage completes.
++
++    python tools/jgen/diag/d18_failed_parent_repro.py --codes BODCAY,LIYTAQ,OBABAX --out-json <path>
++"""
++import argparse
++import os
++import sys
++import traceback
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++import d14_input_consistency as d14  # noqa: E402
++
++
++def innermost_repo_frame(exc):
++    tb = traceback.extract_tb(exc.__traceback__)
++    repo = [f for f in tb if "/src/" in f.filename or "/refit/" in f.filename or "/tools/" in f.filename]
++    last = repo[-1] if repo else (tb[-1] if tb else None)
++    if last is None:
++        return None
++    return dict(file=os.path.relpath(last.filename, ctxio.REPO), line=last.lineno, func=last.name,
++                code=(last.line or "")[:160])
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--codes", required=True)
++    ap.add_argument("--seed", type=int, default=11)
++    ap.add_argument("--out-json", default=None)
++    a = ap.parse_args()
++    import json
++    idx = ctxio.frame_index()
++    results = []
++    for code in a.codes.split(","):
++        rec = dict(code=code, frame=idx.get(code))
++        mol = ctxio.load_parent(code, idx)
++        if mol is None:
++            rec["error"] = "not loadable"
++            results.append(rec)
++            continue
++        lab = d14.classify(mol)
++        rec.update(label=lab["label"], hard=lab["hard"], soft=lab["soft"], smiles=mol.smiles)
++        try:
++            from refit.nci_v2_pilot import build_builder_and_inputs
++            builder, _, berr = build_builder_and_inputs(mol)
++            rec["builder_error"] = berr
++            if builder is None:
++                results.append(rec)
++                continue
++            _, ctx, asg_w, perr = ctxio.load_ctx(mol, a.seed)
++            rec["prepare_ok"] = ctx is not None
++            if ctx is None:
++                rec["prepare_error"] = perr
++                results.append(rec)
++                continue
++            from tools.jdev import multiseed
++            multiseed.seed_rows(builder, ctx, asg_w[0], asg_w[1], [a.seed])
++            rec["seed_rows_ok"] = True
++        except Exception as exc:  # the point is to record it
++            rec["exception"] = "%s: %s" % (type(exc).__name__, str(exc)[:200])
++            rec["innermost_repo_frame"] = innermost_repo_frame(exc)
++        results.append(rec)
++    print(ctxio.to_json(dict(results=results)))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(dict(results=results)))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d19_smiles_only_status.py b/tools/jgen/diag/d19_smiles_only_status.py
+new file mode 100644
+index 0000000..f67d2d9
+--- /dev/null
++++ b/tools/jgen/diag/d19_smiles_only_status.py
+@@ -0,0 +1,146 @@
++"""Reference-free input-plausibility status from the SMILES alone, compared with the reference label (CPU, read-only).
++
++This is the candidate production status of roadmap_generation_v1.md section 2.0. It never reads the reference
++geometry, never rejects an input, and never changes the solver. For each pool parent it reports:
++
++  hard  hypervalent_S           S/Se/Te with valence 4, neutral, no O neighbour (RDKit valence after sanitising)
++  hard  absurd_light_charge     formal charge outside the element window (ctxio.LIGHT_QWIN)
++  hard  absurd_metal_charge     formal charge above the metal's highest common oxidation state (ctxio.MAX_OX)
++  hard  charge_imbalance_N      neutral N with >= 2 O- neighbours
++  soft  quinoid_pattern         a 5/6 ring of C/N atoms with an exocyclic double bond on a ring atom and fewer than
++                                floor(n/2) ring-internal double bonds, in the SMILES (no geometry)
++  soft  sanitize_failed         RDKit sanitisation of the metal-free ligand graph failed
++
++Status: 'implausible' if any hard flag; 'suspect' if any soft flag; otherwise 'plausible'. Ranking is never changed.
++Compared with the reference label of d14 (evaluation only) and with the energy failure (top-1 above 200 kJ/mol) on
++the effective pools. The AUC is the probability that a random failing pool has a higher count of flags than a
++random non-failing pool (ties one half).
++
++    python tools/jgen/diag/d19_smiles_only_status.py --labels <d14 band json> --out-json <path>
++"""
++import argparse
++import collections
++import json
++import os
++import sys
++
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import ctxio  # noqa: E402
++from poolio import Repairs, load_effective  # noqa: E402
++from ctxio import absurd_light, absurd_metal  # noqa: E402
++
++
++
++def smiles_flags(smi):
++    from rdkit import Chem
++    from rdkit.Chem import rdchem
++    hard, soft = set(), set()
++    m = Chem.MolFromSmiles(smi, sanitize=False)
++    if m is None:
++        return {"unparseable"}, set()
++    m.UpdatePropertyCache(strict=False)
++    if any(absurd_metal(a.GetSymbol(), a.GetFormalCharge()) for a in m.GetAtoms()
++           if a.GetSymbol() not in ctxio.LIGHT and a.GetSymbol() != "H"):
++        hard.add("absurd_metal_charge")
++    rw = Chem.RWMol(m)
++    for a in sorted(rw.GetAtoms(), key=lambda x: -x.GetIdx()):
++        if a.GetSymbol() not in ctxio.LIGHT:
++            rw.RemoveAtom(a.GetIdx())
++    lig = rw.GetMol()
++    try:
++        Chem.SanitizeMol(lig)
++    except Exception:
++        soft.add("sanitize_failed")
++    for a in lig.GetAtoms():
++        if absurd_light(a.GetSymbol(), a.GetFormalCharge()):
++            hard.add("absurd_light_charge")
++        if a.GetSymbol() in ("S", "Se", "Te") and a.GetTotalValence() == 4 and a.GetFormalCharge() == 0 \
++                and not any(n.GetSymbol() == "O" for n in a.GetNeighbors()):
++            hard.add("hypervalent_S")
++        if a.GetSymbol() == "N" and a.GetFormalCharge() == 0 and \
++                sum(1 for n in a.GetNeighbors() if n.GetSymbol() == "O" and n.GetFormalCharge() == -1) >= 2:
++            hard.add("charge_imbalance_N")
++    try:
++        Chem.Kekulize(lig, clearAromaticFlags=True)
++    except Exception:
++        pass
++    ri = lig.GetRingInfo()
++    for r in ri.AtomRings():
++        r = set(r)
++        n = len(r)
++        if n not in (5, 6) or not all(lig.GetAtomWithIdx(i).GetSymbol() in ("C", "N") for i in r):
++            continue
++        ring_double = exo = 0
++        for b in lig.GetBonds():
++            if b.GetBondType() != rdchem.BondType.DOUBLE:
++                continue
++            u, v = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
++            if u in r and v in r:
++                ring_double += 1
++            elif u in r or v in r:
++                exo += 1
++        if exo >= 1 and ring_double < n // 2:
++            soft.add("quinoid_pattern")
++    return hard, soft
++
++
++def auc_counts(pos, neg):
++    pos, neg = np.asarray(pos, float), np.asarray(neg, float)
++    if len(pos) == 0 or len(neg) == 0:
++        return None
++    return round(float(((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum())
++                       / (len(pos) * len(neg))), 3)
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--labels", required=True)
++    ap.add_argument("--out-json", default=None)
++    a = ap.parse_args()
++    from poolio import control_tasks
++    lab = {p["code"]: p["label"] for p in json.load(open(a.labels))["parents"]}
++    idx = ctxio.frame_index()
++    status = {}
++    for code in lab:
++        mol = ctxio.load_parent(code, idx)
++        if mol is None:
++            status[code] = dict(status="plausible", hard=[], soft=["not_loadable"])
++            continue
++        hard, soft = smiles_flags(mol.smiles)
++        st = "implausible" if hard else ("suspect" if soft else "plausible")
++        status[code] = dict(status=st, hard=sorted(hard), soft=sorted(soft))
++    rep = Repairs(str(ctxio.SCALED))
++    rows = []
++    for code, seed, rec in control_tasks(os.path.join(str(ctxio.SCALED), "manifest.json")):
++        if code not in lab:
++            continue
++        p = load_effective(os.path.join(str(ctxio.SCALED), "pools"), rep, code, seed)
++        if p is None:
++            continue
++        rows.append(dict(code=code, seed=seed, label=lab[code], status=status[code]["status"],
++                         n_hard=len(status[code]["hard"]), n_soft=len(status[code]["soft"]),
++                         fail=bool(p["dE"][int(np.argmax(p["score"]))] > 200)))
++    table = collections.Counter((r["label"], r["status"]) for r in rows)
++    cross = {f"{k[0]}|{k[1]}": v for k, v in sorted(table.items())}
++    by_status = {}
++    for s in ("plausible", "suspect", "implausible"):
++        rs = [r for r in rows if r["status"] == s]
++        by_status[s] = dict(pools=len(rs), fail_share=round(float(np.mean([r["fail"] for r in rs])), 3) if rs else None)
++    fail_flags = [r["n_hard"] + 0.5 * r["n_soft"] for r in rows if r["fail"]]
++    ok_flags = [r["n_hard"] + 0.5 * r["n_soft"] for r in rows if not r["fail"]]
++    out = dict(pools=len(rows), crosstab_label_status=cross, by_status=by_status,
++               auc_flag_count_failure=auc_counts(fail_flags, ok_flags),
++               auc_implausible_failure=auc_counts([1 if r["status"] == "implausible" else 0 for r in rows if r["fail"]],
++                                                  [1 if r["status"] == "implausible" else 0 for r in rows if not r["fail"]]),
++               flag_counts=dict(collections.Counter(f for s in status.values() for f in s["hard"] + s["soft"])),
++               status_by_code={c: s["status"] for c, s in status.items()})
++    print(ctxio.to_json(out))
++    if a.out_json:
++        with open(a.out_json, "w") as fh:
++            fh.write(ctxio.to_json(out))
++
++
++if __name__ == "__main__":
++    main()

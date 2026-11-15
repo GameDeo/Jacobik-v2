@@ -1,0 +1,17 @@
+configargparse==1.8.0
+e3nn==0.4.4
+gitdb==4.0.12
+gitpython==3.2.1
+graph_longrange==0.4.4
+h5py==3.16.0
+lightning_utilities==0.15.3
+lmdb==3.0.0
+git+https://github.com/ACEsuit/mace.git@726ecec6f3f739786664cf35d6622465fc926170
+orjson==3.13.0
+prettytable==3.18.0
+python_hostlist==2.3.0
+pyyaml==6.0.3
+smmap==5.0.3
+torch_ema==0.3
+torchmetrics==1.9.0
+tqdm==4.70.1

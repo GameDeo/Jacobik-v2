@@ -1,0 +1,121 @@
+{
+  "parents": [
+    "AJAQAD",
+    "AZUSIA",
+    "BOTYUH",
+    "CEHDUS",
+    "CIXYUD",
+    "DOHTOM",
+    "HEDJOP",
+    "LEGXEA",
+    "LUQVOK",
+    "MEJYIN",
+    "NOYTUS",
+    "NUCKUS",
+    "NUWFAM",
+    "OMAGAK",
+    "QEZVEY",
+    "RIQDEB",
+    "SESWIZ",
+    "UBOBUI",
+    "USAPOU",
+    "XEVDAE",
+    "XOJHIN",
+    "YUYGOP",
+    "ZAQNUE",
+    "ZEFXAM"
+  ],
+  "seeds": [
+    11,
+    12,
+    13
+  ],
+  "expected_records": 144,
+  "actual_records": 144,
+  "ledger": [],
+  "fallback_stops": [],
+  "arms": {
+    "IA-k": {
+      "top1": {
+        "declared_parents": 24,
+        "declared_units": 72,
+        "finite_pairs": 72,
+        "missing": [],
+        "median": -4.441606756299734,
+        "mean": -20.593958421545622,
+        "complete_paired_parents": 24,
+        "parent_mean": -20.59395842154562,
+        "parent_clustered_ci95": [
+          -43.68057783475282,
+          -3.24069400115518
+        ]
+      },
+      "floor": {
+        "declared_parents": 24,
+        "declared_units": 72,
+        "finite_pairs": 72,
+        "missing": [],
+        "median": -4.879052174743265,
+        "mean": -19.203932199562487,
+        "complete_paired_parents": 24,
+        "parent_mean": -19.203932199562484,
+        "parent_clustered_ci95": [
+          -39.90364607800147,
+          -4.83066752197095
+        ]
+      },
+      "angle": {
+        "rows": 2435,
+        "p95": 37.6007347106933
+      },
+      "control_angle": {
+        "rows": 2510,
+        "p95": 35.17090950012205
+      },
+      "eligible": true,
+      "excluding_FEKKAJ_NUWFAM": {
+        "top1": {
+          "declared_parents": 23,
+          "declared_units": 69,
+          "finite_pairs": 69,
+          "missing": [],
+          "median": -4.586066577583551,
+          "mean": -21.530238385136794,
+          "complete_paired_parents": 23,
+          "parent_mean": -21.53023838513679,
+          "parent_clustered_ci95": [
+            -45.20850149624259,
+            -3.4229845091288977
+          ]
+        },
+        "floor": {
+          "declared_parents": 23,
+          "declared_units": 69,
+          "finite_pairs": 69,
+          "missing": [],
+          "median": -4.648357749916613,
+          "mean": -19.10882332202965,
+          "complete_paired_parents": 23,
+          "parent_mean": -19.10882332202965,
+          "parent_clustered_ci95": [
+            -40.64426556830682,
+            -4.113290244826636
+          ]
+        }
+      }
+    }
+  },
+  "advanced": [
+    "IA-k"
+  ],
+  "previous_G3d_failures": {
+    "step0": [
+      "FA",
+      "FR+"
+    ],
+    "clean24": [
+      "R2s",
+      "IA"
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "parents": [
+    "AJAQAD",
+    "AZUSIA",
+    "BOTYUH",
+    "CEHDUS",
+    "CIXYUD",
+    "DOHTOM",
+    "HEDJOP",
+    "LEGXEA",
+    "LUQVOK",
+    "MEJYIN",
+    "NOYTUS",
+    "NUCKUS",
+    "NUWFAM",
+    "OMAGAK",
+    "QEZVEY",
+    "RIQDEB",
+    "SESWIZ",
+    "UBOBUI",
+    "USAPOU",
+    "XEVDAE",
+    "XOJHIN",
+    "YUYGOP",
+    "ZAQNUE",
+    "ZEFXAM"
+  ],
+  "seeds": [
+    11,
+    12,
+    13
+  ],
+  "arms": [
+    "C1",
+    "R2s",
+    "IA"
+  ],
+  "reused_paired_profile_records": [
+    {
+      "code": "AJAQAD",
+      "arm": "C1",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/C1/records/AJAQAD_11.json",
+      "sha256": "543a10098412dcc43447ae3303ef87a0451abeb544807370366e67e2a945292a"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "C1",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/C1/records/AJAQAD_12.json",
+      "sha256": "b509b1a26d00f8d111fd952682969b2109e8121a81752119be70730fc7069aba"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "C1",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/C1/records/AJAQAD_13.json",
+      "sha256": "706fd7b6bddee010724c1875d48b5a5fea89ee584661877b7128476ca0572078"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "R2s",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/R2s/records/AJAQAD_11.json",
+      "sha256": "b3c8b6eb38542c1b24ade07887b69f86c9fcf03a60916e3e9b0c17c00e91b6be"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "R2s",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/R2s/records/AJAQAD_12.json",
+      "sha256": "fa07b70079eeaf5cfda37a2e9fa7cdc9cbb86d85f619db5c47325fea3590e338"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "R2s",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/R2s/records/AJAQAD_13.json",
+      "sha256": "6391c1171e8c8a7bb65df23bda41c22791e194761e129429b51eaaa13b95936d"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "IA",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/IA/records/AJAQAD_11.json",
+      "sha256": "56a3e6e128a703f8b54271e8e93b6d59117a036758a31440d3acd81a16bd2210"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "IA",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/IA/records/AJAQAD_12.json",
+      "sha256": "637e6dd3d669b83e9d8107ef568b150dea89401366ddc43a0aad0167ef67b95f"
+    },
+    {
+      "code": "AJAQAD",
+      "arm": "IA",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24/IA/records/AJAQAD_13.json",
+      "sha256": "dabd941827aeeeeacd437d84eab14063ee557de9d0c19dc228efc79a6779de3c"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "C1",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/C1/records/QEZVEY_11.json",
+      "sha256": "aa5c92992a7853078b2a9bfe822da3742897bd2f992a1721c8eedf72a317b214"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "C1",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/C1/records/QEZVEY_12.json",
+      "sha256": "50391cddaf8ec5787170cb9c8379c0db48abdc064436f8859e73565cbd9b4683"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "C1",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/C1/records/QEZVEY_13.json",
+      "sha256": "0b1f926a1a8af2c58ce31619da6b277750ab58fc64c0728005f147c17d7e08c8"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "R2s",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/R2s/records/QEZVEY_11.json",
+      "sha256": "994d229b03b52cc7c963ea1eb22fb47bc8ce40b5e21134a6ca455ecbdba53f94"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "R2s",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/R2s/records/QEZVEY_12.json",
+      "sha256": "224cd19deee9d3e88f5fa5729d7f3abbf8b214395bcc4b68107d65cd95b35b74"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "R2s",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/R2s/records/QEZVEY_13.json",
+      "sha256": "c5ac035b94bcdd0a29a3cd1b81a3699421151562fd2d05d5b84cc1d6335abc60"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "IA",
+      "seed": 11,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/IA/records/QEZVEY_11.json",
+      "sha256": "8e7a86f9523ba2d347a6e6b7534154a06e447ed85b8aef42523a98d744c6a8da"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "IA",
+      "seed": 12,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/IA/records/QEZVEY_12.json",
+      "sha256": "c4fc0ac638c71878069d221c8e4a776d86c07ea4357b2bb3b725467fe0a033c2"
+    },
+    {
+      "code": "QEZVEY",
+      "arm": "IA",
+      "seed": 13,
+      "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/profile_clean24_QEZVEY/IA/records/QEZVEY_13.json",
+      "sha256": "2ecf9651646dcaa1526813f0eb781cfa6d113025adacd5f89b7d09fbd8027696"
+    }
+  ],
+  "remaining_parents": [
+    "AZUSIA",
+    "BOTYUH",
+    "CEHDUS",
+    "CIXYUD",
+    "DOHTOM",
+    "HEDJOP",
+    "LEGXEA",
+    "LUQVOK",
+    "MEJYIN",
+    "NOYTUS",
+    "NUCKUS",
+    "NUWFAM",
+    "OMAGAK",
+    "RIQDEB",
+    "SESWIZ",
+    "UBOBUI",
+    "USAPOU",
+    "XEVDAE",
+    "XOJHIN",
+    "YUYGOP",
+    "ZAQNUE",
+    "ZEFXAM"
+  ],
+  "bench_runner_sha256": "d87fbf7e8d674697a5377424cc0942bf3f6b9fd4b547c7fe13bbbf033e5b7757",
+  "estimate": {
+    "profile_parent_wall_s": [
+      41.0,
+      582.8
+    ],
+    "method": "arithmetic mean of small and large paired profiles times parent count; descriptive planning estimate",
+    "total_s": 7485.599999999999,
+    "remaining_s": 6861.799999999999
+  }
+}

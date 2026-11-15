@@ -1,0 +1,18 @@
+name: architector
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - xtb-python
+  - ase
+  - numpy
+  - py3Dmol
+  - openbabel
+  - scipy
+  - jupyter
+  - numba
+  - pandas
+  - crest
+  - pynauty
+  - tqdm
+  - mendeleev

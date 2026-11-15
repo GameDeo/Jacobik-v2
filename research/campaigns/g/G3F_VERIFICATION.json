@@ -1,0 +1,37 @@
+{
+  "identity_units": 9,
+  "identity_all_pass": true,
+  "initial_parity": {
+    "passed": 21,
+    "failed": 14,
+    "reason": "torch deterministic mode was not enabled; retained failed verification log"
+  },
+  "corrected_parity": {
+    "passed": 18,
+    "failed": 0,
+    "setting": "torch.use_deterministic_algorithms(True), CUBLAS_WORKSPACE_CONFIG=:4096:8, matching benchmark"
+  },
+  "cpu_reference_and_generator_tests_passed": true,
+  "goldens": {
+    "production": "245/245",
+    "u1": "245/245",
+    "written": false
+  },
+  "replay_regeneration": "unchanged",
+  "fingerprints": {
+    "C1": "273f2ccbf892",
+    "IA_k": "5f74b14b57ed"
+  },
+  "elapsed_stage2_upper_bound_s": 1831.4282157421112,
+  "sha256": {
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/identity/result.json": "dff5355ed8ad83eafca68056d968b4a3cfc2cab6d69d1c28f482dbb67c0c5eef",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/parity_tests.log": "04fe6cadafef7e953ac285c2f5ee8f1adecfc13f2425fba9ef94b6b014f79465",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/parity_deterministic.log": "ee5fbc89a987ab9a5d846660af23990a772a4b453be51dd0dcb790d17855d180",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/golden_after.log": "45964884a85dc304ed7d2ae2b534e5e5b375d739dc201db83e442e5599b27342",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/replay_regenerate.log": "fbc59e589a8c91eb31cb2020da295097cfc0eeeba0ff7d03ce8f8a718a6bb768",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/cpu_smoke/timing.json": "123d15152eb7e883ca5d0630a94bca992a31867a4ca7c4d8527a106457572f63",
+    "src/jacobik/ik/finish_phase.py": "6c5e42b22dae24fe9cacd0d6f6ee0a2b2873b1972c8f5d6761ed68483d64355d",
+    "src/jacobik/ik/solver_replay.py": "a806f07ad75a4dc000ccea7b6d44a49387d3a35f437838a16991b5a18f539994",
+    "tools/jdev/build_replay_solver.py": "3146847329cb0726c3a4e906b4d914e5d2ba6f72665a011dc24f8ba869869b75"
+  }
+}

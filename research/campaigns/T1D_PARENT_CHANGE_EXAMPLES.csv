@@ -1,0 +1,11 @@
+csd_code,metal,changed_fields,donors_before,donors_after,cn_before,cn_after,geometry_before,geometry_after,site_labels_before,site_labels_after
+ACIVAL,Ag,donor_set;coordination_number;site_labels;geometry_label,2,3,2,3,linear,t_shaped,"[""P_phosphine"", ""O_carboxylate""]","[""P_phosphine"", ""O_carboxylate"", ""O_carboxylate""]"
+AMOVOP,Ag,donor_set;coordination_number;site_labels;geometry_label,3,4,3,4,t_shaped,see_saw,"[""S_thiolate"", ""N_pyridine"", ""N_pyridine""]","[""S_thiolate"", ""N_donor"", ""N_pyridine"", ""N_pyridine""]"
+AWEZAG,Ag,donor_set;coordination_number;site_labels;geometry_label,4,5,4,5,tetrahedral,square_pyr,"[""O_carboxylate"", ""As_donor"", ""As_donor"", ""As_donor""]","[""O_carboxylate"", ""O_carboxylate"", ""As_donor"", ""As_donor"", ""As_donor""]"
+BEMWIB,Ag,donor_set;coordination_number;site_labels;geometry_label,3,4,3,4,t_shaped,see_saw,"[""N_pyridine"", ""N_pyridine"", ""O_carboxylate""]","[""N_pyridine"", ""N_pyridine"", ""O_carboxylate"", ""O_carboxylate""]"
+BIJLEN,Ag,donor_set;coordination_number;site_labels;geometry_label,3,4,3,4,t_shaped,see_saw,"[""N_pyridine"", ""N_pyridine"", ""O_carboxylate""]","[""N_pyridine"", ""N_pyridine"", ""O_carboxylate"", ""O_carboxylate""]"
+BOYWOC,Ag,donor_set;coordination_number;site_labels;geometry_label,2,3,2,3,linear,t_shaped,"[""C_carbene"", ""O_carboxylate""]","[""C_carbene"", ""O_carboxylate"", ""O_carboxylate""]"
+BUKROP,Ag,donor_set;coordination_number;site_labels;geometry_label,5,6,5,6,square_pyr,trig_pris,"[""N_donor"", ""N_donor"", ""N_donor"", ""N_donor"", ""O_carboxylate""]","[""N_donor"", ""N_donor"", ""N_donor"", ""N_donor"", ""O_carboxylate"", ""O_carboxylate""]"
+COXSUF,Ag,donor_set;coordination_number;site_labels;geometry_label,3,4,3,4,t_shaped,see_saw,"[""O_carboxylate"", ""N_pyridine"", ""N_pyridine""]","[""O_carboxylate"", ""O_carboxylate"", ""N_pyridine"", ""N_pyridine""]"
+DAKXIZ,Ag,donor_set;coordination_number;site_labels;geometry_label,2,3,2,3,linear,t_shaped,"[""C_carbene"", ""O_carboxylate""]","[""C_carbene"", ""O_carboxylate"", ""O_carboxylate""]"
+DAKYUM,Ag,donor_set;coordination_number;site_labels;geometry_label,2,3,2,3,linear,t_shaped,"[""C_carbene"", ""O_carboxylate""]","[""C_carbene"", ""O_carboxylate"", ""O_carboxylate""]"

@@ -1,0 +1,128 @@
+{
+  "seeds": [
+    31,
+    32,
+    33
+  ],
+  "parents": [
+    {
+      "code": "FEKKAJ"
+    },
+    {
+      "code": "DUHHIX"
+    },
+    {
+      "code": "LOPCAW"
+    },
+    {
+      "code": "EDOBUV"
+    },
+    {
+      "code": "BOLGIU"
+    },
+    {
+      "code": "LOPJEF"
+    },
+    {
+      "code": "FUTSOD"
+    },
+    {
+      "code": "LUQVOK"
+    },
+    {
+      "code": "XUKKIA"
+    },
+    {
+      "code": "FEXWUC"
+    },
+    {
+      "code": "NOYTUS"
+    },
+    {
+      "code": "HUNGOP"
+    },
+    {
+      "code": "USAPOU"
+    },
+    {
+      "code": "EZIBUL"
+    },
+    {
+      "code": "NUWFAM"
+    },
+    {
+      "code": "CEHDUS"
+    },
+    {
+      "code": "DAMVAQ"
+    },
+    {
+      "code": "JUPPOZ"
+    },
+    {
+      "code": "HOXJUZ"
+    },
+    {
+      "code": "SILROY"
+    },
+    {
+      "code": "FASPOH"
+    },
+    {
+      "code": "SEJKOK"
+    },
+    {
+      "code": "NUCKUS"
+    },
+    {
+      "code": "ZAFPOP"
+    },
+    {
+      "code": "XOJHIN"
+    },
+    {
+      "code": "VAVBIE"
+    },
+    {
+      "code": "QUGXUN"
+    },
+    {
+      "code": "ZEFXAM"
+    },
+    {
+      "code": "POBCEQ"
+    },
+    {
+      "code": "VOBGUR"
+    },
+    {
+      "code": "OREHAV"
+    },
+    {
+      "code": "XIKGEE"
+    },
+    {
+      "code": "RUJCUW"
+    },
+    {
+      "code": "PENHEY"
+    },
+    {
+      "code": "NAGHUC"
+    },
+    {
+      "code": "WECHOE"
+    },
+    {
+      "code": "ZOQFOA"
+    },
+    {
+      "code": "RUVKIE"
+    },
+    {
+      "code": "QAPFAS"
+    }
+  ],
+  "cost_basis": "recorded 2060 timings; greedy cost balance, QEZVEY separate",
+  "estimated_serial_s": 3472.4925000000003
+}

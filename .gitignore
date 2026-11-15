@@ -1,0 +1,17 @@
+# environment and caches
+.pixi/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# data: inputs, refit outputs, pools, energies (archived separately, see ARCHITECTURE.md)
+/data
+/research
+/dev
+
+# IDE and local editor state
+.claude/
+AGENTS.md
+GEMINI.md
+

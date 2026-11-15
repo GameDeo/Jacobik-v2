@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NCI · Structure, forces & motion</title>
+<style>
+:root{color-scheme:light;--ink:#213449;--muted:#52677a;--line:#d5dfe5;--blue:#2164ad;--orange:#c45732;--green:#168078}*{box-sizing:border-box}body{margin:0;background:#eef2f5;color:var(--ink);font:14px system-ui,Segoe UI,sans-serif}header{padding:18px 24px 12px;background:#fff;border-bottom:1px solid var(--line)}h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.5px}.subtitle{color:var(--muted);margin:5px 0 12px;max-width:1100px}.controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px 18px}.controls label{display:grid;gap:4px;font-size:12px;color:var(--muted)}select,button,input{font:inherit}select,button{border:1px solid #bbcbd7;border-radius:6px;background:white;padding:7px 9px;color:var(--ink)}button{cursor:pointer}button:hover{background:#eaf1f7}input[type=range]{width:115px}label.check{display:flex;gap:6px;align-items:center;align-self:center}main{padding:14px 18px}.panels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.panel{border:1px solid var(--line);border-radius:9px;background:white;overflow:hidden}.panelhead{padding:10px 13px;border-bottom:1px solid var(--line)}.panelhead h2{font-size:15px;margin:0 0 4px}.energy{font-size:12px;color:var(--muted);line-height:1.65}.viewer{height:440px;position:relative}.panelinfo{padding:7px 12px;min-height:44px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.legendline{display:flex;gap:12px;align-items:center;margin:12px 0;flex-wrap:wrap;font-size:12px}.gradient{width:200px;height:13px;border-radius:3px;background:linear-gradient(90deg,#edf4ff,#49a6c0,#f4c66e,#c34437)}.legendlimits{display:flex;width:200px;justify-content:space-between;font-variant-numeric:tabular-nums}.hint{color:var(--muted);font-size:12px}.lower{display:grid;grid-template-columns:minmax(340px,.95fr) minmax(380px,1.25fr);gap:12px}.card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:12px}h3{font-size:15px;margin:0 0 10px}table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}th,td{padding:6px 7px;text-align:right;border-bottom:1px solid #e6edf1}th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-weight:600}.tablewrap{max-height:245px;overflow:auto}.tablewrap th{position:sticky;top:0;background:white}tr.pick{cursor:pointer}tr.pick:hover{background:#edf5fb}tr.selected{background:#e5f1fb}.modebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.modebar select{flex:1;min-width:220px}.metric{font-variant-numeric:tabular-nums}.positive{color:#b54125}.negative{color:#2164ad}.chip{padding:3px 7px;border-radius:4px;background:#edf3f8;font-size:12px}#chart{width:100%;height:230px}.note{font-size:12px;line-height:1.6;color:var(--muted);margin:8px 0 0}.error{padding:16px;color:#a12626;background:#fff2f0}#error:empty{display:none}.detail-empty{color:var(--muted);padding:15px 0}.spacer{flex:1}.contactlist{max-height:200px;overflow:auto}.atom-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.tiny{font-size:11px;color:var(--muted)}.bondcard{padding-top:8px}summary{cursor:pointer;font-weight:600}details .note{margin-top:8px}#atomdetail{min-height:100px}.clear{color:var(--muted);font-size:12px}#status{font-size:12px;margin-left:14px;color:var(--green)}@media(max-width:1150px){.viewer{height:350px}.lower{grid-template-columns:1fr 1fr}}@media(max-width:850px){.panels,.lower{grid-template-columns:1fr}.viewer{height:400px}main{padding:10px}header{padding:14px}}
+</style>
+<script>/*__3DMOL__*/</script></head>
+<body><header>
+<h1>NCI · Structure, forces & motion <span id="status">Loading…</span></h1>
+<p class="subtitle">Rotate or zoom any structure to move all three views. Click an atom or a bond to compare the same location. Select a motion to see where it acts and how the measured energy responds.</p>
+<p id="experimentnote" class="note"></p>
+<div class="controls">
+<label>Complex<select id="case"></select></label><label>Seed<select id="seed"></select></label>
+<label>Atom colors<select id="metric"><option value="force">Force magnitude</option><option value="energy">Atomic model-local ΔE</option><option value="bond">Bond length change</option><option value="element">Elements</option></select></label>
+<label>Compare colors against<select id="baseline"><option value="reference">Reference</option><option value="before">Before NCI</option><option value="after">After NCI</option></select></label>
+<label>Arrows<select id="arrows"><option value="force">MACE forces</option><option value="difference">Force change vs baseline</option><option value="mode">Selected motion, downhill direction</option><option value="none">None</option></select></label>
+<label>Alignment<select id="alignment"><option value="core">Coordination core</option><option value="heavy">All heavy atoms</option><option value="raw">Original coordinates</option></select></label>
+<label class="check"><input id="hydrogens" type="checkbox">Hydrogens</label>
+<label class="check"><input id="contacts" type="checkbox" checked>NCI guides</label>
+<label class="check"><input id="numbers" type="checkbox">Atom IDs</label>
+<button id="reset">Reset view</button>
+</div>
+<div class="controls" style="margin-top:10px">
+<label>Color limit (auto = shared maximum)<input id="colorlimit" type="number" min="0" step="1" value="0" style="width:100px;padding:5px"></label>
+<label>Arrow scale<input id="scale" type="range" min="0.5" max="3" step="0.1" value="1"></label>
+<label>Maximum arrows per structure<select id="arrowcount"><option>8</option><option selected>16</option><option>32</option><option value="999">All</option></select></label>
+<span id="arrowlegend" class="hint"></span>
+</div></header>
+<div id="error"></div><main>
+<div class="panels" id="panels"></div>
+<div class="legendline"><div><div class="gradient" id="gradient"></div><div class="legendlimits"><span id="low"></span><span id="high"></span></div></div><span id="legendtext"></span><span class="spacer"></span><span class="hint">Atom energy colors show the local model component. Global terms stay separate above each view.</span></div>
+<div class="lower"><div>
+<section class="card"><div class="atom-title"><h3 id="atomtitle">Inspect an atom</h3><button id="clearatom" class="clear">Clear selection</button></div><div id="atomdetail" class="detail-empty">Click any atom. The same atom will be highlighted in all views.</div></section>
+<section class="card"><div class="atom-title"><h3>Coordination and bond geometry</h3><select id="geometry"><option value="distance">Distances</option><option value="angle">Coordination angles</option></select></div><div id="bondtable" class="tablewrap"></div><p class="note">Metal–donor distances use verified coordination sites; haptic sites use the donor-face centroid. Click a row to highlight that site or bond. Small numbers beside each value are changes from reference.</p></section>
+<section class="card"><h3>NCI contacts in the after structure</h3><div id="contacttable" class="contactlist"></div><p class="note">Green guides show favorable contacts. Contact-opening motions move an entire ligand and can change other interactions too.</p></section>
+</div><div>
+<section class="card"><h3>Inspect a motion</h3><div class="modebar"><select id="mode"></select><button id="modearrows">Show motion arrows</button><button id="animate">Animate motion</button></div>
+<p id="modenote" class="note"></p><div id="modetable" style="margin-top:8px"></div>
+<svg id="chart" viewBox="0 0 620 230" role="img" aria-label="Measured energy changes along the selected motion"></svg>
+<p class="note">Each curve is ΔE from its own undisplaced structure at the displacement steps labelled on the chart. Step sizes and derivative refinements vary between datasets. The optional motion preview is enlarged for visibility; its energies and forces are not recomputed.</p>
+<details><summary>Score response along this motion</summary><div id="scoretable" style="margin-top:8px"></div><p class="note">Positive dS/dh means the statistical term favors the positive motion. Negative dE/dh means MACE energy favors it. These slopes use different units; their numerical magnitudes are not directly comparable.</p></details>
+</section>
+<section class="card"><h3>How to read the map</h3><p class="note">Force arrows point in the direction that lowers total MACE energy locally. Red energy colors mean a higher model-local atomic contribution than the selected baseline; blue means lower. Bond colors are red for lengthening and blue for shortening, which does not by itself establish whether a bond is strained.</p><p class="note">The modes here are named ligand translations, rotations, torsions and contact openings, not vibrational eigenmodes. All measurements use the same float64 MACE model. Reference structures need not have zero MACE force.</p></section>
+</div></div></main>
+<script>
+'use strict';
+const DATA=/*__DATA__*/;
+const $=id=>document.getElementById(id), roles=['reference','before','after'];
+const defaultTitles=['Reference','Before · NCI off','After · NCI on'];
+let titles=defaultTitles;
+const series=['#52677a','#2164ad','#c45732'];
+let views=[],models=[],state={code:Object.keys(DATA)[0],seed:11,atom:null,bond:null,mode:null,animating:false},ghosts=[],lastFrame=0;
+const norm=v=>Math.hypot(...v), add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,b)=>a.map(v=>v*b),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const centroid=(x,rows)=>rows.reduce((s,i)=>add(s,x[i]),[0,0,0]).map(v=>v/rows.length);
+const fmt=(v,d=2)=>Number.isFinite(v)?v.toFixed(d):'—';
+const signed=(v,d=2)=>Number.isFinite(v)?(v>0?'+':'')+v.toFixed(d):'—';
+function data(){return DATA[state.code]}function key(role){return role==='reference'?'reference':`s${state.seed}_${role}`}function pose(role){return data().poses[key(role)]}function frame(role){return pose(role).frames[$('alignment').value]}
+function baseline(){return $('baseline').value}function selectedMode(role){return frame(role).modes.find(m=>m.label===state.mode)}
+function error(e){$('error').textContent='Viewer error: '+(e.stack||e.message||e);$('status').textContent='Needs attention';console.error(e)}
+window.addEventListener('error',e=>error(e.error||e.message));
+function colorMix(a,b,t){return '#'+a.map((v,i)=>Math.round(v+(b[i]-v)*t).toString(16).padStart(2,'0')).join('')}
+function color(value,limit,diverging){let x=Math.min(1,Math.max(0,Math.abs(value)/Math.max(limit,1e-9)));if(diverging)return colorMix([245,247,249],value<0?[42,103,175]:[195,68,55],x);let stops=[[237,244,255],[73,166,192],[244,198,110],[195,68,55]],u=x*3,i=Math.min(2,Math.floor(u));return colorMix(stops[i],stops[i+1],u-i)}
+function atomValues(role){let p=pose(role),b=pose(baseline()),kind=$('metric').value;if(kind==='force')return frame(role).forces.map(norm);if(kind==='energy')return p.local.map((v,i)=>v-b.local[i]);if(kind==='bond'){let vals=p.local.map(()=>0);data().bonds.forEach((bond,j)=>{let d=p.bond_lengths[j]-b.bond_lengths[j];for(let i of [bond.i,bond.j])if(Math.abs(d)>Math.abs(vals[i]))vals[i]=d});data().sites.forEach((site,j)=>{let d=p.site_distances[j]-b.site_distances[j];for(let i of [data().metal,...site.rows])if(Math.abs(d)>Math.abs(vals[i]))vals[i]=d});return vals}return p.local.map(()=>0)}
+function sharedLimit(){let manual=Number($('colorlimit').value);if(manual>0)return manual;let vals=roles.flatMap(r=>atomValues(r).map(Math.abs));if($('metric').value==='bond')vals.push(...roles.flatMap(r=>pose(r).site_distances.map((x,j)=>Math.abs(x-pose(baseline()).site_distances[j]))));return Math.max(1e-6,...vals)}
+function visible(i){return $('hydrogens').checked||data().symbols[i]!=='H'}
+function atomsAt(X){let c=data();return c.symbols.map((elem,i)=>({elem,serial:i+1,x:X[i][0],y:X[i][1],z:X[i][2],bonds:c.bonds.filter(b=>b.i===i||b.j===i).map(b=>b.i===i?b.j:b.i),bondOrder:c.bonds.filter(b=>b.i===i||b.j===i).map(b=>b.order),properties:{atom:i}}))}
+const vec=p=>({x:p[0],y:p[1],z:p[2]});
+function line(view,a,b,color='#168078',radius=.035,dashed=false){if(dashed)view.addLine({start:vec(a),end:vec(b),color,dashed:true,linewidth:2});else view.addCylinder({start:vec(a),end:vec(b),radius,color,fromCap:1,toCap:1})}
+function label(view,text,p,color='#213449'){view.addLabel(text,{position:vec(p),fontSize:11,fontColor:color,backgroundColor:'white',backgroundOpacity:.9,borderThickness:0,inFront:true})}
+function stopAnimation(){state.animating=false;$('animate').textContent='Animate motion';ghosts.forEach((m,i)=>{if(m)views[i].removeModel(m)});ghosts=[]}
+function draw(reset=false){
+ stopAnimation();let c=data(),lim=sharedLimit(),kind=$('metric').value,base=pose(baseline());
+ for(let q=0;q<3;q++){
+  let r=roles[q],p=pose(r),f=frame(r),v=views[q],camera=reset?null:v.getView();v.clear();
+  let model=v.addModel();model.addAtoms(atomsAt(f.X));models[q]=model;
+  let vals=atomValues(r),colorFunc=a=>kind==='element'?($3Dmol.elementColors.defaultColors[a.elem]||'#bbbbbb'):color(vals[a.index],lim,kind!=='force');
+  model.setStyle({},{stick:{radius:.105,colorfunc:colorFunc},sphere:{scale:.26,colorfunc:colorFunc}});
+  if(!$('hydrogens').checked)model.setStyle({elem:'H'},{});
+  model.setStyle({index:c.metal},{sphere:{scale:.45,colorfunc:colorFunc},stick:{radius:.12,colorfunc:colorFunc}});
+  model.setClickable({},true,a=>{state.atom=a.index;state.bond=null;state.site=undefined;state.angle=undefined;draw()});
+  model.setHoverable({},true,(a,viewer)=>{let i=a.index;viewer._atomTip=viewer.addLabel(`${a.elem}${i+1} · |F| ${fmt(norm(f.forces[i]),1)} · Δlocal ${signed(p.local[i]-base.local[i])}`,{position:a,fontSize:12,backgroundColor:'white',fontColor:'#213449',backgroundOpacity:.95,inFront:true});viewer.render()},(a,viewer)=>{if(viewer._atomTip)viewer.removeLabel(viewer._atomTip);viewer.render()});
+  c.sites.forEach((s,j)=>{let a=f.X[c.metal],b=centroid(f.X,s.rows),change=p.site_distances[j]-base.site_distances[j];line(v,a,b,kind==='bond'?color(change,Math.max(lim,.03),true):'#8094a5',kind==='bond'?.095:.035,kind!=='bond')});
+  c.bonds.forEach((b,j)=>{if(!visible(b.i)||!visible(b.j))return;let spec={start:vec(f.X[b.i]),end:vec(f.X[b.j]),radius:.045,color:'#657888',opacity:0.05,clickable:true,callback:()=>{state.bond=j;state.atom=null;state.site=undefined;state.angle=undefined;draw()}};v.addCylinder(spec);if(kind==='bond'){let d=p.bond_lengths[j]-base.bond_lengths[j];line(v,f.X[b.i],f.X[b.j],color(d,lim,true),.115)}});
+  if($('contacts').checked)p.contacts.filter(ct=>ct.score>.4).slice(0,8).forEach(ct=>{let groups=ct.type==='hb'?ct.groups.slice(1):ct.groups;line(v,centroid(f.X,groups[0]),centroid(f.X,groups[1]),'#168078',.025,true)});
+  if(state.atom!==null){let i=state.atom;v.addSphere({center:vec(f.X[i]),radius:.4,color:'#ddaa22',opacity:.35});label(v,`${c.symbols[i]}${i+1}`,f.X[i]);}
+  if(state.bond!==null){let b=c.bonds[state.bond];line(v,f.X[b.i],f.X[b.j],'#d4a21c',.17);label(v,`${fmt(p.bond_lengths[state.bond],3)} Å`,centroid(f.X,[b.i,b.j]));}
+  if(state.site!==undefined){let s=c.sites[state.site];line(v,f.X[c.metal],centroid(f.X,s.rows),'#d4a21c',.085,true);label(v,`${fmt(p.site_distances[state.site],3)} Å`,centroid(f.X,[c.metal,...s.rows]));}
+  if(state.angle!==undefined){for(let i of c.angle_pairs[state.angle])line(v,f.X[c.metal],centroid(f.X,c.sites[i].rows),'#d4a21c',.09,true);label(v,`${fmt(p.site_angles[state.angle],2)}°`,f.X[c.metal]);}
+  if($('numbers').checked)f.X.forEach((x,i)=>{if(visible(i))label(v,`${c.symbols[i]}${i+1}`,x)});
+  drawArrows(q);
+  if(reset)v.zoomTo();else if(camera)v.setView(camera,true);
+  v.render();
+  let e=p.energy,ref=pose('reference').energy;
+  $('energy'+q).innerHTML=`Total ΔE vs reference <b>${signed(e.total-ref.total)} kJ/mol</b><br>Local sum ${signed(e.model_local_sum-ref.model_local_sum)} · global remainder ${signed(e.nonlocal_residual-ref.nonlocal_residual)}`;
+  if(Number.isFinite(e.electrostatic_energy)&&Number.isFinite(ref.electrostatic_energy)&&Number.isFinite(e.electron_energy)&&Number.isFinite(ref.electron_energy))$('energy'+q).innerHTML+=`<br>Global components: electrostatic ${signed(e.electrostatic_energy-ref.electrostatic_energy)} · electronic ${signed(e.electron_energy-ref.electron_energy)}`;
+  $('info'+q).textContent=`${c.symbols.length} atoms · force RMS ${fmt(Math.sqrt(f.forces.reduce((s,a)=>s+dot(a,a),0)/c.symbols.length),1)} kJ/mol/Å${state.mode&&!selectedMode(r)?' · selected motion not measured here':''}`;
+ }
+ updateLegend(lim);updateDetails();updateBonds();updateContacts();updateMode();$('status').textContent=`${state.code} · seed ${state.seed} · measured MACE64`;
+}
+function drawArrows(q){let r=roles[q],f=frame(r),v=views[q],kind=$('arrows').value,scale=Number($('scale').value);if(kind==='none')return;
+ let vectors;if(kind==='mode'){let m=selectedMode(r);if(!m)return;vectors=m.v.map(x=>mul(x,m.dE_dh>0?-1:1));let max=Math.max(1e-9,...roles.flatMap(role=>selectedMode(role)?.v.map(norm)||[]));vectors=vectors.map(x=>mul(x,1.25*scale/max))}
+ else {vectors=f.forces;if(kind==='difference'){let b=frame(baseline()).forces;vectors=vectors.map((x,i)=>sub(x,b[i]))}vectors=vectors.map(x=>mul(x,.004*scale))}
+ let ix=vectors.map((x,i)=>({i,n:norm(x)})).filter(x=>visible(x.i)&&x.n>.025).sort((a,b)=>b.n-a.n).slice(0,Number($('arrowcount').value));
+ for(let {i,n} of ix){let d=mul(vectors[i],Math.min(1,2.5/n));v.addArrow({start:vec(f.X[i]),end:vec(add(f.X[i],d)),radius:.035,radiusRatio:2.5,mid:.76,color:kind==='mode'?'#8b469b':'#243e58'})}
+}
+function updateLegend(lim){let kind=$('metric').value,div=kind==='energy'||kind==='bond';$('gradient').style.background=div?'linear-gradient(90deg,#2a67af,#f5f7f9,#c34437)':'linear-gradient(90deg,#edf4ff,#49a6c0,#f4c66e,#c34437)';$('low').textContent=div?signed(-lim):'0';$('high').textContent=fmt(lim,kind==='bond'?3:1);$('legendtext').textContent=kind==='force'?'|Force| · kJ/mol/Å':kind==='energy'?`Model-local atomic ΔE vs ${baseline()} · kJ/mol`:kind==='bond'?`Length change vs ${baseline()} · Å (atoms use largest incident change)`:'Element colors';$('gradient').style.visibility=kind==='element'?'hidden':'visible';$('arrowlegend').textContent=$('arrows').value==='mode'?'Purple arrows: energy-decreasing direction of the selected motion.':`Force arrows: ${fmt(.004*Number($('scale').value),4)} Å per kJ/mol/Å; length capped at 2.5 Å.`}
+function header(first){return `<thead><tr><th>${first}</th>${titles.map((t,i)=>`<th style="color:${series[i]}">${t.split(' · ')[0]}</th>`).join('')}</tr></thead>`}
+function updateDetails(){let i=state.atom,c=data();if(i===null){$('atomtitle').textContent=state.bond===null?'Inspect an atom':'Selected bond';$('atomdetail').innerHTML=state.bond===null?'Click any atom. The same atom will be highlighted in all views.':'The selected bond is highlighted in gold. Its lengths are listed below.';return}
+ $('atomtitle').textContent=`${c.symbols[i]}${i+1} · ${c.ligand[i]<0?'metal':'ligand '+c.ligand[i]}`;
+ let rows=[['|Force| (kJ/mol/Å)',r=>fmt(norm(frame(r).forces[i]),2)],['Δlocal E vs reference (kJ/mol)',r=>signed(pose(r).local[i]-pose('reference').local[i])],['Δlocal E vs before (kJ/mol)',r=>signed(pose(r).local[i]-pose('before').local[i])]];
+ for(let [j,ax] of ['x','y','z'].entries())rows.push([`Force ${ax} (aligned frame)`,r=>signed(frame(r).forces[i][j])]);
+ $('atomdetail').innerHTML='<table>'+header('Atom metric')+'<tbody>'+rows.map(([title,fn])=>`<tr><td>${title}</td>${roles.map(r=>`<td>${fn(r)}</td>`).join('')}</tr>`).join('')+'</tbody></table>';
+}
+function updateBonds(){let c=data(),isAngle=$('geometry').value==='angle',rows=c.sites.map((s,j)=>({label:`Metal → ${s.kind==='haptic'?'face':'donor'} ${s.rows.map(i=>c.symbols[i]+(i+1)).join(', ')}`,values:roles.map(r=>pose(r).site_distances[j]),site:j}));
+ let ix=c.bonds.map((b,j)=>({b,j,change:Math.abs(pose('after').bond_lengths[j]-pose('reference').bond_lengths[j])})).filter(x=>state.atom===null||[x.b.i,x.b.j].includes(state.atom)).sort((a,b)=>b.change-a.change).slice(0,18);
+ rows.push(...ix.map(({b,j})=>({label:`${c.symbols[b.i]}${b.i+1}–${c.symbols[b.j]}${b.j+1}`,values:roles.map(r=>pose(r).bond_lengths[j]),bond:j})));
+ if(isAngle)rows=c.angle_pairs.map(([i,j],k)=>({label:`Site ${i+1}–metal–site ${j+1}`,values:roles.map(r=>pose(r).site_angles[k]),angle:k}));
+ $('bondtable').innerHTML='<table>'+header(isAngle?'Angle (°)':'Distance (Å)')+'<tbody>'+rows.map((row,j)=>`<tr class="pick ${row.bond===state.bond&&row.bond!==undefined?'selected':''}" data-row="${j}"><td>${row.label}</td>${row.values.map((x,i)=>`<td title="Δ vs ref ${signed(x-row.values[0],4)} ${isAngle?'degrees':'Å'}">${fmt(x,isAngle?2:3)}<span class="tiny"> ${i?signed(x-row.values[0],isAngle?2:3):''}</span></td>`).join('')}</tr>`).join('')+'</tbody></table>';
+ $('bondtable').querySelectorAll('[data-row]').forEach(el=>el.onclick=()=>{let row=rows[Number(el.dataset.row)];state.bond=row.bond??null;state.site=row.site;state.angle=row.angle;draw()});
+}
+function updateContacts(){let c=data(),contacts=pose('after').contacts.filter(ct=>ct.score>.15).sort((a,b)=>b.score-a.score).slice(0,14);
+ $('contacttable').innerHTML='<table><thead><tr><th>Contact</th><th>Distance</th><th>Score (nats)</th></tr></thead><tbody>'+contacts.map((ct,j)=>{let names=ct.groups.map(g=>g.length>1?'ring '+g.map(i=>i+1).join(','):c.symbols[g[0]]+(g[0]+1));return `<tr class="pick" data-contact="${j}"><td>${ct.type} · ${names.join(' → ')}</td><td>${fmt(ct.r,2)} Å</td><td>${fmt(ct.score,2)}</td></tr>`}).join('')+'</tbody></table>';
+ $('contacttable').querySelectorAll('[data-contact]').forEach(el=>el.onclick=()=>{let ct=contacts[Number(el.dataset.contact)],name=`${ct.type}_contact_${ct.candidate}_ligand_open`;if([...$('mode').options].some(o=>o.value===name)){state.mode=name;$('mode').value=name;$('arrows').value='mode'}state.atom=ct.groups[ct.type==='hb'?1:0][0];draw()});
+}
+function refreshModes(){let modes=new Map;roles.forEach(r=>frame(r).modes.forEach(m=>{let old=modes.get(m.label);if(!old||Math.abs(m.dE_dh)>old.rank)modes.set(m.label,{label:m.label,rank:Math.abs(m.dE_dh),kind:m.kind})}));let sorted=[...modes.values()].sort((a,b)=>b.rank-a.rank);$('mode').innerHTML=sorted.map(m=>`<option value="${m.label}">${m.label.replaceAll('_',' ')} · ${m.kind}</option>`).join('');if(!modes.has(state.mode)){let preferred=frame('after').modes.filter(m=>m.kind==='contact'&&m.label.startsWith('pp_')).sort((a,b)=>Math.abs(b.dE_dh)-Math.abs(a.dE_dh))[0];state.mode=preferred?.label||sorted[0]?.label}$('mode').value=state.mode}
+function updateMode(){let ms=roles.map(selectedMode),available=ms.filter(Boolean);$('modenote').textContent=available.length?`${state.mode.replaceAll('_',' ')}. Purple arrows show −sign(dE/dh) × the normalized motion. A missing entry means this motion was not measured for that structure.${available.some(m=>['translation','rotation'].includes(m.kind))?' Lab-axis directions rotate with alignment; each curve follows its own displayed motion. Contact and torsion modes provide a common internal-motion comparison.':''}`:'Select a measured motion.';
+ let rows=[['dE/dh · kJ/mol/Å',m=>signed(m.dE_dh)],['Energy curvature · kJ/mol/Å²',m=>fmt(m.curvature,1)],['Force / finite-difference error',m=>fmt(m.fd_force_error,4)]];
+ $('modetable').innerHTML='<table>'+header('Energy response')+'<tbody>'+rows.map(([l,fn])=>`<tr><td>${l}</td>${ms.map(m=>`<td>${m?fn(m):'—'}</td>`).join('')}</tr>`).join('')+'</tbody></table>';
+ let terms=data().score_terms||['Q6_before','Q6_after','NCI_hb','NCI_pp','NCI_chp'];$('scoretable').innerHTML='<table>'+header('dS/dh · nats/Å')+'<tbody>'+terms.map(t=>`<tr><td>${t.replaceAll('_',' ')}</td>${ms.map(m=>`<td>${m?signed(m['dS_'+t+'_dh']):'—'}</td>`).join('')}</tr>`).join('')+'</tbody></table>';drawChart(ms);
+}
+function drawChart(ms){const w=620,h=230,pad={l:60,r:18,t:24,b:44};let all=ms.filter(Boolean),xs=all.flatMap(m=>m.h),ys=all.flatMap(m=>m.curve);if(!all.length){$('chart').innerHTML='';return}let xlim=Math.max(...xs.map(Math.abs)),ylim=Math.max(.01,...ys.map(Math.abs))*1.12;let xx=x=>pad.l+(x+xlim)/(2*xlim)*(w-pad.l-pad.r),yy=y=>h-pad.b-(y+ylim)/(2*ylim)*(h-pad.t-pad.b);let svg='';for(let y of [-ylim,0,ylim])svg+=`<line x1="${pad.l}" x2="${w-pad.r}" y1="${yy(y)}" y2="${yy(y)}" stroke="#dce5eb"/><text x="${pad.l-7}" y="${yy(y)+4}" text-anchor="end" font-size="11" fill="#52677a">${fmt(y,2)}</text>`;for(let x of [-xlim,0,xlim])svg+=`<text x="${xx(x)}" y="${h-pad.b+18}" text-anchor="middle" font-size="11" fill="#52677a">${fmt(x,2)}</text>`;ms.forEach((m,i)=>{if(!m)return;let points=m.h.map((x,j)=>`${xx(x)},${yy(m.curve[j])}`).join(' ');svg+=`<polyline points="${points}" fill="none" stroke="${series[i]}" stroke-width="2"/>`;m.h.forEach((x,j)=>svg+=`<circle cx="${xx(x)}" cy="${yy(m.curve[j])}" r="3" fill="${series[i]}"><title>${titles[i]}: h=${x}, ΔE=${m.curve[j].toFixed(5)} kJ/mol</title></circle>`)});svg+=`<text x="${pad.l}" y="14" font-size="11" fill="#52677a">ΔE from each structure (kJ/mol)</text><text x="${w/2}" y="${h-6}" text-anchor="middle" font-size="11" fill="#52677a">Motion coordinate h (Å tangent norm)</text>`;$('chart').innerHTML=svg}
+function modeMoved(X,m,h){if(!m.axis)return X.map((x,i)=>add(x,mul(m.v[i],h)));let rows=new Set(m.rows),a=m.axis,theta=h/m.rotation_scale;return X.map((x,i)=>{if(!rows.has(i))return x;let p=sub(x,m.origin),cross=[a[1]*p[2]-a[2]*p[1],a[2]*p[0]-a[0]*p[2],a[0]*p[1]-a[1]*p[0]];return add(m.origin,add(add(mul(p,Math.cos(theta)),mul(cross,Math.sin(theta))),mul(a,dot(p,a)*(1-Math.cos(theta)))))})}
+function animate(now){if(!state.animating)return;if(now-lastFrame>65){lastFrame=now;let phase=Math.sin(now/700)*.6;for(let i=0;i<3;i++){let m=selectedMode(roles[i]);if(!m)continue;let v=views[i];if(ghosts[i])v.removeModel(ghosts[i]);let g=v.addModel();g.addAtoms(atomsAt(modeMoved(frame(roles[i]).X,m,phase)));g.setStyle({},{stick:{radius:.09,color:'#964aab',opacity:.38}});if(!$('hydrogens').checked)g.setStyle({elem:'H'},{});ghosts[i]=g;v.render()}}requestAnimationFrame(animate)}
+function changeCase(){state.code=$('case').value;titles=data().titles||defaultTitles;document.querySelectorAll('.panelhead h2').forEach((el,i)=>el.textContent=titles[i]);[...$('baseline').options].forEach((el,i)=>el.textContent=titles[i]);$('experimentnote').textContent=data().description||'Historical comparison: original NCI model and its cached force measurements.';let seeds=data().seeds;$('seed').innerHTML=seeds.map(s=>`<option>${s}</option>`).join('');if(!seeds.includes(state.seed))state.seed=seeds[0];$('seed').value=state.seed;state.atom=null;state.bond=null;state.site=undefined;state.angle=undefined;refreshModes();draw(true)}
+function init(){
+ $('panels').innerHTML=roles.map((r,i)=>`<section class="panel"><div class="panelhead"><h2 style="color:${series[i]}">${titles[i]}</h2><div id="energy${i}" class="energy"></div></div><div id="viewer${i}" class="viewer"></div><div id="info${i}" class="panelinfo"></div></section>`).join('');
+ views=roles.map((r,i)=>$3Dmol.createViewer('viewer'+i,{backgroundColor:'#ffffff',antialias:true}));views.forEach(v=>views.forEach(o=>{if(v!==o)v.linkViewer(o)}));
+ $('case').innerHTML=Object.keys(DATA).map(c=>`<option>${c}</option>`).join('');if(!DATA[state.code])state.code=Object.keys(DATA)[0];$('case').value=state.code;$('case').onchange=changeCase;
+ $('seed').onchange=()=>{state.seed=Number($('seed').value);refreshModes();draw(true)};
+ ['metric','baseline','arrows','hydrogens','contacts','numbers','colorlimit','arrowcount','geometry'].forEach(id=>$(id).onchange=()=>draw());$('scale').oninput=()=>draw();$('alignment').onchange=()=>{refreshModes();draw(true)};$('reset').onclick=()=>draw(true);
+ $('clearatom').onclick=()=>{state.atom=null;state.bond=null;state.site=undefined;state.angle=undefined;draw()};$('mode').onchange=()=>{state.mode=$('mode').value;draw()};$('modearrows').onclick=()=>{$('arrows').value='mode';draw()};
+ $('animate').onclick=()=>{if(state.animating){stopAnimation();views.forEach(v=>v.render())}else{state.animating=true;$('animate').textContent='Stop preview';requestAnimationFrame(animate)}};
+ window.addEventListener('resize',()=>views.forEach(v=>{v.resize();v.render()}));changeCase();window.NCI_VIEWER={state,views,DATA,draw,modeMoved,atomValues,sharedLimit};
+}
+try{init()}catch(e){error(e)}
+</script></body></html>

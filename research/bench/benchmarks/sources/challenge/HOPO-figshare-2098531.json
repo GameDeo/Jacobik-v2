@@ -1,0 +1,268 @@
+﻿{
+    "files":  [
+                  {
+                      "id":  3731797,
+                      "name":  "bc5b00572_si_001.pdf",
+                      "size":  3738210,
+                      "is_link_only":  false,
+                      "download_url":  "https://ndownloader.figshare.com/files/3731797",
+                      "supplied_md5":  "e3b98b3eb249ef0f34a81f72c1ba098b",
+                      "computed_md5":  "e3b98b3eb249ef0f34a81f72c1ba098b",
+                      "mimetype":  "application/pdf"
+                  }
+              ],
+    "folder_structure":  {
+
+                         },
+    "authors":  [
+                    {
+                        "id":  1322481,
+                        "full_name":  "Melissa\nA. Deri",
+                        "first_name":  "Melissa\nA.",
+                        "last_name":  "Deri",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1322478,
+                        "full_name":  "Shashikanth Ponnala",
+                        "first_name":  "Shashikanth",
+                        "last_name":  "Ponnala",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1368042,
+                        "full_name":  "Paul Kozlowski",
+                        "first_name":  "Paul",
+                        "last_name":  "Kozlowski",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1459849,
+                        "full_name":  "Benjamin P. Burton-Pye",
+                        "first_name":  "Benjamin P.",
+                        "last_name":  "Burton-Pye",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1459846,
+                        "full_name":  "Huseyin T. Cicek",
+                        "first_name":  "Huseyin T.",
+                        "last_name":  "Cicek",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  437906,
+                        "full_name":  "Chunhua Hu",
+                        "first_name":  "Chunhua",
+                        "last_name":  "Hu",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  254218,
+                        "full_name":  "Jason S. Lewis",
+                        "first_name":  "Jason S.",
+                        "last_name":  "Lewis",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1322484,
+                        "full_name":  "Lynn C. Francesconi",
+                        "first_name":  "Lynn C.",
+                        "last_name":  "Francesconi",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    }
+                ],
+    "custom_fields":  [
+
+                      ],
+    "figshare_url":  "https://acs.figshare.com/articles/journal_contribution/_i_p_i_SCN_Bn_HOPO_A_Superior_Bifunctional_Chelator_for_sup_89_sup_Zr_ImmunoPET/2098531",
+    "download_disabled":  false,
+    "description":  "Zirconium-89\nhas an ideal half-life for use in antibody-based PET\nimaging; however, when used with the chelator DFO, there is an accumulation\nof radioactivity in the bone, suggesting that the \u003csup\u003e89\u003c/sup\u003eZr\u003csup\u003e4+\u003c/sup\u003e cation is being released in vivo. Therefore, a more robust\nchelator for \u003csup\u003e89\u003c/sup\u003eZr could reduce the in vivo release and\nthe dose to nontarget tissues. Evaluation of the ligand 3,4,3-(LI-1,2-HOPO)\ndemonstrated efficient binding of \u003csup\u003e89\u003c/sup\u003eZr\u003csup\u003e4+\u003c/sup\u003e and\nhigh stability; therefore, we developed a bifunctional derivative, \u003ci\u003ep\u003c/i\u003e-SCN-Bn-HOPO, for conjugation to an antibody. A Zr-HOPO\ncrystal structure was obtained showing that the Zr is fully coordinated\nby the octadentate HOPO ligand, as expected, forming a stable complex. \u003ci\u003ep\u003c/i\u003e-SCN-Bn-HOPO was synthesized through a novel pathway. Both \u003ci\u003ep\u003c/i\u003e-SCN-Bn-HOPO and \u003ci\u003ep\u003c/i\u003e-SCN-Bn-DFO were conjugated\nto trastuzumab and radiolabeled with \u003csup\u003e89\u003c/sup\u003eZr. Both complexes\nlabeled efficiently and achieved specific activities of approximately\n2 mCi/mg. PET imaging studies in nude mice with BT474 tumors (\u003ci\u003en\u003c/i\u003e = 4) showed good tumor uptake for both compounds, but\nwith a marked decrease in bone uptake for the \u003csup\u003e89\u003c/sup\u003eZr-HOPO-trastuzumab\nimages. Biodistribution data confirmed the lower bone activity, measuring\n17.0%ID/g in the bone at 336 h for \u003csup\u003e89\u003c/sup\u003eZr-DFO-trastuzumab\nwhile \u003csup\u003e89\u003c/sup\u003eZr-HOPO-trastuzumab only had 2.4%ID/g. We successfully\nsynthesized \u003ci\u003ep\u003c/i\u003e-SCN-Bn-HOPO, a bifunctional derivative\nof 3,4,3-(LI-1,2-HOPO) as a potential chelator for \u003csup\u003e89\u003c/sup\u003eZr.\nIn vivo studies demonstrate the successful use of \u003csup\u003e89\u003c/sup\u003eZr-HOPO-trastuzumab\nto image BT474 breast cancer with low background, good tumor to organ\ncontrast, and, importantly, very low bone uptake. The reduced bone\nuptake seen with \u003csup\u003e89\u003c/sup\u003eZr-HOPO-trastuzumab suggests superior\nstability of the \u003csup\u003e89\u003c/sup\u003eZr-HOPO complex.",
+    "funding":  null,
+    "funding_list":  [
+
+                     ],
+    "version":  1,
+    "status":  "public",
+    "size":  3738210,
+    "created_date":  "2016-02-12T06:05:02Z",
+    "modified_date":  "2023-05-31T01:14:11Z",
+    "is_public":  true,
+    "is_confidential":  false,
+    "is_metadata_record":  false,
+    "confidential_reason":  "",
+    "metadata_reason":  "",
+    "license":  {
+                    "value":  10,
+                    "name":  "CC BY-NC 4.0",
+                    "url":  "https://creativecommons.org/licenses/by-nc/4.0/"
+                },
+    "tags":  [
+                 "bone uptake",
+                 "BT 474 tumors",
+                 "Superior Bifunctional Chelator",
+                 "image BT 474 breast cancer",
+                 "chelator",
+                 "DFO",
+                 "vivo",
+                 "octadentate HOPO ligand",
+                 "89 Zr",
+                 "LI",
+                 "ID"
+             ],
+    "keywords":  [
+                     "bone uptake",
+                     "BT 474 tumors",
+                     "Superior Bifunctional Chelator",
+                     "image BT 474 breast cancer",
+                     "chelator",
+                     "DFO",
+                     "vivo",
+                     "octadentate HOPO ligand",
+                     "89 Zr",
+                     "LI",
+                     "ID"
+                 ],
+    "categories":  [
+                       {
+                           "id":  4,
+                           "title":  "Biochemistry",
+                           "parent_id":  38,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  146,
+                           "title":  "Space Science",
+                           "parent_id":  43,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  7,
+                           "title":  "Medicine",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  12,
+                           "title":  "Cell Biology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  16,
+                           "title":  "Physiology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  19,
+                           "title":  "Pharmacology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  21,
+                           "title":  "Biotechnology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  873,
+                           "title":  "Chemical Sciences not elsewhere classified",
+                           "parent_id":  38,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  64,
+                           "title":  "Cancer",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  133,
+                           "title":  "Plant Biology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       }
+                   ],
+    "references":  [
+                       "https://doi.org/10.1021/acs.bioconjchem.5b00572"
+                   ],
+    "has_linked_file":  false,
+    "citation":  "Deri, Melissa\nA.; Ponnala, Shashikanth; Kozlowski, Paul; Burton-Pye, Benjamin P.; Cicek, Huseyin T.; Hu, Chunhua; et al. (2016). p‑SCN-Bn-HOPO: A Superior\nBifunctional Chelator for 89Zr ImmunoPET. ACS Publications. Journal contribution. https://doi.org/10.1021/acs.bioconjchem.5b00572.s001",
+    "related_materials":  [
+                              {
+                                  "id":  6292982,
+                                  "identifier":  "10.1021/acs.bioconjchem.5b00572",
+                                  "title":  "p‑SCN-Bn-HOPO: A Superior\nBifunctional Chelator for 89Zr ImmunoPET",
+                                  "relation":  "IsSupplementTo",
+                                  "identifier_type":  "DOI",
+                                  "is_linkout":  true,
+                                  "link":  "https://doi.org/10.1021/acs.bioconjchem.5b00572"
+                              }
+                          ],
+    "is_embargoed":  false,
+    "embargo_date":  null,
+    "embargo_type":  null,
+    "embargo_title":  "",
+    "embargo_reason":  "",
+    "embargo_options":  [
+
+                        ],
+    "id":  2098531,
+    "title":  "\u003ci\u003ep\u003c/i\u003e‑SCN-Bn-HOPO: A Superior\nBifunctional Chelator for \u003csup\u003e89\u003c/sup\u003eZr ImmunoPET",
+    "doi":  "10.1021/acs.bioconjchem.5b00572.s001",
+    "handle":  "",
+    "url":  "https://api.figshare.com/v2/articles/2098531",
+    "published_date":  "2015-12-16T00:00:00Z",
+    "thumb":  "https://s3-eu-west-1.amazonaws.com/ppreviews-acs-4898564/3731797/thumb.png",
+    "defined_type":  6,
+    "defined_type_name":  "journal contribution",
+    "group_id":  2424,
+    "url_private_api":  "https://api.figshare.com/v2/account/articles/2098531",
+    "url_public_api":  "https://api.figshare.com/v2/articles/2098531",
+    "url_private_html":  "https://figshare.com/account/articles/2098531",
+    "url_public_html":  "https://acs.figshare.com/articles/journal_contribution/_i_p_i_SCN_Bn_HOPO_A_Superior_Bifunctional_Chelator_for_sup_89_sup_Zr_ImmunoPET/2098531",
+    "timeline":  {
+                     "posted":  "2015-12-16T00:00:00",
+                     "firstOnline":  "2016-02-12"
+                 },
+    "resource_title":  "\u003ci\u003ep\u003c/i\u003e‑SCN-Bn-HOPO: A Superior\nBifunctional Chelator for \u003csup\u003e89\u003c/sup\u003eZr ImmunoPET",
+    "resource_doi":  "10.1021/acs.bioconjchem.5b00572"
+}

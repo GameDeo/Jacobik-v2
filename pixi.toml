@@ -1,0 +1,63 @@
+[workspace]
+authors = ["GameDeo <alanchen310@gmail.com>"]
+channels = ["conda-forge", "bioconda"]
+name = "jacobik_2026-10-02_full"
+platforms = [
+    { name = "my-win-64", platform = "win-64", cuda = "12" },
+    { name = "my-linux-64", platform = "linux-64", cuda = "12" },
+]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "3.11.*"
+numpy = ">=2.4"
+scipy = ">=1.17"
+pandas = ">=3.0"
+scikit-learn = ">=1.8"
+xtb = ">=6.7.1,<7"
+pip = ">=26.2.1,<27"
+ipykernel = ">=7.4.0,<8"
+rdkit = ">=2026.9.1,<2027"
+pyarrow = ">=25.0.0,<26"
+joblib = ">=1.6.0,<2"
+networkx = ">=3.6.1,<4"
+tqdm = ">=4.66.0,<5"
+matplotlib = ">=3.11.2,<4"
+nbformat = ">=5.11.1,<6"
+ipywidgets = ">=8.1.9,<9"
+py3dmol = ">=2.5.4,<3"
+plotly = ">=7.1.0,<8"
+e3nn = ">=0.6.0,<0.7"
+ase = ">=3.29.0,<4"
+pytest = ">=9.1.1,<10"
+nbconvert = ">=7.17.2,<8"
+
+[pypi-dependencies]
+matscipy = ">=1.3.1, <2"
+
+# Keep platform environments in separate prefixes on the shared NTFS workspace.
+[feature.windows]
+platforms = ["my-win-64"]
+
+[feature.windows.dependencies]
+pytorch-gpu = ">=2.13.0,<3"
+
+[feature.linux]
+platforms = ["my-linux-64"]
+
+[feature.linux.dependencies]
+pytorch-gpu = ">=2.13.0,<3"
+cuda-driver-dev = "12.9.*"
+cuda-driver-dev_linux-64 = "12.9.*"
+cuda-cudart-dev_linux-64 = "12.9.*"
+
+[environments]
+default = ["windows"]
+
+[environments.linux]
+features = ["linux"]
+
+[environments.linux.dependencies]
+nbconvert = ">=7.17.2,<8"

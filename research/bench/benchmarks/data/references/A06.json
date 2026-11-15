@@ -1,0 +1,244 @@
+{
+  "case_id": "A06",
+  "source_id": "A06",
+  "datablock": "2202758",
+  "source_sha256": "0b83e3ae8cb2137024c76ae58562b06c6dd6e0bca0849fa265e5a9d8434b7d04",
+  "reader_normalizations": [],
+  "donor_label_filter": null,
+  "units": "angstrom",
+  "hydrogens": "omitted",
+  "metal_reference_index": 0,
+  "atom_mapping": [
+    {
+      "reference_index": 0,
+      "element": "Ni",
+      "cif_label": "Ni",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 1,
+      "element": "C",
+      "ligand_atom_index": 0,
+      "cif_label": "C1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 2,
+      "element": "C",
+      "ligand_atom_index": 1,
+      "cif_label": "C2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 3,
+      "element": "N",
+      "ligand_atom_index": 2,
+      "cif_label": "N1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 4,
+      "element": "O",
+      "ligand_atom_index": 3,
+      "cif_label": "O1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 5,
+      "element": "C",
+      "ligand_atom_index": 4,
+      "cif_label": "C3",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 6,
+      "element": "C",
+      "ligand_atom_index": 5,
+      "cif_label": "C4",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 7,
+      "element": "N",
+      "ligand_atom_index": 6,
+      "cif_label": "N2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 8,
+      "element": "O",
+      "ligand_atom_index": 7,
+      "cif_label": "O2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 9,
+      "element": "C",
+      "ligand_atom_index": 0,
+      "cif_label": "C1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 10,
+      "element": "C",
+      "ligand_atom_index": 1,
+      "cif_label": "C2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 11,
+      "element": "N",
+      "ligand_atom_index": 2,
+      "cif_label": "N1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 12,
+      "element": "O",
+      "ligand_atom_index": 3,
+      "cif_label": "O1",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 13,
+      "element": "C",
+      "ligand_atom_index": 4,
+      "cif_label": "C3",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 14,
+      "element": "C",
+      "ligand_atom_index": 5,
+      "cif_label": "C4",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 15,
+      "element": "N",
+      "ligand_atom_index": 6,
+      "cif_label": "N2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "reference_index": 16,
+      "element": "O",
+      "ligand_atom_index": 7,
+      "cif_label": "O2",
+      "cell_shift": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "ligand_instances": [
+    {
+      "ligand_id": "hdmg",
+      "reference_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "donor_reference_indices": [
+        3,
+        7
+      ]
+    },
+    {
+      "ligand_id": "hdmg",
+      "reference_indices": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "donor_reference_indices": [
+        11,
+        15
+      ]
+    }
+  ],
+  "metal_donor_distances": [
+    1.8616542168303463,
+    1.8586986258579365,
+    1.8616542168303456,
+    1.8586986258579374
+  ],
+  "published_bond_distance_checks": 4,
+  "validation": "complete ligand connectivity and donor sets matched to catalog; selected sites have occupancy 1",
+  "limitations": "Bond order, proton positions, spin, and absolute stereochemical labels are not independently assigned."
+}

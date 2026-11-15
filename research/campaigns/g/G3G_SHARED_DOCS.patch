@@ -1,0 +1,12 @@
+--- /mnt/e/Dev/Projects/jacobik_2026-10-02_full/AGENTS.md
++++ /mnt/e/Dev/Projects/jacobik_2026-10-02_full/AGENTS.md
+@@ -28 +28 @@
+-- **Production fingerprint:** `273f2ccbf892` from the η² + haptic-cap fold-in (`eta2_face_plane`, `eta2_group_bend`, `embed_haptic_li_cap` on, with the DB `data/db/constraints_2026-11-01.json` + `.meta.json`; branch `jgen/h-patch`, 2026-11-01; **master fast-forwarded to it, `347496f`, on 2026-11-01**). History: `3f75c9525a4e` Package H, `6cc586e17ab1` Li cap, `615ae97d2350` Package F, `711411157fb4` Phase 4.
++- **Production fingerprint:** `5f74b14b57ed` from the IA-k fold-in (G-3g, owner-approved 2026-11-02; on `jgen/b-solver`, pending owner merge). iRprop+ search/finish, switch 100, symmetry-only release, thermal widths; shape/projection retained. DB `data/db/constraints_2026-11-01.json` + `.meta.json` unchanged. Set `finish_phase=null` for old C1 (`273f2ccbf892`). History: `273f2ccbf892` eta2/haptic-cap (master `347496f`, 2026-11-01; master remains there until owner merge), `3f75c9525a4e` Package H, `6cc586e17ab1` Li cap, `615ae97d2350` Package F, `711411157fb4` Phase 4.
+--- /mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/PLAN_jgen.md
++++ /mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/PLAN_jgen.md
+@@ -3 +3 @@
+-**Last updated:** 2026-11-01 (H-patch closed: η² face plane folded in, fingerprint `273f2ccbf892`; handoff in `SESSION_2026-11-01.md`).
++**Last updated:** 2026-11-02 (G-3g: owner-approved IA-k fold-in on `jgen/b-solver`, fingerprint `5f74b14b57ed`; pending owner merge; master remains `347496f` / `273f2ccbf892`).
+@@ -122,0 +123 @@
++- **B current (2026-11-02): G-3g IA-k fold-in.** Production default on `jgen/b-solver`: `5f74b14b57ed`, old C1 reachable with `finish_phase=null`. G-3f L4 cal top-1 -10.9 [-18.7,-4.6], floor -9.5, end-to-end wall 1.22x; regression guard failed (3 vs 2), owner explicitly approved fold-in after audit. Old goldens archived under `research/archive/data/2026-11_golden_history/golden_273f2ccbf892/`, new references regenerated locally. No DB/meta change, no Colab for fold-in. Checkpoint complete (439 passed, 3 xfailed; goldens 245/245 each; G3G_REPORT.md); pending owner merge; G-3f failure remains recorded. FELSAU -> D ranking case; CAXTAX -> watch in post-fold-in A4b rerun. Older track paragraphs below are history.

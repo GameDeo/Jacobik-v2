@@ -1,0 +1,14 @@
+{
+  "summary": {
+    "pool_rows": 96,
+    "collapsed": 17,
+    "collapsed_both_away": 6,
+    "collapsed_both_toward": 0,
+    "collapsed_mixed": 11,
+    "collapsed_positive_mean_bend": 2,
+    "start_both_abs_lean_lt10": 0,
+    "prior_reconstruction_max_lean_difference_deg": 3.319841164994841e-05,
+    "prediction_a_pass": false
+  },
+  "caveat": "Starts reconstructed by variant/assignment/trial; original exports have no initial-state hashes. No Li positions retained, so substituent signs are the directive proxy, not a direct Li/metal face measurement."
+}

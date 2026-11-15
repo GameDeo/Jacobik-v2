@@ -1,0 +1,51 @@
+{
+  "contract": "G-3a convergence screen",
+  "date": "2026-10-28",
+  "supersedes": "evaluation_contract_o2.json",
+  "arms": {
+    "C0": "production 200 steps",
+    "C1": "production 250 steps",
+    "A1": "normalised adam_metric, 200 steps, paired C0",
+    "P1": "200 Adam + 50 FIRE polish, paired C1",
+    "P2": "200 Adam + 50 fresh Adam lr 0.01 polish, paired C1"
+  },
+  "sanity": {
+    "rows": "48 O1 delivered rows, eight parents, seed 11, CPU eager",
+    "polish_gate": "median delivered score must not fall and median fraction of O1 L-BFGS score gain recovered >= 0.25",
+    "A1_gate": "full solve of eight O1 parents; median delivered top-1 score must not fall versus C0"
+  },
+  "primary": "paired top-1 delta E_unrel, mean with parent-clustered bootstrap 95% CI and median",
+  "secondary": [
+    "delivered top-1 score",
+    "floor delta E_unrel",
+    "obscene rate (>200 kJ/mol), all delivered rows",
+    "worst slot",
+    "wall time / paired control"
+  ],
+  "order": [
+    "nine-parent CPU trope suite, no strain; filter only, no inferential CI",
+    "tail seeds 11,12,13 on local 2060, paired local control",
+    "cal seeds 11,12,13 only on tail pass or ambiguous tail with better mean"
+  ],
+  "trope_filter": "score rises on most parents, paired median top-1 delta E_unrel <= 0, guard holds",
+  "panel_pass": "tail primary CI upper <0 OR cal primary upper <2 kJ/mol AND floor or obscene-rate improvement CI excludes 0",
+  "guards": {
+    "parent_regression": "no parent worsens >25 kJ/mol in top-1 delta E_unrel on >=2/3 seeds",
+    "wall_ratio": 1.3
+  },
+  "bootstrap": {
+    "unit": "parent, retaining all paired seeds",
+    "replicates": 10000,
+    "seed": 11,
+    "interval": "percentile 2.5%,97.5%"
+  },
+  "failure_policy": "record failures and continue; never impute zero; report incomplete pairing and do not declare pass on incomplete gates",
+  "prohibited": "relaxation during development, val/reserve/locked sets, G-3b before audit",
+  "checkpoint": "G-3a: report, commit, stop for audit",
+  "trope_seeds": [
+    11,
+    12,
+    13
+  ],
+  "trope_seed_note": "All nine parents and paired controls use three seeds so the >=2/3 regression guard is observable; no CI claimed for nine parents."
+}

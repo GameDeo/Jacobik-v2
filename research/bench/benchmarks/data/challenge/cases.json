@@ -1,0 +1,1495 @@
+{
+  "schema_version": 2,
+  "dataset_id": "coordination-failure-modes-v2",
+  "selection": "Mechanism-led challenge panel authored before running either builder; no tmQM inputs.",
+  "cases": [
+    {
+      "id": "H01",
+      "name": "[Fe(eta5-Cp*)2]",
+      "metal": "Fe",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 10,
+      "binding_site_count": 2,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "cpstar",
+          "count": 2
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "ARCH"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "hapticity",
+        "ring_face",
+        "torsional_sampling"
+      ],
+      "challenge": "Haptic positive control: preserve both five-carbon faces, vary ring rotation without treating ten contacts as CN=10.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "H02",
+      "name": "[Ru(eta6-p-cymene)(6-Me-NS-Et)Cl]+",
+      "metal": "Ru",
+      "oxidation_state": 2,
+      "charge": 1,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 9,
+      "binding_site_count": 4,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "pcym",
+          "count": 1
+        },
+        {
+          "ligand_id": "ns6me",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "ARCH",
+        "SNS23"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "hapticity",
+        "sulfur_stereochemistry",
+        "steric_gating"
+      ],
+      "challenge": "Piano stool with an asymmetric crowded N,S chelate: arene face, Ru configuration, and thioether configuration are coupled.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [
+          "metal/sulfur diastereomers",
+          "arene rotations"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "H03",
+      "name": "[Rh(eta5-indenyl)(CO)2]",
+      "metal": "Rh",
+      "oxidation_state": 1,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 7,
+      "binding_site_count": 3,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "indenyl",
+          "count": 1
+        },
+        {
+          "ligand_id": "co",
+          "count": 2
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "ARCH"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "hapticity",
+        "fused_ring",
+        "ring_slippage"
+      ],
+      "challenge": "Select the five-membered face of a fused aromatic system; diagnose eta5-to-eta3 slippage separately from successful preservation.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "H04",
+      "name": "rac/meso-[Zr(ethylene-bis-indenyl)Cl2]",
+      "metal": "Zr",
+      "oxidation_state": 4,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 12,
+      "binding_site_count": 4,
+      "architector_core_cn": null,
+      "ligands": [
+        {
+          "ligand_id": "ebi",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "tethered_haptics",
+        "global_closure",
+        "stereoisomer_coverage"
+      ],
+      "challenge": "One covalently tethered dianion spans two eta5 faces; recover rac/meso families while preserving the bridge.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [
+          "rac family",
+          "meso family"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "requires_adapter",
+        "reason": "Two haptic groups belong to one covalent ligand; one flat sandwich coordList does not represent this tethered target.",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "H05",
+      "name": "[Pd(eta3-cinnamyl)(Xantphos)]+",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 1,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 5,
+      "binding_site_count": 3,
+      "architector_core_cn": null,
+      "ligands": [
+        {
+          "ligand_id": "cinnamyl",
+          "count": 1
+        },
+        {
+          "ligand_id": "xantphos",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "ALLYL"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "open_chain_haptics",
+        "allyl_orientation",
+        "wide_bite"
+      ],
+      "challenge": "Open-chain eta3 allyl, substituted-end orientation, and a hinged wide-bite chelate; distinguish eta1 collapse.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "requires_adapter",
+        "reason": "Nonaromatic eta3 connectivity and site accounting require an explicit validated haptic adapter; do not send three independent sigma donors.",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "H06",
+      "name": "[Rh(eta2,eta2-COD)(P(o-tolyl)3)Cl]",
+      "metal": "Rh",
+      "oxidation_state": 1,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": null,
+      "metal_contact_count": 6,
+      "binding_site_count": 4,
+      "architector_core_cn": null,
+      "ligands": [
+        {
+          "ligand_id": "cod",
+          "count": 1
+        },
+        {
+          "ligand_id": "potol3",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "multiple_haptic_groups",
+        "ring_puckering",
+        "steric_gating"
+      ],
+      "challenge": "Two alkene pi groups in one flexible ring must both bind; ring conformation and phosphine shielding are coupled.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "requires_adapter",
+        "reason": "Two eta2 groups in one diene require separate group placement within the same covalent ligand.",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "S01",
+      "name": "[Cu(6,6'-Me2-N2S)Cl2]",
+      "metal": "Cu",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 1,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "n2s6me",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "RUSULF"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "hemilability",
+        "steric_gating",
+        "five_coordinate_shape"
+      ],
+      "challenge": "Two crowded pyridine donors and a soft thioether compete to close the same coordination pocket.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "S02",
+      "name": "[Cu(asym-Me/OMe-N2S)Cl2]",
+      "metal": "Cu",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 1,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "n2s_asym",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "RUSULF"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "sulfur_stereochemistry",
+        "competing_heteroatoms",
+        "hemilability"
+      ],
+      "challenge": "Constitutionally different arms make bound sulfur stereogenic; avoid promoting the methoxy oxygen into the specified donor set.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "S03",
+      "name": "[Ru{HN(CH2CH2SEt)2}Cl(H)(PPh3)]",
+      "metal": "Ru",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 6,
+      "metal_contact_count": 6,
+      "binding_site_count": 6,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "sns_eth",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 1
+        },
+        {
+          "ligand_id": "hydride",
+          "count": 1
+        },
+        {
+          "ligand_id": "pph3",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "SNS23"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "sulfur_stereochemistry",
+        "exchangeable_isomers",
+        "hydride_policy"
+      ],
+      "challenge": "Published amine-based SNS complex with three crystallographically characterized sulfur diastereomers and measured exchange.",
+      "ensemble_target": {
+        "evidence": "experimental_exchange",
+        "source_id": "SNS23",
+        "targets": [
+          "2a",
+          "2b",
+          "2c"
+        ],
+        "activation_gibbs_kj_mol_range": [
+          65,
+          70
+        ],
+        "temperature_k": null,
+        "populations": null,
+        "notes": "Exchange barriers are kinetic quantities, not energy gaps or equal-population claims."
+      },
+      "architector_support": {
+        "status": "assembly_only",
+        "reason": "Architector 0.0.10 forces relax=False for explicit [H-]; use --no-final-relax and a separate common optimization stage.",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "S04",
+      "name": "[Ru(thienyl-bpy-kappa2N,N)(thienyl-bpy-kappa3N,N,S)Cl]+",
+      "metal": "Ru",
+      "oxidation_state": 2,
+      "charge": 1,
+      "unpaired_electrons": 0,
+      "coordination_number": 6,
+      "metal_contact_count": 6,
+      "binding_site_count": 6,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "thbpy_N2",
+          "count": 1
+        },
+        {
+          "ligand_id": "thbpy_N2S",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "RUSULF"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "binding_mode_discrimination",
+        "competing_heteroatoms",
+        "mixed_denticity"
+      ],
+      "challenge": "The identical chemical ligand occurs twice with different donor sets; one thiophene sulfur binds and the other remains unbound.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "S05",
+      "name": "[Cu(sulfonated-asym-N2S2-macrocycle)Cl]",
+      "metal": "Cu",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 1,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "polar_n2s2",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "macrocycle_closure",
+        "sulfur_stereochemistry",
+        "charged_sidechain"
+      ],
+      "challenge": "An asymmetric N2S2 ring carries a sulfonate-bearing benzyl arm; prevent spectator oxygens from replacing the intended donors.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "B01",
+      "name": "[Pd(dppm)Cl2]",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "dppm",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "ALLYL"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "acute_bite",
+        "small_chelate_ring"
+      ],
+      "challenge": "Four-membered Pd-P-C-P chelate is an intentionally narrow-bite contrast to the spanning phosphines.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "B02",
+      "name": "[Pd(DPEphos)Cl2]",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "dpephos",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "ALLYL"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "wide_bite",
+        "backbone_folding",
+        "competing_heteroatoms"
+      ],
+      "challenge": "Large P-P span with an ether hinge and competing ether oxygen; fixed P,P mode must survive folding.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "B03",
+      "name": "[Pd(Xantphos)Cl2]",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "xantphos",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "XLXANT"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "wide_bite",
+        "cis_trans_coverage",
+        "backbone_folding"
+      ],
+      "challenge": "Probe cis versus trans spanning placements and xanthene folding; compare with the spacer-extended B05 ligand.",
+      "ensemble_target": {
+        "evidence": "computed_relative_stability",
+        "source_id": "XLXANT",
+        "targets": [
+          "cis-P,P arrangement",
+          "trans-P,P arrangement"
+        ],
+        "population_reference": false,
+        "notes": "The paper calculates a cis preference for Xantphos; this is not evidence of equal or thermally accessible populations."
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "published_computed_geometry_set_prepared",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "B04",
+      "name": "[Cu(Xantphos)(6,6'-Me2-bpy)]+",
+      "metal": "Cu",
+      "oxidation_state": 1,
+      "charge": 1,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "xantphos",
+          "count": 1
+        },
+        {
+          "ligand_id": "dm_bpy",
+          "count": 1
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "CUPP"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "steric_gating",
+        "backbone_folding",
+        "interligand_clash"
+      ],
+      "challenge": "Crowded N,N chelate and wide P,P chelate compete for a tetrahedral Cu(I) sphere; measure unintended flattening and phenyl packing.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "B05",
+      "name": "[Pd(XL-Xantphos)Cl2]",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "xl_xantphos",
+          "count": 1
+        },
+        {
+          "ligand_id": "cl",
+          "count": 2
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "XLXANT"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "trans_spanning",
+        "global_closure",
+        "cis_trans_coverage"
+      ],
+      "challenge": "Phenylene-extended Xantphos spans opposite metal sites; use B03/B05 as a matched test of local versus global bite constraints.",
+      "ensemble_target": {
+        "evidence": "computed_relative_stability",
+        "source_id": "XLXANT",
+        "targets": [
+          "trans-P,P arrangement",
+          "cis-P,P arrangement"
+        ],
+        "population_reference": false,
+        "notes": "The reported computed trans preference is not a measured solution population or an activation barrier."
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "published_computed_geometry_set_prepared",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "D01",
+      "name": "[Eu(DTMA)(H2O)]3+",
+      "metal": "Eu",
+      "oxidation_state": 3,
+      "charge": 3,
+      "unpaired_electrons": 6,
+      "coordination_number": 9,
+      "metal_contact_count": 9,
+      "binding_site_count": 9,
+      "architector_core_cn": 9,
+      "ligands": [
+        {
+          "ligand_id": "dtma",
+          "count": 1
+        },
+        {
+          "ligand_id": "water",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "DOTA09"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "octadentate_closure",
+        "SAP_TSAP",
+        "arm_ring_coupling"
+      ],
+      "challenge": "N4O4 tetraamide macrocycle has coupled ring inversion and pendant-arm rotation; retain the inner-sphere water.",
+      "ensemble_target": {
+        "evidence": "solution_isomers_reported",
+        "source_id": "DOTA09",
+        "targets": [
+          "SAP",
+          "TSAP"
+        ],
+        "reported_SAP_to_TSAP_ratio": 3.2,
+        "ratio_scope": "Background DTMA value cited in this paper; conditions must be recovered before quantitative use.",
+        "temperature_k": null,
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "D02",
+      "name": "[Eu(DOTA-tetra-sec-butylamide)(H2O)]3+",
+      "metal": "Eu",
+      "oxidation_state": 3,
+      "charge": 3,
+      "unpaired_electrons": 6,
+      "coordination_number": 9,
+      "metal_contact_count": 9,
+      "binding_site_count": 9,
+      "architector_core_cn": 9,
+      "ligands": [
+        {
+          "ligand_id": "dotasec",
+          "count": 1
+        },
+        {
+          "ligand_id": "water",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "DOTA09"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "octadentate_closure",
+        "fixed_ligand_chirality",
+        "SAP_TSAP",
+        "steric_gating"
+      ],
+      "challenge": "Four specified sec-butyl carbon stereocenters bias the coupled macrocycle/arm arrangements; preserve every ligand stereocenter.",
+      "ensemble_target": {
+        "evidence": "solution_isomer_study",
+        "source_id": "DOTA09",
+        "targets": [
+          "SAP-like family",
+          "TSAP-like family"
+        ],
+        "populations": null,
+        "notes": "No numeric population or accessibility threshold is assigned to this authored stereoisomer without matching the experimental stereochemical definition."
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "D03",
+      "name": "[Zr(3,4,3-LI(1,2-HOPO))]",
+      "metal": "Zr",
+      "oxidation_state": 4,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 8,
+      "metal_contact_count": 8,
+      "binding_site_count": 8,
+      "architector_core_cn": 8,
+      "ligands": [
+        {
+          "ligand_id": "hopo343",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "HOPO"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "octadentate_closure",
+        "global_wrapping",
+        "competing_heteroatoms",
+        "hydrogen_bonding"
+      ],
+      "challenge": "A long four-arm O8 chelator wraps the metal; select ring O donors over linker amide O atoms and sample distinct backbone folds.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "experimental_heavy_atom_reference_prepared",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "D04",
+      "name": "[La(TPEN)(kappa2-NO3)2]+",
+      "metal": "La",
+      "oxidation_state": 3,
+      "charge": 1,
+      "unpaired_electrons": 0,
+      "coordination_number": 10,
+      "metal_contact_count": 10,
+      "binding_site_count": 10,
+      "architector_core_cn": 10,
+      "ligands": [
+        {
+          "ligand_id": "tpen",
+          "count": 1
+        },
+        {
+          "ligand_id": "nitrate_bi",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "high_contact_count",
+        "acute_bite",
+        "coupled_chelate_closure"
+      ],
+      "challenge": "Ten atomic contacts combine a crowded six-N cage with two acute-bite nitrates; a designed overpacking boundary case.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "D05",
+      "name": "[Lu(tpatcn)]",
+      "metal": "Lu",
+      "oxidation_state": 3,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 9,
+      "metal_contact_count": 9,
+      "binding_site_count": 9,
+      "architector_core_cn": 9,
+      "ligands": [
+        {
+          "ligand_id": "tpatcn",
+          "count": 1
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "TPATCN"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "nonadentate_closure",
+        "rigid_arm_cage",
+        "competing_heteroatoms"
+      ],
+      "challenge": "Nine N6O3 donors on a TACN-based tripod must all close; pyridyl orientation and carboxylate choices are coupled.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "P01",
+      "name": "[FeIII(H3buea)(OH)]-",
+      "metal": "Fe",
+      "oxidation_state": 3,
+      "charge": -1,
+      "unpaired_electrons": 5,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "buea",
+          "count": 1
+        },
+        {
+          "ligand_id": "hydroxide",
+          "count": 1
+        }
+      ],
+      "origin": "literature_input",
+      "source_ids": [
+        "BUEA"
+      ],
+      "source_relationship": "source chemical input; consult individual evidence notes",
+      "failure_modes": [
+        "secondary_sphere",
+        "hydrogen_bonding",
+        "competing_heteroatoms"
+      ],
+      "challenge": "Three urea NH groups should organize around the hydroxo pocket; carbonyl O atoms remain outside the primary N4 donor sphere.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "P02",
+      "name": "[FeIII(N-methyl-H3buea-analogue)(OH)]-",
+      "metal": "Fe",
+      "oxidation_state": 3,
+      "charge": -1,
+      "unpaired_electrons": 5,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "buea_nme",
+          "count": 1
+        },
+        {
+          "ligand_id": "hydroxide",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "BUEA"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "secondary_sphere",
+        "conformer_ranking",
+        "matched_chemical_perturbation"
+      ],
+      "challenge": "A custom NH-blocked partner to P01 changes the directional hydrogen-bond network while retaining the same N4 primary donor topology.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "P03",
+      "name": "[Cu(trisulfonato-TPA)(H2O)]-",
+      "metal": "Cu",
+      "oxidation_state": 2,
+      "charge": -1,
+      "unpaired_electrons": 1,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "sulfo_tpa",
+          "count": 1
+        },
+        {
+          "ligand_id": "water",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "charged_sidechain",
+        "solvent_sensitivity",
+        "competing_heteroatoms"
+      ],
+      "challenge": "Three remote sulfonates make many polar oxygen atoms available without changing the intended N4 tripod; test collapse and donor swapping.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "water",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "I01",
+      "name": "[Fe(asym-N2O-Schiff-base)2]+",
+      "metal": "Fe",
+      "oxidation_state": 3,
+      "charge": 1,
+      "unpaired_electrons": 5,
+      "coordination_number": 6,
+      "metal_contact_count": 6,
+      "binding_site_count": 6,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "asym_NNO",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "asymmetric_tridentates",
+        "isomer_coverage",
+        "orientation_coupling"
+      ],
+      "challenge": "Two directional tridentates create head-tail, fac/mer-like, and chiral arrangement alternatives; peripheral methoxy groups add conformational choices.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [
+          "distinct N/O arrangement families",
+          "metal helicities"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "I02",
+      "name": "[Ir(difluoro-tert-butyl-ppy)3]",
+      "metal": "Ir",
+      "oxidation_state": 3,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 6,
+      "metal_contact_count": 6,
+      "binding_site_count": 6,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "df_tbu_ppy",
+          "count": 3
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "cyclometalation",
+        "fac_mer_coverage",
+        "steric_gating"
+      ],
+      "challenge": "Three unsymmetrical C,N chelates require carbon sigma donation and fac/mer family sampling with fluorinated, bulky outer groups.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [
+          "fac donor arrangement",
+          "mer donor arrangement",
+          "metal helicities"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "I03",
+      "name": "[Pd(6-Me-NS-Et)2]2+",
+      "metal": "Pd",
+      "oxidation_state": 2,
+      "charge": 2,
+      "unpaired_electrons": 0,
+      "coordination_number": 4,
+      "metal_contact_count": 4,
+      "binding_site_count": 4,
+      "architector_core_cn": 4,
+      "ligands": [
+        {
+          "ligand_id": "ns6me",
+          "count": 2
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "SNS23"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "cis_trans_coverage",
+        "sulfur_stereochemistry",
+        "coupled_isomerism"
+      ],
+      "challenge": "Square-planar cis/trans N/S arrangements combine with two independent sulfur configurations and constrained chelate folds.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [
+          "cis-S,S",
+          "trans-S,S",
+          "sulfur diastereomers"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "N01",
+      "name": "[Mo(N2)2(depe)2]",
+      "metal": "Mo",
+      "oxidation_state": 0,
+      "charge": 0,
+      "unpaired_electrons": 0,
+      "coordination_number": 6,
+      "metal_contact_count": 6,
+      "binding_site_count": 6,
+      "architector_core_cn": 6,
+      "ligands": [
+        {
+          "ligand_id": "n2",
+          "count": 2
+        },
+        {
+          "ligand_id": "depe",
+          "count": 2
+        }
+      ],
+      "origin": "literature_motif",
+      "source_ids": [
+        "MO69"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "dinitrogen_binding",
+        "cis_trans_coverage",
+        "phosphine_torsions"
+      ],
+      "challenge": "Two end-on N2 ligands share a flexible four-phosphorus environment; preserve N-N connectivity and sample N2 placement alternatives.",
+      "ensemble_target": {
+        "evidence": "candidate_families_not_population_reference",
+        "targets": [
+          "cis-N2",
+          "trans-N2"
+        ],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    },
+    {
+      "id": "N02",
+      "name": "[MoIII(Dipp-N3N)(N2)]",
+      "metal": "Mo",
+      "oxidation_state": 3,
+      "charge": 0,
+      "unpaired_electrons": 1,
+      "coordination_number": 5,
+      "metal_contact_count": 5,
+      "binding_site_count": 5,
+      "architector_core_cn": 5,
+      "ligands": [
+        {
+          "ligand_id": "dipp_n3n",
+          "count": 1
+        },
+        {
+          "ligand_id": "n2",
+          "count": 1
+        }
+      ],
+      "origin": "designed",
+      "source_ids": [
+        "MOEPR"
+      ],
+      "source_relationship": "motif or mechanism analogy; not an experimental reference for this exact target",
+      "failure_modes": [
+        "dinitrogen_binding",
+        "steric_cavity",
+        "low_spin_input",
+        "global_wrapping"
+      ],
+      "challenge": "Custom reduced-size aryl-shielded triamidoamine pocket challenges approach to N2 and collective aryl rotation; low-spin input is an explicit assumption for this derivative.",
+      "ensemble_target": {
+        "evidence": "design_hypothesis",
+        "targets": [],
+        "populations": null
+      },
+      "architector_support": {
+        "status": "direct",
+        "reason": "",
+        "runtime_verified": false
+      },
+      "environment": {
+        "xtb_solvent": "none",
+        "temperature_k": 298.15
+      },
+      "reference_status": "no_coordinate_reference_archived",
+      "stereochemistry": "preserve explicit ligand stereocenters; metal/sulfur configurations not fixed",
+      "spin_status": "specified scalar-spin benchmark input; not a spin-state prediction task"
+    }
+  ]
+}

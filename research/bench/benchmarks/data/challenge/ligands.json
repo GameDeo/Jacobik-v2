@@ -1,0 +1,1727 @@
+{
+  "schema_version": 2,
+  "index_convention": "Zero-based atoms in the exact SMILES before implicit hydrogens are expanded. An explicit [H-] is a real indexed atom.",
+  "ligands": [
+    {
+      "id": "cl",
+      "name": "chloride",
+      "smiles": "[Cl-]",
+      "authored_mapped_smiles": "[Cl-:1]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "Cl"
+      ],
+      "formal_charge": -1,
+      "family": "monodentate",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "Cl-",
+      "heavy_atom_count": 1,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "water",
+      "name": "water",
+      "smiles": "[OH2]",
+      "authored_mapped_smiles": "[OH2:1]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "H2O",
+      "heavy_atom_count": 1,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "hydroxide",
+      "name": "hydroxide",
+      "smiles": "[OH-]",
+      "authored_mapped_smiles": "[OH-:1]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "O"
+      ],
+      "formal_charge": -1,
+      "family": "monodentate",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "HO-",
+      "heavy_atom_count": 1,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "hydride",
+      "name": "hydride",
+      "smiles": "[H-]",
+      "authored_mapped_smiles": "[H-:1]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "H"
+      ],
+      "formal_charge": -1,
+      "family": "hydride",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "H-",
+      "heavy_atom_count": 0,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "Explicit hydrogen is itself a coordinating atom; Architector 0.0.10 forces relax=False."
+    },
+    {
+      "id": "co",
+      "name": "carbon monoxide",
+      "smiles": "[C-]#[O+]",
+      "authored_mapped_smiles": "[C-:1]#[O+]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "C"
+      ],
+      "formal_charge": 0,
+      "family": "carbonyl",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "CO",
+      "heavy_atom_count": 2,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "n2",
+      "name": "end-on dinitrogen",
+      "smiles": "[N]#N",
+      "authored_mapped_smiles": "[N:1]#N",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "dinitrogen",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "N2",
+      "heavy_atom_count": 2,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "pph3",
+      "name": "triphenylphosphine",
+      "smiles": "[P](c1ccccc1)(c2ccccc2)c3ccccc3",
+      "authored_mapped_smiles": "[P:1](c1ccccc1)(c2ccccc2)c3ccccc3",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "bulky_phosphine",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "C18H15P",
+      "heavy_atom_count": 19,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "potol3",
+      "name": "tris(2-methylphenyl)phosphine",
+      "smiles": "[P](c1ccccc1C)(c2ccccc2C)c3ccccc3C",
+      "authored_mapped_smiles": "[P:1](c1ccccc1C)(c2ccccc2C)c3ccccc3C",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "bulky_phosphine",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        }
+      ],
+      "formula": "C21H21P",
+      "heavy_atom_count": 22,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "cpstar",
+      "name": "pentamethylcyclopentadienyl",
+      "smiles": "C[c-]1[c](C)[c](C)[c](C)[c]1C",
+      "authored_mapped_smiles": "C[c-:1]1[c:2](C)[c:3](C)[c:4](C)[c:5]1C",
+      "donor_indices": [
+        1,
+        2,
+        4,
+        6,
+        8
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": -1,
+      "family": "pi_ring",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            1,
+            2,
+            4,
+            6,
+            8
+          ],
+          "hapticity": 5
+        }
+      ],
+      "formula": "C10H15-",
+      "heavy_atom_count": 10,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "pcym",
+      "name": "p-cymene",
+      "smiles": "C[c]1[cH][cH][c](C(C)C)[cH][cH]1",
+      "authored_mapped_smiles": "C[c:1]1[cH:2][cH:3][c:4](C(C)C)[cH:5][cH:6]1",
+      "donor_indices": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        9
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": 0,
+      "family": "pi_ring",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            1,
+            2,
+            3,
+            4,
+            8,
+            9
+          ],
+          "hapticity": 6
+        }
+      ],
+      "formula": "C10H14",
+      "heavy_atom_count": 10,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "indenyl",
+      "name": "indenyl",
+      "smiles": "[cH-]1[cH][cH][c]2cccc[c]21",
+      "authored_mapped_smiles": "[cH-:1]1[cH:2][cH:3][c:4]2cccc[c:5]21",
+      "donor_indices": [
+        0,
+        1,
+        2,
+        3,
+        8
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": -1,
+      "family": "pi_ring",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            0,
+            1,
+            2,
+            3,
+            8
+          ],
+          "hapticity": 5
+        }
+      ],
+      "formula": "C9H7-",
+      "heavy_atom_count": 9,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "ebi",
+      "name": "ethylene-bridged bis(indenyl) dianion",
+      "smiles": "C(C[c-]1[cH][cH][c]2cccc[c]21)[c-]3[cH][cH][c]4cccc[c]43",
+      "authored_mapped_smiles": "C(C[c-:1]1[cH:2][cH:3][c:4]2cccc[c:5]21)[c-:6]3[cH:7][cH:8][c:9]4cccc[c:10]43",
+      "donor_indices": [
+        2,
+        3,
+        4,
+        5,
+        10,
+        11,
+        12,
+        13,
+        14,
+        19
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": -2,
+      "family": "tethered_pi_rings",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            2,
+            3,
+            4,
+            5,
+            10
+          ],
+          "hapticity": 5
+        },
+        {
+          "kind": "eta",
+          "atom_indices": [
+            11,
+            12,
+            13,
+            14,
+            19
+          ],
+          "hapticity": 5
+        }
+      ],
+      "formula": "C20H16-2",
+      "heavy_atom_count": 20,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "One covalent ligand; splitting into two indenyl ligands would destroy the ansa tether."
+    },
+    {
+      "id": "cinnamyl",
+      "name": "cinnamyl anion, eta3 target",
+      "smiles": "[CH2-][CH]=[CH]c1ccccc1",
+      "authored_mapped_smiles": "[CH2-:1][CH:2]=[CH:3]c1ccccc1",
+      "donor_indices": [
+        0,
+        1,
+        2
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": -1,
+      "family": "open_chain_pi",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            0,
+            1,
+            2
+          ],
+          "hapticity": 3
+        }
+      ],
+      "formula": "C9H9-",
+      "heavy_atom_count": 9,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "cod",
+      "name": "cycloocta-1,5-diene",
+      "smiles": "[CH]1=[CH]CC[CH]=[CH]CC1",
+      "authored_mapped_smiles": "[CH:1]1=[CH:2]CC[CH:3]=[CH:4]CC1",
+      "donor_indices": [
+        0,
+        1,
+        4,
+        5
+      ],
+      "donor_elements": [
+        "C",
+        "C",
+        "C",
+        "C"
+      ],
+      "formal_charge": 0,
+      "family": "multi_pi_diene",
+      "binding_groups": [
+        {
+          "kind": "eta",
+          "atom_indices": [
+            0,
+            1
+          ],
+          "hapticity": 2
+        },
+        {
+          "kind": "eta",
+          "atom_indices": [
+            4,
+            5
+          ],
+          "hapticity": 2
+        }
+      ],
+      "formula": "C8H12",
+      "heavy_atom_count": 8,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "ns6me",
+      "name": "2-(ethylthiomethyl)-6-methylpyridine",
+      "smiles": "CC[S]Cc1cccc(C)[n]1",
+      "authored_mapped_smiles": "CC[S:1]Cc1cccc(C)[n:2]1",
+      "donor_indices": [
+        2,
+        10
+      ],
+      "donor_elements": [
+        "S",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "hemilabile_NS",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            2
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            10
+          ]
+        }
+      ],
+      "formula": "C9H13NS",
+      "heavy_atom_count": 11,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "n2s6me",
+      "name": "bis(6-methyl-2-pyridylmethyl) sulfide",
+      "smiles": "Cc1cccc(C[S]Cc2cccc(C)[n]2)[n]1",
+      "authored_mapped_smiles": "Cc1cccc(C[S:1]Cc2cccc(C)[n:2]2)[n:3]1",
+      "donor_indices": [
+        7,
+        15,
+        16
+      ],
+      "donor_elements": [
+        "S",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "hemilabile_N2S",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            7
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            15
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        }
+      ],
+      "formula": "C14H16N2S",
+      "heavy_atom_count": 17,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "n2s_asym",
+      "name": "asymmetric methyl/methoxy N2S thioether",
+      "smiles": "COc1cccc(C[S]Cc2cccc(C)[n]2)[n]1",
+      "authored_mapped_smiles": "COc1cccc(C[S:1]Cc2cccc(C)[n:2]2)[n:3]1",
+      "donor_indices": [
+        8,
+        16,
+        17
+      ],
+      "donor_elements": [
+        "S",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "hemilabile_N2S",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            8
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            17
+          ]
+        }
+      ],
+      "formula": "C14H16N2OS",
+      "heavy_atom_count": 18,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "The two arms are constitutionally different; coordinated sulfur can be stereogenic."
+    },
+    {
+      "id": "sns_eth",
+      "name": "bis(2-ethylthioethyl)amine",
+      "smiles": "CC[S]CC[NH]CC[S]CC",
+      "authored_mapped_smiles": "CC[S:1]CC[NH:2]CC[S:3]CC",
+      "donor_indices": [
+        2,
+        5,
+        8
+      ],
+      "donor_elements": [
+        "S",
+        "N",
+        "S"
+      ],
+      "formal_charge": 0,
+      "family": "sulfur_stereochemistry",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            2
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            5
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            8
+          ]
+        }
+      ],
+      "formula": "C8H19NS2",
+      "heavy_atom_count": 11,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "thbpy_N2",
+      "name": "6-(2-thienyl)-bipyridine, N2 binding",
+      "smiles": "[n]1ccccc1-c2cccc(-c3ccc[s]3)[n]2",
+      "authored_mapped_smiles": "[n:1]1ccccc1-c2cccc(-c3ccc[s:3]3)[n:2]2",
+      "donor_indices": [
+        0,
+        16
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "alternative_binding",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        }
+      ],
+      "formula": "C14H10N2S",
+      "heavy_atom_count": 17,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "thbpy_N2S",
+      "name": "6-(2-thienyl)-bipyridine, N2S binding",
+      "smiles": "[n]1ccccc1-c2cccc(-c3ccc[s]3)[n]2",
+      "authored_mapped_smiles": "[n:1]1ccccc1-c2cccc(-c3ccc[s:3]3)[n:2]2",
+      "donor_indices": [
+        0,
+        16,
+        15
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "S"
+      ],
+      "formal_charge": 0,
+      "family": "alternative_binding",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            15
+          ]
+        }
+      ],
+      "formula": "C14H10N2S",
+      "heavy_atom_count": 17,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "polar_n2s2",
+      "name": "asymmetric N-benzyl N2S2 macrocycle with pendant sulfonate",
+      "smiles": "Cc1ccc(C[N]2CC[S]CC[N](Cc3ccc(S(=O)(=O)[O-])cc3)CC[S]CC2)cc1",
+      "authored_mapped_smiles": "Cc1ccc(C[N:1]2CC[S:2]CC[N:3](Cc3ccc(S(=O)(=O)[O-])cc3)CC[S:4]CC2)cc1",
+      "donor_indices": [
+        6,
+        9,
+        12,
+        26
+      ],
+      "donor_elements": [
+        "N",
+        "S",
+        "N",
+        "S"
+      ],
+      "formal_charge": -1,
+      "family": "polar_macrocycle",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            6
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            9
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            12
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            26
+          ]
+        }
+      ],
+      "formula": "C23H31N2O3S3-",
+      "heavy_atom_count": 31,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "dppm",
+      "name": "bis(diphenylphosphino)methane",
+      "smiles": "[P](c1ccccc1)(c2ccccc2)C[P](c3ccccc3)c4ccccc4",
+      "authored_mapped_smiles": "[P:1](c1ccccc1)(c2ccccc2)C[P:2](c3ccccc3)c4ccccc4",
+      "donor_indices": [
+        0,
+        14
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "small_bite",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            14
+          ]
+        }
+      ],
+      "formula": "C25H22P2",
+      "heavy_atom_count": 27,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "dpephos",
+      "name": "DPEphos",
+      "smiles": "[P](c1ccccc1)(c2ccccc2)c3ccccc3Oc4ccccc4[P](c5ccccc5)c6ccccc6",
+      "authored_mapped_smiles": "[P:1](c1ccccc1)(c2ccccc2)c3ccccc3Oc4ccccc4[P:2](c5ccccc5)c6ccccc6",
+      "donor_indices": [
+        0,
+        26
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "wide_bite_flexible",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            26
+          ]
+        }
+      ],
+      "formula": "C36H28OP2",
+      "heavy_atom_count": 39,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "xantphos",
+      "name": "Xantphos",
+      "smiles": "O6c1c(cccc1[P](c2ccccc2)c3ccccc3)C(c7cccc([P](c4ccccc4)c5ccccc5)c67)(C)C",
+      "authored_mapped_smiles": "O6c1c(cccc1[P:1](c2ccccc2)c3ccccc3)C(c7cccc([P:2](c4ccccc4)c5ccccc5)c67)(C)C",
+      "donor_indices": [
+        7,
+        26
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "wide_bite_hinged",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            7
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            26
+          ]
+        }
+      ],
+      "formula": "C39H32OP2",
+      "heavy_atom_count": 42,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "The bridging ether is deliberately not a coordinating atom in this fixed-mode task."
+    },
+    {
+      "id": "xl_xantphos",
+      "name": "XL-Xantphos",
+      "smiles": "O6c1c(cccc1-c8ccc([P](c2ccccc2)c3ccccc3)cc8)C(c7cccc(-c9ccc([P](c4ccccc4)c5ccccc5)cc9)c67)(C)C",
+      "authored_mapped_smiles": "O6c1c(cccc1-c8ccc([P:1](c2ccccc2)c3ccccc3)cc8)C(c7cccc(-c9ccc([P:2](c4ccccc4)c5ccccc5)cc9)c67)(C)C",
+      "donor_indices": [
+        11,
+        36
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "trans_spanning_diphosphine",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            11
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            36
+          ]
+        }
+      ],
+      "formula": "C51H40OP2",
+      "heavy_atom_count": 54,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "Two para-phenylene spacers lengthen the P-P span; the bridge oxygen cannot occupy the metal pocket as in ordinary Xantphos."
+    },
+    {
+      "id": "dm_bpy",
+      "name": "6,6'-dimethyl-2,2'-bipyridine",
+      "smiles": "Cc1cccc(-c2cccc(C)[n]2)[n]1",
+      "authored_mapped_smiles": "Cc1cccc(-c2cccc(C)[n:1]2)[n:2]1",
+      "donor_indices": [
+        12,
+        13
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "crowded_NN",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            12
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            13
+          ]
+        }
+      ],
+      "formula": "C12H12N2",
+      "heavy_atom_count": 14,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "dtma",
+      "name": "DOTA tetra-N-methylamide",
+      "smiles": "[N]1(CC(=[O])NC)CC[N](CC(=[O])NC)CC[N](CC(=[O])NC)CC[N](CC(=[O])NC)CC1",
+      "authored_mapped_smiles": "[N:1]1(CC(=[O:5])NC)CC[N:2](CC(=[O:6])NC)CC[N:3](CC(=[O:7])NC)CC[N:4](CC(=[O:8])NC)CC1",
+      "donor_indices": [
+        0,
+        8,
+        16,
+        24,
+        3,
+        11,
+        19,
+        27
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "N4O4_macrocyclic_tetraamide",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            8
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            24
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            11
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            19
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            27
+          ]
+        }
+      ],
+      "formula": "C20H40N8O4",
+      "heavy_atom_count": 32,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "dotasec",
+      "name": "DOTA tetra-N-sec-butylamide, four specified carbon stereocenters",
+      "smiles": "[N]1(CC(=[O])N[C@@H](C)CC)CC[N](CC(=[O])N[C@@H](C)CC)CC[N](CC(=[O])N[C@@H](C)CC)CC[N](CC(=[O])N[C@@H](C)CC)CC1",
+      "authored_mapped_smiles": "[N:1]1(CC(=[O:5])N[C@@H](C)CC)CC[N:2](CC(=[O:6])N[C@@H](C)CC)CC[N:3](CC(=[O:7])N[C@@H](C)CC)CC[N:4](CC(=[O:8])N[C@@H](C)CC)CC1",
+      "donor_indices": [
+        0,
+        11,
+        22,
+        33,
+        3,
+        14,
+        25,
+        36
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "N4O4_macrocyclic_tetraamide",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            11
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            22
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            33
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            14
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            25
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            36
+          ]
+        }
+      ],
+      "formula": "C32H64N8O4",
+      "heavy_atom_count": 44,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [
+        {
+          "atom_index": 5,
+          "cip": "S"
+        },
+        {
+          "atom_index": 16,
+          "cip": "S"
+        },
+        {
+          "atom_index": 27,
+          "cip": "S"
+        },
+        {
+          "atom_index": 38,
+          "cip": "S"
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "hopo343",
+      "name": "3,4,3-LI(1,2-HOPO) tetraanion",
+      "smiles": "[O-]n1c(=[O])cccc1C(=O)NCCCN(C(=O)c2cccc(=[O])n2[O-])CCCCN(C(=O)c3cccc(=[O])n3[O-])CCCNC(=O)c4cccc(=[O])n4[O-]",
+      "authored_mapped_smiles": "[O-:1]n1c(=[O:2])cccc1C(=O)NCCCN(C(=O)c2cccc(=[O:3])n2[O-:4])CCCCN(C(=O)c3cccc(=[O:5])n3[O-:6])CCCNC(=O)c4cccc(=[O:7])n4[O-:8]",
+      "donor_indices": [
+        0,
+        3,
+        22,
+        24,
+        37,
+        39,
+        51,
+        53
+      ],
+      "donor_elements": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": -4,
+      "family": "octadentate_O8",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            22
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            24
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            37
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            39
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            51
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            53
+          ]
+        }
+      ],
+      "formula": "C34H34N8O12-4",
+      "heavy_atom_count": 54,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "Ring carbonyl and N-oxide oxygens bind; four linker amide oxygens do not."
+    },
+    {
+      "id": "tpen",
+      "name": "TPEN",
+      "smiles": "[N](Cc1cccc[n]1)(Cc2cccc[n]2)CC[N](Cc3cccc[n]3)Cc4cccc[n]4",
+      "authored_mapped_smiles": "[N:1](Cc1cccc[n:2]1)(Cc2cccc[n:3]2)CC[N:4](Cc3cccc[n:5]3)Cc4cccc[n:6]4",
+      "donor_indices": [
+        0,
+        7,
+        14,
+        17,
+        24,
+        31
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "six_donor_cage",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            7
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            14
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            17
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            24
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            31
+          ]
+        }
+      ],
+      "formula": "C26H28N6",
+      "heavy_atom_count": 32,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "nitrate_bi",
+      "name": "bidentate nitrate",
+      "smiles": "O=[N+]([O-])[O-]",
+      "authored_mapped_smiles": "O=[N+]([O-:1])[O-:2]",
+      "donor_indices": [
+        2,
+        3
+      ],
+      "donor_elements": [
+        "O",
+        "O"
+      ],
+      "formal_charge": -1,
+      "family": "acute_bite",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            2
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        }
+      ],
+      "formula": "NO3-",
+      "heavy_atom_count": 4,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "tpatcn",
+      "name": "TACN tris(picolinate), tpatcn3-",
+      "smiles": "[N]1(Cc2cccc(C(=O)[O-])[n]2)CC[N](Cc3cccc(C(=O)[O-])[n]3)CC[N](Cc4cccc(C(=O)[O-])[n]4)CC1",
+      "authored_mapped_smiles": "[N:1]1(Cc2cccc(C(=O)[O-:7])[n:4]2)CC[N:2](Cc3cccc(C(=O)[O-:8])[n:5]3)CC[N:3](Cc4cccc(C(=O)[O-:9])[n:6]4)CC1",
+      "donor_indices": [
+        0,
+        13,
+        26,
+        10,
+        23,
+        36,
+        9,
+        22,
+        35
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": -3,
+      "family": "nonadentate_N6O3",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            13
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            26
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            10
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            23
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            36
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            9
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            22
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            35
+          ]
+        }
+      ],
+      "formula": "C27H27N6O6-3",
+      "heavy_atom_count": 39,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "buea",
+      "name": "H3buea3-, urea hydrogen-bond cavity",
+      "smiles": "[N](CC[N-]C(=O)NC(C)(C)C)(CC[N-]C(=O)NC(C)(C)C)CC[N-]C(=O)NC(C)(C)C",
+      "authored_mapped_smiles": "[N:1](CC[N-:2]C(=O)NC(C)(C)C)(CC[N-:3]C(=O)NC(C)(C)C)CC[N-:4]C(=O)NC(C)(C)C",
+      "donor_indices": [
+        0,
+        3,
+        13,
+        23
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": -3,
+      "family": "secondary_sphere_tripod",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            13
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            23
+          ]
+        }
+      ],
+      "formula": "C21H42N7O3-3",
+      "heavy_atom_count": 31,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "buea_nme",
+      "name": "N-methylated H3buea analogue, no terminal urea NH donors",
+      "smiles": "[N](CC[N-]C(=O)N(C)C(C)(C)C)(CC[N-]C(=O)N(C)C(C)(C)C)CC[N-]C(=O)N(C)C(C)(C)C",
+      "authored_mapped_smiles": "[N:1](CC[N-:2]C(=O)N(C)C(C)(C)C)(CC[N-:3]C(=O)N(C)C(C)(C)C)CC[N-:4]C(=O)N(C)C(C)(C)C",
+      "donor_indices": [
+        0,
+        3,
+        14,
+        25
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": -3,
+      "family": "secondary_sphere_tripod",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            14
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            25
+          ]
+        }
+      ],
+      "formula": "C24H48N7O3-3",
+      "heavy_atom_count": 34,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "sulfo_tpa",
+      "name": "tris(4-sulfonato-2-pyridylmethyl)amine",
+      "smiles": "[N](Cc1cc(S(=O)(=O)[O-])cc[n]1)(Cc2cc(S(=O)(=O)[O-])cc[n]2)Cc3cc(S(=O)(=O)[O-])cc[n]3",
+      "authored_mapped_smiles": "[N:1](Cc1cc(S(=O)(=O)[O-])cc[n:2]1)(Cc2cc(S(=O)(=O)[O-])cc[n:3]2)Cc3cc(S(=O)(=O)[O-])cc[n:4]3",
+      "donor_indices": [
+        0,
+        11,
+        22,
+        33
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": -3,
+      "family": "polyanionic_N4_tripod",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            11
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            22
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            33
+          ]
+        }
+      ],
+      "formula": "C18H15N4O9S3-3",
+      "heavy_atom_count": 34,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "asym_NNO",
+      "name": "methoxy-substituted pyridylmethyl salicylaldiminate",
+      "smiles": "[n]1ccccc1C[N]=Cc2cc(OC)ccc2[O-]",
+      "authored_mapped_smiles": "[n:1]1ccccc1C[N:2]=Cc2cc(OC)ccc2[O-:3]",
+      "donor_indices": [
+        0,
+        7,
+        17
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "O"
+      ],
+      "formal_charge": -1,
+      "family": "unsymmetrical_N2O",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            7
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            17
+          ]
+        }
+      ],
+      "formula": "C14H13N2O2-",
+      "heavy_atom_count": 18,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "df_tbu_ppy",
+      "name": "difluoro-tert-butyl phenylpyridinate, C,N mode",
+      "smiles": "CC(C)(C)c1ccc(-c2cc(F)cc(F)[c-]2)[n]c1",
+      "authored_mapped_smiles": "CC(C)(C)c1ccc(-c2cc(F)cc(F)[c-:1]2)[n:2]c1",
+      "donor_indices": [
+        15,
+        16
+      ],
+      "donor_elements": [
+        "C",
+        "N"
+      ],
+      "formal_charge": -1,
+      "family": "cyclometalated_CN",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            15
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            16
+          ]
+        }
+      ],
+      "formula": "C15H14F2N-",
+      "heavy_atom_count": 18,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "The aryl C anion is the intended sigma donor; it must not be interpreted as an eta ligand."
+    },
+    {
+      "id": "depe",
+      "name": "1,2-bis(diethylphosphino)ethane",
+      "smiles": "CC[P](CC)CC[P](CC)CC",
+      "authored_mapped_smiles": "CC[P:1](CC)CC[P:2](CC)CC",
+      "donor_indices": [
+        2,
+        7
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "flexible_alkyl_phosphine",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            2
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            7
+          ]
+        }
+      ],
+      "formula": "C10H24P2",
+      "heavy_atom_count": 12,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": ""
+    },
+    {
+      "id": "dipp_n3n",
+      "name": "tris(2-(2,6-diisopropylphenylamido)ethyl)amine trianion",
+      "smiles": "[N](CC[N-]c1c(C(C)C)cccc1C(C)C)(CC[N-]c1c(C(C)C)cccc1C(C)C)CC[N-]c1c(C(C)C)cccc1C(C)C",
+      "authored_mapped_smiles": "[N:1](CC[N-:2]c1c(C(C)C)cccc1C(C)C)(CC[N-:3]c1c(C(C)C)cccc1C(C)C)CC[N-:4]c1c(C(C)C)cccc1C(C)C",
+      "donor_indices": [
+        0,
+        3,
+        18,
+        33
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": -3,
+      "family": "sterically_shielded_triamidoamine",
+      "binding_groups": [
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            0
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            3
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            18
+          ]
+        },
+        {
+          "kind": "kappa",
+          "atom_indices": [
+            33
+          ]
+        }
+      ],
+      "formula": "C42H63N4-3",
+      "heavy_atom_count": 46,
+      "radical_electrons": 0,
+      "fixed_stereocenters": [],
+      "notes": "A deliberately smaller aryl-shielded model of a Schrock-type pocket; it is not HIPTN3N."
+    }
+  ]
+}

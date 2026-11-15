@@ -1,0 +1,9 @@
+.pixi/
+__pycache__/
+*.pyc
+results/
+scratch/
+
+# Keep this independent catalog despite the root project's data/ ignore rule.
+!data/
+!data/**

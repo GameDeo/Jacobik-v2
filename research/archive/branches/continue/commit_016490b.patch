@@ -1,0 +1,19 @@
+commit 016490b35ea989fff2efe06651ff1e548116ea85
+Author: GameDeo <alanchen310@gmail.com>
+Date:   Sun Oct 25 01:33:50 2026 -0700
+
+    docs(jgen): fill Q1 contamination estimate (d21) in roadmap section 8.4
+
+diff --git a/roadmap_generation_v1.md b/roadmap_generation_v1.md
+index fb229ae..d47f213 100644
+--- a/roadmap_generation_v1.md
++++ b/roadmap_generation_v1.md
+@@ -809,7 +809,7 @@ Resource rules: one GPU job at a time; RAM within limits; no environments under
+ ### 8.4 Statistics DB, NCI v2 and input labels (revision 2)
+ 
+ - **Surface-fit prevalence.** 934 consistent, 209 ambiguous and 57 inconsistent parents in 1200 (Section 2.0). About 22% of surface-fit parents carry a non-consistent label. Their statistics enter the NCI v2 fit.
+-- **Q1 key contamination (estimate, not a measurement).** The constraints DB (`data/refit/final/constraints_2026-10-18.json`) has no per-key provenance, so contamination cannot be read from it. d21 estimates, per donor subclass, how many surface_fit parents carrying that subclass are inconsistent or ambiguous. It says how many training parents have a defective SMILES. It does not say which DB key each parent fed or with what weight. Result: D21_RESULT_PLACEHOLDER
++- **Q1 key contamination (estimate, not a measurement).** The constraints DB (`data/refit/final/constraints_2026-10-18.json`) has no per-key provenance, so contamination cannot be read from it. d21 estimates, per donor subclass, how many surface_fit parents carrying that subclass are inconsistent or ambiguous. It says how many training parents have a defective SMILES. It does not say which DB key each parent fed or with what weight. Result (d21, surface_fit, 1200 parents, 57 inconsistent): the highest inconsistent shares are N_donor:N_amine 17.2% (17 of 99 parents), S_donor:S_thiocarbonyl 15.2% (7 of 46), N_donor:N_amido 10.7% (8 of 75), O_donor:O_alkoxide 8.0% (4 of 50), Hal_donor:Hal_I 7.0% (3 of 43). The largest absolute counts are P_donor:P_phosphine 15 of 303 (5.0%) and Hal_donor:Hal_Cl 11 of 382 (2.9%). The estimate is per subclass, not per DB key (see Section 8.4 caveat).
+ - **Consequence for NCI v2.** Q1 keys with a high non-consistent share should be refit with those parents excluded or flagged, under roadmapv2 section 4.1. Changing the labels changes the training set and is reported separately from energy changes (Section 8.2).
+ 
+ ## 9. Evidence limits and undetermined items

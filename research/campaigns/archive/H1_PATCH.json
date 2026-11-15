@@ -1,0 +1,4 @@
+{
+  "q6_donor_pairs": {"hh": 0.95, "ho": 0.90, "oo": 0.80},
+  "angle_tail_quadratic": true
+}

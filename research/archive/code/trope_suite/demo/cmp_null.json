@@ -1,0 +1,1001 @@
+{
+ "footprint": {
+  "change": "none (determinism check)",
+  "tags": [],
+  "parents": []
+ },
+ "rows": [
+  {
+   "code": "SUQWEG",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta3",
+    "haptic_eta5",
+    "lanthanide"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": null,
+   "d_offset": null,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": null,
+     "d_offset": null
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": null,
+   "d_bucket_offset": null,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.3591432571411133,
+    "dE_unrel": 628.9832979389466,
+    "strain": null,
+    "offset": null,
+    "md_bond_dev": 11811.417895592374,
+    "rmsd": 2.3603746895088085,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.3591432571411133,
+    "dE_unrel": 628.9832979389466,
+    "strain": null,
+    "offset": null,
+    "md_bond_dev": 11811.417895592374,
+    "rmsd": 2.3603746895088085,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "CAFWIQ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 3,
+   "tags": [
+    "anionic_N",
+    "anionic_halide",
+    "chelate_ring5",
+    "cn6_trig_pris",
+    "haptic_eta2",
+    "macrocycle"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 12.0,
+   "n_buckets_arm": 12.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      11
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      11
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      11
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.14000877986351648,
+    "dE_unrel": 535.986512622796,
+    "strain": 512.2435177145526,
+    "offset": 23.742994908243418,
+    "md_bond_dev": 85.43999724313362,
+    "rmsd": 1.5113971791376721,
+    "n_seeds": 3,
+    "n_buckets": 12.0
+   },
+   "arm": {
+    "score": 0.14000877986351648,
+    "dE_unrel": 535.986512622796,
+    "strain": 512.2435177145526,
+    "offset": 23.742994908243418,
+    "md_bond_dev": 85.43999724313362,
+    "rmsd": 1.5113971791376721,
+    "n_seeds": 3,
+    "n_buckets": 12.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "MUNSUJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta4"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.5389151573181152,
+    "dE_unrel": 128.0574080022052,
+    "strain": 117.34806886781007,
+    "offset": 10.709339134395123,
+    "md_bond_dev": 46.41104589844921,
+    "rmsd": 1.8599329562249287,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.5389151573181152,
+    "dE_unrel": 128.0574080022052,
+    "strain": 117.34806886781007,
+    "offset": 10.709339134395123,
+    "md_bond_dev": 46.41104589844921,
+    "rmsd": 1.8599329562249287,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SIKNAE",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 3,
+   "tags": [
+    "anionic_C",
+    "anionic_N",
+    "bulky_phosphine",
+    "chelate_ring4",
+    "chelate_ring5",
+    "chelate_ring7",
+    "chelate_ring8plus",
+    "cn5_trig_bipyr"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 2.0,
+   "n_buckets_arm": 2.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.08732552329699199,
+    "dE_unrel": 166.85913625856242,
+    "strain": 151.026380535836,
+    "offset": 15.832755722726384,
+    "md_bond_dev": 198.63717547391556,
+    "rmsd": 1.358003885552849,
+    "n_seeds": 3,
+    "n_buckets": 2.0
+   },
+   "arm": {
+    "score": 0.08732552329699199,
+    "dE_unrel": 166.85913625856242,
+    "strain": 151.026380535836,
+    "offset": 15.832755722726384,
+    "md_bond_dev": 198.63717547391556,
+    "rmsd": 1.358003885552849,
+    "n_seeds": 3,
+    "n_buckets": 2.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "RIGWAJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "carbene_other",
+    "cn6_octahedral"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.768609642982483,
+    "dE_unrel": 40.81212569400668,
+    "strain": 8.925740735605359,
+    "offset": 31.886384958401322,
+    "md_bond_dev": 2.290670462819121,
+    "rmsd": 0.6320376864404912,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.768609642982483,
+    "dE_unrel": 40.81212569400668,
+    "strain": 8.925740735605359,
+    "offset": 31.886384958401322,
+    "md_bond_dev": 2.290670462819121,
+    "rmsd": 0.6320376864404912,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "YUNPIG",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "anionic_S",
+    "chelate_ring6",
+    "cn4_square_plan"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 2.0,
+   "n_buckets_arm": 2.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.0341144800186157,
+    "dE_unrel": 70.19483765214682,
+    "strain": 62.49603853933513,
+    "offset": 7.698799112811685,
+    "md_bond_dev": 12.295791580142447,
+    "rmsd": 0.6760232499310486,
+    "n_seeds": 1,
+    "n_buckets": 2.0
+   },
+   "arm": {
+    "score": 1.0341144800186157,
+    "dE_unrel": 70.19483765214682,
+    "strain": 62.49603853933513,
+    "offset": 7.698799112811685,
+    "md_bond_dev": 12.295791580142447,
+    "rmsd": 0.6760232499310486,
+    "n_seeds": 1,
+    "n_buckets": 2.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SUXROT",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "carbene_nhc",
+    "cn4_see_saw",
+    "haptic_eta2"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 4.0,
+   "n_buckets_arm": 4.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.4653155505657196,
+    "dE_unrel": 1047.6557871149853,
+    "strain": 992.4397257617675,
+    "offset": 55.21606135321781,
+    "md_bond_dev": 24.05862726910158,
+    "rmsd": 1.94815768651114,
+    "n_seeds": 1,
+    "n_buckets": 4.0
+   },
+   "arm": {
+    "score": 0.4653155505657196,
+    "dE_unrel": 1047.6557871149853,
+    "strain": 992.4397257617675,
+    "offset": 55.21606135321781,
+    "md_bond_dev": 24.05862726910158,
+    "rmsd": 1.94815768651114,
+    "n_seeds": 1,
+    "n_buckets": 4.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "CANXAQ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta6"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.837519645690918,
+    "dE_unrel": 12.613085937686265,
+    "strain": 10.487441326491535,
+    "offset": 2.12564461119473,
+    "md_bond_dev": 8.389058877456161,
+    "rmsd": 1.7232614932209418,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.837519645690918,
+    "dE_unrel": 12.613085937686265,
+    "strain": 10.487441326491535,
+    "offset": 2.12564461119473,
+    "md_bond_dev": 8.389058877456161,
+    "rmsd": 1.7232614932209418,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SISKAJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "anionic_O",
+    "anionic_halide",
+    "chelate_ring5",
+    "cn5_square_pyr"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 12.0,
+   "n_buckets_arm": 12.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      5
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      4
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.8180252313613892,
+    "dE_unrel": 81.14095147745684,
+    "strain": 103.2818773468025,
+    "offset": -22.140925869345665,
+    "md_bond_dev": 124.86753275673078,
+    "rmsd": 1.348103136205661,
+    "n_seeds": 1,
+    "n_buckets": 12.0
+   },
+   "arm": {
+    "score": 0.8180252313613892,
+    "dE_unrel": 81.14095147745684,
+    "strain": 103.2818773468025,
+    "offset": -22.140925869345665,
+    "md_bond_dev": 124.86753275673078,
+    "rmsd": 1.348103136205661,
+    "n_seeds": 1,
+    "n_buckets": 12.0
+   },
+   "status": "ok"
+  }
+ ],
+ "per_trope": {},
+ "outside_violations": [],
+ "outside_ok": true,
+ "note": "a filter before panels; the panels decide. <=12 parents: no CI claimed."
+}

@@ -1,0 +1,77 @@
+{
+  "reason": "incomplete fixed-identity cohort; contract audit referral",
+  "ledger": {
+    "HEDJOP": {
+      "status": "failed_fixed_identity",
+      "reason": "ValueError: fixed row unavailable at switch: [None, 1, 148]"
+    },
+    "FEKKAJ": {
+      "status": "interrupted_at_audit_stop"
+    },
+    "NUWFAM": {
+      "status": "not_attempted_at_audit_stop"
+    },
+    "QEZVEY": {
+      "status": "not_attempted_at_audit_stop"
+    },
+    "DAMVAQ": {
+      "status": "not_attempted_at_audit_stop"
+    },
+    "USAPOU": {
+      "status": "not_attempted_at_audit_stop"
+    },
+    "NEPNEF": {
+      "status": "not_attempted_at_audit_stop"
+    },
+    "AJAQAD": {
+      "status": "not_attempted_at_audit_stop"
+    }
+  },
+  "rules": {
+    "status": "incomplete_no_policy_selection",
+    "policy_exclusions": [
+      "FEKKAJ",
+      "NEPNEF"
+    ],
+    "expected_parent_identities": [
+      "HEDJOP",
+      "FEKKAJ",
+      "NUWFAM",
+      "QEZVEY",
+      "DAMVAQ",
+      "USAPOU",
+      "NEPNEF",
+      "AJAQAD"
+    ],
+    "release_rule": "median score gain >=0 AND class-change share <=0.05 when released alone",
+    "release_rule_inputs": {
+      "shape": {
+        "median_score_gain": null,
+        "class_change_share": null
+      },
+      "symmetry": {
+        "median_score_gain": null,
+        "class_change_share": null
+      },
+      "projection": {
+        "median_score_gain": null,
+        "class_change_share": null
+      }
+    },
+    "proposed_release": null,
+    "joint_release_class_change_share": null,
+    "native_curvature_cost_fraction": null,
+    "sigma_source": null,
+    "sigma_rule": "measured whole-loop curvature cost <=10% of thermal finish wall, otherwise thermal",
+    "proposed_cap": null,
+    "censored_rows": 0,
+    "convergence_rule": "0.5 sum((score-gradient-in-nats * sigma)^2) <0.1; one-based criterion checks; p95 rounded UP to multiple of8; no cap if censored"
+  },
+  "tracebacks": {
+    "HEDJOP": "Traceback (most recent call last):\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/research/bench/tools/jgen/g3d_diagnostics.py\", line 622, in main\n    result['parents'][code]=run_parent(code,args,stats,mace,keys)\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/research/bench/tools/jgen/g3d_diagnostics.py\", line 489, in run_parent\n    snapshots,activities,search_wall=capture_switch(builder,stats,args.seed,args.switch_step,args.total_steps,\n                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/research/bench/tools/jgen/g3d_diagnostics.py\", line 370, in capture_switch\n    solved=builder.solve(seed=seed,stats=stats,angle_bends=True,device='cpu',\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/src/jacobik/engine.py\", line 1264, in solve\n    return self._solve_for_assignments(ctx, candidates, beam_width, n_ik_steps)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/src/jacobik/engine.py\", line 1814, in _solve_for_assignments\n    thetas_final, converged, scores, solve_trace = self._run_joint_ik(\n                                                   ^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/research/bench/tools/jgen/g3d_diagnostics.py\", line 330, in wrapped\n    return original_joint(ctx,fks,scorer,ge,X,theta,didx,ideal,sym,q3sym,W,T,candidate)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/src/jacobik/engine.py\", line 2333, in _run_joint_ik\n    thetas_final, converged, scores, solve_trace = joint_solver.solve(\n                                                   ^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/src/jacobik/ik/ik_solver.py\", line 490, in solve\n    return self._solve_impl(\n           ^^^^^^^^^^^^^^^^^\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/src/jacobik/ik/ik_solver.py\", line 967, in _solve_impl\n    JointIKSolver.diagnostic_hook(self, t, dict(\n  File \"/mnt/e/Dev/Projects/jacobik_2026-10-02_full/.claude/worktrees/jgen-b/research/bench/tools/jgen/g3d_diagnostics.py\", line 344, in hook\n    raise ValueError(f'fixed row unavailable at switch: {key}')\nValueError: fixed row unavailable at switch: [None, 1, 148]\n"
+  },
+  "artifact_sha256": {
+    "step0.json": "850822f5a1b3a9beb1ebd77b0ba0fee88b03120731d13fc6c5771e430cfede3f",
+    "step0.log": "82b274f7d2b47a84cc20b99ecdf33dc6c5e61c87bfd668b0b5fef4c92581cba0"
+  }
+}

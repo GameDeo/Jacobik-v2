@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "retrieved_on": "2026-10-17",
+  "files": [
+    {
+      "file": "A01.cif",
+      "bytes": 2009844,
+      "sha256": "a2ee5e9dc4e937682456029e8a9254993a1705cda7919845fb69c18ec391ffb9",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?hb7980"
+    },
+    {
+      "file": "A02.cif",
+      "bytes": 20159,
+      "sha256": "83e55ac8b20ec9b2021678dc2d923d948346d4f7a46a8c7293333a7a917c7e4f",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?wm5082"
+    },
+    {
+      "file": "A03.cif",
+      "bytes": 2028938,
+      "sha256": "5d09bc464eac5493b5e4f70f593b5fdbe52950b2b7cab642d8f39b23b84f6d76",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?zl5041"
+    },
+    {
+      "file": "A04.cif",
+      "bytes": 632095,
+      "sha256": "4e823ba133fc4cccf90808d11789506aa0064dbe5df7e5cebbdc8da76de3ee94",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?tx2089"
+    },
+    {
+      "file": "A05.cif",
+      "bytes": 290702,
+      "sha256": "ab657e860c7f4d51e97fb01826c5f9c8da13f6d7e17df6003966672b984cff56",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?hb7735"
+    },
+    {
+      "file": "A06.cif",
+      "bytes": 10033,
+      "sha256": "0b83e3ae8cb2137024c76ae58562b06c6dd6e0bca0849fa265e5a9d8434b7d04",
+      "url": "https://www.crystallography.net/cod/2202758.cif"
+    },
+    {
+      "file": "A07.cif",
+      "bytes": 3888558,
+      "sha256": "e3c4f164a64c157b354380f76bda2b5f9d852c2f72da2f637d776bf7f0a544b5",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?hb8036"
+    },
+    {
+      "file": "A08.cif",
+      "bytes": 525261,
+      "sha256": "38b6dc448ad56759605e29142b9439517e68daa2243727cadb6d4be2b5a6a5ef",
+      "url": "https://scripts.iucr.org/cgi-bin/sendcif?vm4054"
+    },
+    {
+      "file": "architector-conda.json",
+      "bytes": 18399,
+      "sha256": "f3220bca9e7df0f40adda00adf6b34b7ffc8210749a3ed82631ec6d4b846e58f",
+      "url": "https://api.anaconda.org/package/conda-forge/architector"
+    },
+    {
+      "file": "architector-upstream.json",
+      "bytes": 5317,
+      "sha256": "0854d1bee9465dc681a0bcd3471d0f93a3f0655f4c69d99ff325f765fe450b67",
+      "url": "https://api.github.com/repos/lanl/Architector/commits/main"
+    },
+    {
+      "file": "ARCHITECTOR_LICENSE.txt",
+      "bytes": 2218,
+      "sha256": "fe42029d293bd98ccb6dbdc4250c2584769f00a816657bedfc8c0c5574c524c3",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/LICENSE.txt"
+    },
+    {
+      "file": "challenge/ALLYL-crossref.json",
+      "bytes": 18133,
+      "sha256": "41eb8c47080769d07901c584cc382e3766bfa71a99b9bf85f910449d4d7b77f7",
+      "url": "https://api.crossref.org/works/10.1016/S1631-0748(02)01406-6"
+    },
+    {
+      "file": "challenge/ARCH-crossref.json",
+      "bytes": 32767,
+      "sha256": "42196a547e2d5e30012e967840e811dbb5ccef4312bf1fdd0604061039e5945e",
+      "url": "https://api.crossref.org/works/10.1038/s41467-023-38169-2"
+    },
+    {
+      "file": "challenge/BUEA-crossref.json",
+      "bytes": 16951,
+      "sha256": "e22a1e03182ccc3e7731366cd9912eb1f438c53aade9313f1cc039aa33bb7128",
+      "url": "https://api.crossref.org/works/10.1021/ja061618x"
+    },
+    {
+      "file": "challenge/cif-downloads.json",
+      "bytes": 271,
+      "sha256": "ad2cb8553af2cd8aab6aea5f8e5863c228f4530921cdecf51d2098361ffe5a84",
+      "derived_from": "Publisher download audit recorded during challenge preparation"
+    },
+    {
+      "file": "challenge/complex_construction.py.txt",
+      "bytes": 43173,
+      "sha256": "45f5c7ea2ada0276055af86afbc05102ca4592ca1c47bfe522fa6f0d9b0b014a",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/architector/complex_construction.py"
+    },
+    {
+      "file": "challenge/CUPP-crossref.json",
+      "bytes": 16788,
+      "sha256": "573e70c32a247012165fe24b353f4af44fe213e4745c65e5c8fff2f7e3ba67fa",
+      "url": "https://api.crossref.org/works/10.3390/molecules24213934"
+    },
+    {
+      "file": "challenge/DOTA09-crossref.json",
+      "bytes": 12630,
+      "sha256": "11f4c546b906e252eb6f7d47b9fc4129e494ef4961d356858e1227b9964f6342",
+      "url": "https://api.crossref.org/works/10.1021/ic9017008"
+    },
+    {
+      "file": "challenge/HOPO-bc5b00572_si_002.cif",
+      "bytes": 1880563,
+      "sha256": "e11e6b1a6d7b2205e9a17f89c182e82e17741d6be177da1c8004f3cafe6d959f",
+      "url": "https://ndownloader.figshare.com/files/3731791"
+    },
+    {
+      "file": "challenge/HOPO-crossref.json",
+      "bytes": 10732,
+      "sha256": "486da8139f827574df0a54926aa4c170344db49c5f86225ea77c6c6780cc312f",
+      "url": "https://api.crossref.org/works/10.1021/acs.bioconjchem.5b00572"
+    },
+    {
+      "file": "challenge/HOPO-figshare-2098525.json",
+      "bytes": 13549,
+      "sha256": "4cb890ae45afce95aef013113d1d30e16e509045a5c6bac595b897bea49f3e21",
+      "url": "https://api.figshare.com/v2/articles/2098525"
+    },
+    {
+      "file": "challenge/HOPO-figshare-2098531.json",
+      "bytes": 13679,
+      "sha256": "bf166305d7453ca947e1a21803d84924b45b3df59eb686f983aac46f95b77029",
+      "url": "https://api.figshare.com/v2/articles/2098531"
+    },
+    {
+      "file": "challenge/io_core.py.txt",
+      "bytes": 18916,
+      "sha256": "3794e0e4ab1153383208fd3e2ffc5aca4c2251b709e55e6a054c1807071797fc",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/architector/io_core.py"
+    },
+    {
+      "file": "challenge/io_lig.py.txt",
+      "bytes": 80431,
+      "sha256": "6d2ca9e0d603f9a2190db97386d461cb1916df8fe59c708b7f41669b57962bea",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/architector/io_lig.py"
+    },
+    {
+      "file": "challenge/io_obabel.py.txt",
+      "bytes": 31161,
+      "sha256": "cd4b27db23157642bf041f7b1d0c7a2efcb2de44553fd50666e4253beaab6ca5",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/architector/io_obabel.py"
+    },
+    {
+      "file": "challenge/io_symmetry.py.txt",
+      "bytes": 15061,
+      "sha256": "9c3009c7598178dbe9bccdb5fbdba740ba0c7f139be4904dbc44b69816f20003",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/de3af7656096ea7c5a039a970585155327e253a8/architector/io_symmetry.py"
+    },
+    {
+      "file": "challenge/MO69-crossref.json",
+      "bytes": 2079,
+      "sha256": "97891e47ca04d17e829f0a69d7d3447c01e677b28817f0403b43b193531c3e22",
+      "url": "https://api.crossref.org/works/10.1039/C29690001392"
+    },
+    {
+      "file": "challenge/MOEPR-crossref.json",
+      "bytes": 13255,
+      "sha256": "b121c319ea75cf99116388d3dc6bca8b8014bce6ab1fd4c0101c57c9a2e95209",
+      "url": "https://api.crossref.org/works/10.1021/ja1004619"
+    },
+    {
+      "file": "challenge/RUSULF-crossref.json",
+      "bytes": 16124,
+      "sha256": "0e126cf79b5384216781d60d041e80f2dc7ad46146f994824ce39b4dca8b19b3",
+      "url": "https://api.crossref.org/works/10.1039/DT9910002335"
+    },
+    {
+      "file": "challenge/SNS23-crossref.json",
+      "bytes": 17155,
+      "sha256": "e1ce2bf07e99209878f17f108f44a5de6ecc18230cb49c7b3262547416e3e514",
+      "url": "https://api.crossref.org/works/10.1002/ejic.202300313"
+    },
+    {
+      "file": "challenge/TPATCN-crossref.json",
+      "bytes": 9092,
+      "sha256": "11bb065cceb851023d61664547a9f5544105d03b70961aeb1b719bd7287e1f36",
+      "url": "https://api.crossref.org/works/10.1002/hlca.200900150"
+    },
+    {
+      "file": "challenge/XLXANT-crossref.json",
+      "bytes": 7039,
+      "sha256": "b872bf4dc26e2df0540615fab5772f5063d47e285470eca43b5dad3e3c1ac06b",
+      "url": "https://api.crossref.org/works/10.1021/acs.organomet.9b00141"
+    },
+    {
+      "file": "challenge/XLXANT-figshare-8072216.json",
+      "bytes": 11059,
+      "sha256": "5f1ba41c6d66082789abb44681c2680f25d66d7e6580629bc531b5eaea6c4d32",
+      "url": "https://api.figshare.com/v2/articles/8072216"
+    },
+    {
+      "file": "challenge/XLXANT-figshare-8072219.json",
+      "bytes": 10925,
+      "sha256": "268e999ee3d587c83a4c79a26b71b0f9ecaa07fde32efb3b74a4fe89aa11e9e6",
+      "url": "https://api.figshare.com/v2/articles/8072219"
+    },
+    {
+      "file": "challenge/XLXANT-om9b00141_si_002.xyz",
+      "bytes": 94165,
+      "sha256": "ed8c8c94be716c9b58c8311359e242016c7d58330959509f358e6b9e4001676c",
+      "url": "https://ndownloader.figshare.com/files/15042911"
+    },
+    {
+      "file": "cod-search-A01.json",
+      "bytes": 1643,
+      "sha256": "eb9bcc132d1671cd8f14d18d82aa4c341c0a0f9d666882543b24f1380c780085",
+      "url": "https://www.crystallography.net/cod/result?doi=10.1107%2FS2056989021009336&format=json"
+    },
+    {
+      "file": "cod-search-A06.json",
+      "bytes": 3429,
+      "sha256": "b1c2939dbe3f5a4120e0dfa6ca6c190e237461401240e7af21590f0ccbe47f41",
+      "url": "https://www.crystallography.net/cod/result?doi=10.1107%2FS1600536803024656&format=json"
+    },
+    {
+      "file": "io_process_input.py.txt",
+      "bytes": 69700,
+      "sha256": "ddfa16458f9fdbc44c0044af1a50f23156e033db2f9e6ec073fac2c64b639380",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/main/architector/io_process_input.py"
+    },
+    {
+      "file": "upstream-environment.yml",
+      "bytes": 216,
+      "sha256": "2d18f2c97d6850eeefc2354b5e416ea04caaa575a1c47e63eff68b2901344219",
+      "url": "https://raw.githubusercontent.com/lanl/Architector/main/environment.yml"
+    },
+    {
+      "file": "xtb-python-conda.json",
+      "bytes": 244528,
+      "sha256": "bf6ceeec731c221a742009403bbaee74fa2d70b1f1eb47b96d9cd96bf65cfa93",
+      "url": "https://api.anaconda.org/package/conda-forge/xtb-python"
+    }
+  ]
+}

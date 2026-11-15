@@ -1,0 +1,39 @@
+{
+  "dataset_id": "coordination-failure-modes-v2",
+  "case_count": 29,
+  "ligand_count": 39,
+  "chemistry_checked": true,
+  "source_count": 12,
+  "origins": {
+    "literature_motif": 7,
+    "designed": 14,
+    "literature_input": 8
+  },
+  "adapter_status": {
+    "direct": 25,
+    "requires_adapter": 3,
+    "assembly_only": 1
+  },
+  "prepared_coordinate_sets": {
+    "experimental_crystal_heavy_atoms": 1,
+    "published_computed_geometry": 12
+  },
+  "input_sha256": {
+    "data/challenge/cases.json": "f82e46d830eb857662e0f5332e58d92fc8a7a1e85954f5a12a2c78cbf1887a3b",
+    "data/challenge/ligands.json": "ed702b458fd51fc41a48519d942f38313afb7da2960daa002fcea7bfc16faacc",
+    "data/challenge/sources.json": "c4d7f4faa9ac5932efdbace9bdc235e1641df207305350a69ad5d39f8f7de623",
+    "sources/manifest.json": "27ee6b2037dfcf1300cf979c0499fef03a6b481c462447fdf6cff80d3a4da329"
+  },
+  "checks": [
+    "binding-group partition",
+    "metal contacts versus template slots",
+    "formal charges",
+    "export policy",
+    "source hashes and DOI metadata",
+    "RDKit/Open Babel atom order and connectivity",
+    "ligand radicals",
+    "fixed stereochemistry round trip",
+    "electron parity",
+    "aromatic pi-group topology"
+  ]
+}

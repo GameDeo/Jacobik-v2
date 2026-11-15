@@ -1,0 +1,1017 @@
+{
+  "verdict": "incompatible_cap_exceeds_144_stop",
+  "contract_amendment3_commit": "f92e23a",
+  "policy_commit": "6027475",
+  "policy": {
+    "status": "diagnostic_proposal_pending_audit",
+    "policy_exclusions": [
+      "FEKKAJ",
+      "NEPNEF"
+    ],
+    "policy_row_counts": {
+      "HEDJOP": 6,
+      "NUWFAM": 6,
+      "DAMVAQ": 6,
+      "QEZVEY": 6,
+      "AJAQAD": 6,
+      "USAPOU": 6
+    },
+    "policy_row_total": 36,
+    "expected_parent_identities": [
+      "HEDJOP",
+      "FEKKAJ",
+      "NUWFAM",
+      "QEZVEY",
+      "DAMVAQ",
+      "USAPOU",
+      "NEPNEF",
+      "AJAQAD"
+    ],
+    "release_rule": "median score gain >=0 AND class-change share <=0.05 when released alone",
+    "release_rule_inputs": {
+      "shape": {
+        "median_score_gain": 0.04391014575958252,
+        "class_change_share": 0.05555555555555555
+      },
+      "symmetry": {
+        "median_score_gain": 0.05513528361916542,
+        "class_change_share": 0.027777777777777776
+      },
+      "projection": {
+        "median_score_gain": 0.04260603338479996,
+        "class_change_share": 0.05555555555555555
+      }
+    },
+    "proposed_release": [
+      "symmetry"
+    ],
+    "joint_release_class_change_share": 0.027777777777777776,
+    "native_curvature_cost_fraction": 14.563939297941035,
+    "sigma_source": "thermal",
+    "sigma_rule": "measured whole-loop curvature cost <=10% of thermal finish wall, otherwise thermal",
+    "proposed_cap": null,
+    "censored_rows": 19,
+    "convergence_rule": "0.5 sum((score-gradient-in-nats * sigma)^2) <0.1; one-based criterion checks; p95 rounded UP to multiple of8; no cap if censored"
+  },
+  "convergence": {
+    "policy": {
+      "release": [
+        "symmetry"
+      ],
+      "sigma_source": "thermal",
+      "sigma": {
+        "translation": 0.0585,
+        "rotation": 0.08609,
+        "torsion": 0.2402,
+        "ring": 0.2402,
+        "bend": 0.08609
+      },
+      "measurements": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/step0_50_complete.json",
+      "measurements_sha256": "4d3bd7bd8f5b76f93f4030c50e94ca72487d137b37e82a7d57a84477f5b40f9d",
+      "row_manifest_sha256": "4960170192fb621cdc98fb942a78727e413fa3049652964d6ab68bf60e66f5e0",
+      "rules": {
+        "status": "diagnostic_proposal_pending_audit",
+        "policy_exclusions": [
+          "FEKKAJ",
+          "NEPNEF"
+        ],
+        "policy_row_counts": {
+          "HEDJOP": 6,
+          "NUWFAM": 6,
+          "DAMVAQ": 6,
+          "QEZVEY": 6,
+          "AJAQAD": 6,
+          "USAPOU": 6
+        },
+        "policy_row_total": 36,
+        "expected_parent_identities": [
+          "HEDJOP",
+          "FEKKAJ",
+          "NUWFAM",
+          "QEZVEY",
+          "DAMVAQ",
+          "USAPOU",
+          "NEPNEF",
+          "AJAQAD"
+        ],
+        "release_rule": "median score gain >=0 AND class-change share <=0.05 when released alone",
+        "release_rule_inputs": {
+          "shape": {
+            "median_score_gain": 0.04391014575958252,
+            "class_change_share": 0.05555555555555555
+          },
+          "symmetry": {
+            "median_score_gain": 0.05513528361916542,
+            "class_change_share": 0.027777777777777776
+          },
+          "projection": {
+            "median_score_gain": 0.04260603338479996,
+            "class_change_share": 0.05555555555555555
+          }
+        },
+        "proposed_release": [
+          "symmetry"
+        ],
+        "joint_release_class_change_share": 0.027777777777777776,
+        "native_curvature_cost_fraction": 14.563939297941035,
+        "sigma_source": "thermal",
+        "sigma_rule": "measured whole-loop curvature cost <=10% of thermal finish wall, otherwise thermal",
+        "proposed_cap": null,
+        "censored_rows": 19,
+        "convergence_rule": "0.5 sum((score-gradient-in-nats * sigma)^2) <0.1; one-based criterion checks; p95 rounded UP to multiple of8; no cap if censored"
+      },
+      "horizon": 144,
+      "cap_rule": "ceil(.95*n)-th order statistic across all policy rows; censored above observed; round up to multiple of 8",
+      "bias": "Step-200 switch states are more settled than plateau switches near 100; measured cap may be optimistic; no correction."
+    },
+    "parents": {
+      "HEDJOP": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              0,
+              76
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              35
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              19
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              48
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              1,
+              138
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              1,
+              134
+            ],
+            "first_converged_step": null,
+            "censored": true
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                0,
+                76
+              ],
+              [
+                0,
+                0,
+                35
+              ],
+              [
+                0,
+                0,
+                19
+              ],
+              [
+                0,
+                0,
+                48
+              ]
+            ],
+            "switch_digest": "e0f1b83ab846be8ee087ff0c8090486dc0d62816a3fa706c16d661fbd336a2b7",
+            "steps_executed": 144,
+            "wall_s": 5.5692115419660695
+          },
+          {
+            "keys": [
+              [
+                0,
+                1,
+                138
+              ],
+              [
+                0,
+                1,
+                134
+              ]
+            ],
+            "switch_digest": "6a9c6f82e9859a4defe5a42c676ed279d8219ad69ef7c1cc1ce2349c66515acf",
+            "steps_executed": 144,
+            "wall_s": 5.472726586973295
+          }
+        ],
+        "search_wall_s": 13.576624063018244,
+        "wall_s": 26.811008617980406
+      },
+      "USAPOU": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              8,
+              401
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              2,
+              144
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              58
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              1,
+              94
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              31
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              1,
+              127
+            ],
+            "first_converged_step": null,
+            "censored": true
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                8,
+                401
+              ]
+            ],
+            "switch_digest": "4e6e9a5eb606a580be544e2a492f97f7c81c94390d2bb5a2a8871981526631a2",
+            "steps_executed": 144,
+            "wall_s": 10.971361371979583
+          },
+          {
+            "keys": [
+              [
+                0,
+                2,
+                144
+              ]
+            ],
+            "switch_digest": "b3c8ab1068bc868cd043c2c1441fd806d8a86fdc7a4e2f893b102e9404ec241c",
+            "steps_executed": 144,
+            "wall_s": 11.930414470029064
+          },
+          {
+            "keys": [
+              [
+                0,
+                0,
+                58
+              ],
+              [
+                0,
+                1,
+                94
+              ],
+              [
+                0,
+                0,
+                31
+              ],
+              [
+                0,
+                1,
+                127
+              ]
+            ],
+            "switch_digest": "3b5ef300c91e08d7f7c9cb1a013353ebbb7cd0dfe61ec3e943827cb630ec4189",
+            "steps_executed": 144,
+            "wall_s": 9.18318992696004
+          }
+        ],
+        "search_wall_s": 30.98112927703187,
+        "wall_s": 63.771470531006344
+      },
+      "NUWFAM": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              0,
+              42
+            ],
+            "first_converged_step": 21,
+            "censored": false
+          },
+          {
+            "key": [
+              1,
+              0,
+              46
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          },
+          {
+            "key": [
+              1,
+              0,
+              21
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          },
+          {
+            "key": [
+              1,
+              0,
+              43
+            ],
+            "first_converged_step": 34,
+            "censored": false
+          },
+          {
+            "key": [
+              1,
+              0,
+              99
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              1,
+              0,
+              112
+            ],
+            "first_converged_step": 32,
+            "censored": false
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                0,
+                42
+              ]
+            ],
+            "switch_digest": "a597a6e66a7ee41c767ad97bcf484eb345bfba489f0d3d8b66413f62e4d27015",
+            "steps_executed": 21,
+            "wall_s": 0.8373834119993262
+          },
+          {
+            "keys": [
+              [
+                1,
+                0,
+                46
+              ],
+              [
+                1,
+                0,
+                21
+              ],
+              [
+                1,
+                0,
+                43
+              ],
+              [
+                1,
+                0,
+                99
+              ],
+              [
+                1,
+                0,
+                112
+              ]
+            ],
+            "switch_digest": "384d4c6d10e04803c0e64816d893c8930925a68fd003333e9a4f1e3859f9172e",
+            "steps_executed": 144,
+            "wall_s": 6.386473470018245
+          }
+        ],
+        "search_wall_s": 40.79923435195815,
+        "wall_s": 50.256752705026884
+      },
+      "QEZVEY": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              2,
+              368
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              2,
+              260
+            ],
+            "first_converged_step": 49,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              8,
+              1114
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              6,
+              847
+            ],
+            "first_converged_step": 40,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              11,
+              1495
+            ],
+            "first_converged_step": 44,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              11,
+              1410
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                2,
+                368
+              ],
+              [
+                0,
+                2,
+                260
+              ]
+            ],
+            "switch_digest": "a207c83f5a8bcdc3141f1d1a79073d5d07c7acb0c35da8c242795d79e2d076cb",
+            "steps_executed": 49,
+            "wall_s": 2.3522358579793945
+          },
+          {
+            "keys": [
+              [
+                0,
+                8,
+                1114
+              ]
+            ],
+            "switch_digest": "0717f3afdc95382e7ca2e7b6fdc981c9631cd094fab85c17ac9a6abd7b9d49af",
+            "steps_executed": 1,
+            "wall_s": 0.04542218497954309
+          },
+          {
+            "keys": [
+              [
+                0,
+                6,
+                847
+              ]
+            ],
+            "switch_digest": "144c6c5f1550775d704f8b6add9c8ec1fecb9524c6a3a6feca83ad7881bd22b3",
+            "steps_executed": 40,
+            "wall_s": 1.8439812040305696
+          },
+          {
+            "keys": [
+              [
+                0,
+                11,
+                1495
+              ],
+              [
+                0,
+                11,
+                1410
+              ]
+            ],
+            "switch_digest": "1703f17d4eda0a489275adbdbf99e1dffe6fea7357d9c144e7b7e113857af3ff",
+            "steps_executed": 44,
+            "wall_s": 2.1112889269716106
+          }
+        ],
+        "search_wall_s": 78.87830480496632,
+        "wall_s": 85.73235921596643
+      },
+      "DAMVAQ": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              1,
+              123
+            ],
+            "first_converged_step": null,
+            "censored": true
+          },
+          {
+            "key": [
+              0,
+              0,
+              17
+            ],
+            "first_converged_step": 69,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              0,
+              14
+            ],
+            "first_converged_step": 79,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              94
+            ],
+            "first_converged_step": 60,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              0,
+              45
+            ],
+            "first_converged_step": 58,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              0,
+              48
+            ],
+            "first_converged_step": 114,
+            "censored": false
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                1,
+                123
+              ],
+              [
+                0,
+                0,
+                17
+              ],
+              [
+                0,
+                0,
+                14
+              ],
+              [
+                0,
+                1,
+                94
+              ],
+              [
+                0,
+                0,
+                45
+              ],
+              [
+                0,
+                0,
+                48
+              ]
+            ],
+            "switch_digest": "b43bb37bfdaffced6fa9ce624d89ada6371c68444a2b5524525f87811e106e29",
+            "steps_executed": 144,
+            "wall_s": 2.7489927440183237
+          }
+        ],
+        "search_wall_s": 15.84647093701642,
+        "wall_s": 20.463222188001964
+      },
+      "AJAQAD": {
+        "status": "ok",
+        "rows": [
+          {
+            "key": [
+              0,
+              1,
+              236
+            ],
+            "first_converged_step": 43,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              219
+            ],
+            "first_converged_step": 1,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              152
+            ],
+            "first_converged_step": 38,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              205
+            ],
+            "first_converged_step": 39,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              206
+            ],
+            "first_converged_step": 43,
+            "censored": false
+          },
+          {
+            "key": [
+              0,
+              1,
+              179
+            ],
+            "first_converged_step": 37,
+            "censored": false
+          }
+        ],
+        "row_failures": [],
+        "traces": [
+          {
+            "keys": [
+              [
+                0,
+                1,
+                236
+              ],
+              [
+                0,
+                1,
+                219
+              ],
+              [
+                0,
+                1,
+                152
+              ],
+              [
+                0,
+                1,
+                205
+              ],
+              [
+                0,
+                1,
+                206
+              ],
+              [
+                0,
+                1,
+                179
+              ]
+            ],
+            "switch_digest": "bfde1146044c3438ea2b6aa819461a6348031e53d3340fa047a6e5a4bb569475",
+            "steps_executed": 43,
+            "wall_s": 2.2685120219830424
+          }
+        ],
+        "search_wall_s": 11.71136125200428,
+        "wall_s": 14.292065896035638
+      }
+    },
+    "counts": {
+      "HEDJOP": 6,
+      "USAPOU": 6,
+      "NUWFAM": 6,
+      "QEZVEY": 6,
+      "DAMVAQ": 6,
+      "AJAQAD": 6
+    },
+    "n_rows": 36,
+    "censored_rows": 14,
+    "order_statistic_rank": 35,
+    "cap": null,
+    "cap_exceeds_144": true,
+    "complete": true,
+    "nonexempt_fallback_stop": false,
+    "wall_s": 159.09145381301641
+  },
+  "comparisons_thermal_50": {
+    "keep_all": {
+      "score_gain": {
+        "mean": 0.23223768443697032,
+        "ci95": [
+          0.03364821813172764,
+          0.6036104067332215
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -32.37471075865647,
+        "ci95": [
+          -61.7668300347351,
+          -9.461497801433628
+        ],
+        "parents": 6
+      }
+    },
+    "shape": {
+      "score_gain": {
+        "mean": 0.24641948379576206,
+        "ci95": [
+          0.0390309203002188,
+          0.6321586962375375
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -31.53542598360218,
+        "ci95": [
+          -59.58774302141845,
+          -9.461497801433628
+        ],
+        "parents": 6
+      }
+    },
+    "symmetry": {
+      "score_gain": {
+        "mean": 0.4840393780420224,
+        "ci95": [
+          0.0361672244552109,
+          1.0740464909209146
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -60.85109492554329,
+        "ci95": [
+          -112.73565754904801,
+          -20.237796005534218
+        ],
+        "parents": 6
+      }
+    },
+    "projection": {
+      "score_gain": {
+        "mean": 0.2408047432286872,
+        "ci95": [
+          0.0340239353891876,
+          0.6251733487264978
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -31.834032039235655,
+        "ci95": [
+          -61.7653478414286,
+          -9.303972986604398
+        ],
+        "parents": 6
+      }
+    },
+    "all": {
+      "score_gain": {
+        "mean": 0.5774924763374858,
+        "ci95": [
+          0.04380032337374157,
+          1.3055187310609553
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -71.82789412666008,
+        "ci95": [
+          -138.4380710517677,
+          -20.65329185756855
+        ],
+        "parents": 6
+      }
+    },
+    "shape+symmetry": {
+      "score_gain": {
+        "mean": 0.5562843916316828,
+        "ci95": [
+          0.04366501379344199,
+          1.2699362114071846
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -69.35095475748595,
+        "ci95": [
+          -134.89269424206577,
+          -21.90791027056467
+        ],
+        "parents": 6
+      }
+    },
+    "shape+projection": {
+      "score_gain": {
+        "mean": 0.26388521140648263,
+        "ci95": [
+          0.04050260798798667,
+          0.6805227427846855
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -32.74644592546651,
+        "ci95": [
+          -64.84135681196737,
+          -9.303972986604398
+        ],
+        "parents": 6
+      }
+    },
+    "symmetry+projection": {
+      "score_gain": {
+        "mean": 0.5146921962085697,
+        "ci95": [
+          0.03630253403551049,
+          1.1378279013766184
+        ],
+        "parents": 6
+      },
+      "mace_change_kj": {
+        "mean": -65.0759908707502,
+        "ci95": [
+          -121.83502374731661,
+          -18.98317759253809
+        ],
+        "parents": 6
+      }
+    }
+  },
+  "FEKKAJ_thermal_50": {
+    "keep_all": {
+      "score_gain_median": 0.07355034351348877,
+      "mace_delta_median": -6.948321484029293
+    },
+    "shape": {
+      "score_gain_median": 0.07355034351348877,
+      "mace_delta_median": -6.948321484029293
+    },
+    "symmetry": {
+      "score_gain_median": 0.07394349575042725,
+      "mace_delta_median": -7.424291182309389
+    },
+    "projection": {
+      "score_gain_median": 0.07355034351348877,
+      "mace_delta_median": -6.948321484029293
+    },
+    "all": {
+      "score_gain_median": 0.07394349575042725,
+      "mace_delta_median": -7.424291182309389
+    },
+    "shape+symmetry": {
+      "score_gain_median": 0.07394349575042725,
+      "mace_delta_median": -7.424291182309389
+    },
+    "shape+projection": {
+      "score_gain_median": 0.07355034351348877,
+      "mace_delta_median": -6.948321484029293
+    },
+    "symmetry+projection": {
+      "score_gain_median": 0.07394349575042725,
+      "mace_delta_median": -7.424291182309389
+    }
+  },
+  "NEPNEF": {
+    "status": "invalid_input",
+    "embed_fallback": true,
+    "rows": [],
+    "shortfall": 6,
+    "exempt": true
+  },
+  "XOJHIN": {
+    "status": "ok",
+    "records": 250,
+    "last_step": 249,
+    "last_live_best_dihedrals_deg": [
+      73.75758361816406,
+      -14.090335845947266,
+      -55.01850128173828,
+      -55.01846694946289,
+      73.7574462890625
+    ],
+    "last_closure_max_abs_A": 2.799956798553467,
+    "peak_closure_max_abs_A": 4.519772529602051,
+    "note": "Live-best row may change between steps; all-row dihedral quantiles and per-DOF delta/flip traces are in the raw artifact. Not policy evidence."
+  },
+  "raw_sha256": {
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/step0_50_complete.json": "4d3bd7bd8f5b76f93f4030c50e94ca72487d137b37e82a7d57a84477f5b40f9d",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/convergence144_complete.json": "7d8f56deb24c2ac85df1c021e8c8521b6e69c6d26c1a9ba8b686ae964e77fb0c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/a3_XOJHIN.json": "7fa9dcaa2cc3bbd89cbc3a26ac316e4026550d315d6edd901985ee1302876e8c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/step0_amend2.json": "c1ffa0b502ddcbdb4e853fd4f70b92916a76085481c9af862fb5a51a20ab8dcd",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/step0_group2.json": "28981afd8bf8e40eea6a0641c2488fa5ccdf958c357f192f3476bcbeba5581c4",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/a3_FEKKAJ.json": "4ab5e520fd2d6e2670758ed77e3e0c029efe97b97db7ad16636cdea6c2ded59f",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/a3_QEZVEY.json": "9bbdf7f4ef887197eb4cea2d5b601a60f46ab68413a1da5f001608634b973236",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/a3_other.json": "0414270fcc2b1034c5d811aa15c302d38a898edaaf4b97d9f4ae7655b5f4dde6",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/convergence144_1.json": "18022b7f3621ddf1fe79a1cdc23122168158edf26b44af9f6a95428d6c61f245",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/convergence144_2.json": "0c6936d66d8250873d12a3f91d9cafb80717945a61e84a25d7b54e361f42cf67",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3d/convergence144_3.json": "beeb55da0e2d5002f1ed9ee718678204898c51b82c681ccf09063d4b404e9e71"
+  },
+  "colab_spend": 0
+}

@@ -1,0 +1,193 @@
+{
+  "stages": {
+    "before": {
+      "rows": [
+        {
+          "code": "AWONOR",
+          "arm": "C1",
+          "B": 768,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 6.894922073810331,
+            "eigh": 0.4005400003084252,
+            "aids": 0.3123412922986092,
+            "snapshot": 0.10847961253696872,
+            "score_and_total_gradients": 13.826854459701046,
+            "projection": 0.07352129099590163,
+            "history_duals": 0.3583277431466887,
+            "optimizer": 0.07422503354328294,
+            "apply_wrap": 0.21994232278197043
+          },
+          "event_total_ms": 22.269153829123226,
+          "replay_wall_ms_per_step": 22.500925568546073,
+          "residual_host_replay_ms": 0.23177173942284668
+        },
+        {
+          "code": "AWONOR",
+          "arm": "IA-k",
+          "B": 768,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 6.819654297444128,
+            "eigh": 0.39236387213872326,
+            "aids": 0.4767291631189085,
+            "snapshot": 0.10290309573493657,
+            "score_and_total_gradients": 27.03719309068495,
+            "projection": 0.07367832399904728,
+            "history_duals": 0.35209458285281736,
+            "optimizer": 0.31531380561570965,
+            "apply_wrap": 0.23430425968141325
+          },
+          "event_total_ms": 35.80423449127064,
+          "replay_wall_ms_per_step": 36.03595020564582,
+          "residual_host_replay_ms": 0.23171571437517713
+        },
+        {
+          "code": "CAXTAX",
+          "arm": "C1",
+          "B": 2688,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 10.979851765017356,
+            "eigh": 0.8680461947956393,
+            "aids": 0.20649548259473616,
+            "snapshot": 0.11064129019336354,
+            "score_and_total_gradients": 17.095796342818968,
+            "projection": 0.04723174239118253,
+            "history_duals": 0.3605796134760303,
+            "optimizer": 0.23016232450402552,
+            "apply_wrap": 0.20168154939047753
+          },
+          "event_total_ms": 30.100486305181782,
+          "replay_wall_ms_per_step": 30.288073161295138,
+          "residual_host_replay_ms": 0.1875868561133558
+        },
+        {
+          "code": "CAXTAX",
+          "arm": "IA-k",
+          "B": 2688,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 11.1880345882908,
+            "eigh": 0.8309025795709702,
+            "aids": 0.440026065394763,
+            "snapshot": 0.10483728989117569,
+            "score_and_total_gradients": 34.402801206035,
+            "projection": 0.04780916139603623,
+            "history_duals": 0.3597845163556837,
+            "optimizer": 0.7863427131406723,
+            "apply_wrap": 0.20950322526116524
+          },
+          "event_total_ms": 48.37004134533627,
+          "replay_wall_ms_per_step": 48.6257059435502,
+          "residual_host_replay_ms": 0.25566459821393295
+        }
+      ],
+      "wall_s": 92.40456309100045,
+      "raw_sha256": "0312ab9a653678529748767c05ec18ae9a696cd8bfe37e20e3a91db598dce0b7"
+    },
+    "after": {
+      "rows": [
+        {
+          "code": "AWONOR",
+          "arm": "C1",
+          "B": 768,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 7.060279996164383,
+            "eigh": 0.31610038768379917,
+            "aids": 0.31097703342956884,
+            "snapshot": 0.1099003871842738,
+            "score_and_total_gradients": 14.192948279842254,
+            "projection": 0.07428916252308315,
+            "history_duals": 0.36043703315719483,
+            "optimizer": 0.07708116170139082,
+            "apply_wrap": 0.22070645180440718
+          },
+          "event_total_ms": 22.722719893490353,
+          "replay_wall_ms_per_step": 22.955084366935075,
+          "residual_host_replay_ms": 0.2323644734447221
+        },
+        {
+          "code": "AWONOR",
+          "arm": "IA-k",
+          "B": 768,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 7.010136908100497,
+            "eigh": 0.3251863228337419,
+            "aids": 0.4762330328024203,
+            "snapshot": 0.10308154804571983,
+            "score_and_total_gradients": 27.617161004774033,
+            "projection": 0.07408064519686083,
+            "history_duals": 0.3540919968678105,
+            "optimizer": 0.22712219386331498,
+            "apply_wrap": 0.2358842600257166
+          },
+          "event_total_ms": 36.42297791251011,
+          "replay_wall_ms_per_step": 36.59640394758137,
+          "residual_host_replay_ms": 0.17342603507125887
+        },
+        {
+          "code": "CAXTAX",
+          "arm": "C1",
+          "B": 2688,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 11.223502347546239,
+            "eigh": 0.9178174180128882,
+            "aids": 0.20692658033822814,
+            "snapshot": 0.11024864495641762,
+            "score_and_total_gradients": 17.566139228882328,
+            "projection": 0.047752258112473835,
+            "history_duals": 0.36357561246522013,
+            "optimizer": 0.29296774327033953,
+            "apply_wrap": 0.24910529035954707
+          },
+          "event_total_ms": 30.978035123943684,
+          "replay_wall_ms_per_step": 31.158419455646108,
+          "residual_host_replay_ms": 0.18038433170242385
+        },
+        {
+          "code": "CAXTAX",
+          "arm": "IA-k",
+          "B": 2688,
+          "steps": 250,
+          "measured_replay_steps": 248,
+          "mean_ms": {
+            "score_forward_kinematics": 11.202677676754613,
+            "eigh": 0.7613281316814884,
+            "aids": 0.43954890341528,
+            "snapshot": 0.10568980620272699,
+            "score_and_total_gradients": 34.50295202962814,
+            "projection": 0.04797032266674984,
+            "history_duals": 0.3619958699470566,
+            "optimizer": 0.5604117414163005,
+            "apply_wrap": 0.18207858028190751
+          },
+          "event_total_ms": 48.16465306199426,
+          "replay_wall_ms_per_step": 48.36898477419122,
+          "residual_host_replay_ms": 0.20433171219696078
+        }
+      ],
+      "wall_s": 90.26775949299918,
+      "raw_sha256": "ba927e280c620dbdd618eefea1a7a988f2e6b334f166a7819253c271151706bd"
+    }
+  },
+  "invalid_attempt": {
+    "path": "profile_before",
+    "reason": "diagnostic copied stale module globals; replay drains missing, only eager step measured; rejected in full"
+  },
+  "fix": "Skip unread Adam proposal only when neither phase uses Adam. Moment/count state preserved; all used arithmetic unchanged.",
+  "bottleneck": "IA-k takes a separate score-only autograd pass for the remaining-gain stop and row freezing, then the aided gradient pass. Removing/changing it would change numeric decisions and is not admitted.",
+  "observer_note": "External CUDA events inside captured halves; per-step synchronize to read timestamps. Exclude eager warm-up/graph-recording steps 0 and 1. Residual host/replay overhead includes observer synchronization; not confirmation wall.",
+  "fingerprint_before": "5f74b14b57ed",
+  "fingerprint_after": "5f74b14b57ed"
+}

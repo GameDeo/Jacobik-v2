@@ -1,0 +1,244 @@
+{
+  "schema_version": 2,
+  "sources": [
+    {
+      "id": "ARCH",
+      "doi": "10.1038/s41467-023-38169-2",
+      "title": "Architector for high-throughput cross-periodic table 3D complex building",
+      "year": 2023,
+      "evidence": "API and capability context; aromatic sandwich groups use three facial template slots. Not evidence for a particular designed molecule.",
+      "url": "https://github.com/lanl/Architector",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/ARCH-crossref.json",
+      "bibliographic_title": "Architector for high-throughput cross-periodic table 3D complex building",
+      "authors": [
+        "Michael G. Taylor",
+        "Daniel J. Burrill",
+        "Jan Janssen",
+        "Enrique R. Batista",
+        "Danny Perez",
+        "Ping Yang"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1038/s41467-023-38169-2"
+    },
+    {
+      "id": "SNS23",
+      "doi": "10.1002/ejic.202300313",
+      "title": "Slow Inversion of Coordinated Thioether Groups in SNS-Type Ruthenium Pincer Complexes",
+      "year": 2023,
+      "evidence": "Exact S03 connectivity and three sulfur diastereomers; experimentally measured exchange, with activation Gibbs energies 65-70 kJ/mol.",
+      "url": "https://chemistry-europe.onlinelibrary.wiley.com/doi/10.1002/ejic.202300313",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/SNS23-crossref.json",
+      "bibliographic_title": "Slow Inversion of Coordinated Thioether Groups in SNS\u2010Type Ruthenium Pincer Complexes",
+      "authors": [
+        "Frederik Rummel",
+        "Frerk Wehmeyer",
+        "Matthias Vogt",
+        "Robert Langer"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1002/ejic.202300313"
+    },
+    {
+      "id": "RUSULF",
+      "doi": "10.1039/DT9910002335",
+      "title": "Different bonding modes in octahedral complexes of 6-(2-thienyl)-2,2'-bipyridine (HL) with transition metal ions",
+      "year": 1991,
+      "evidence": "Exact mixed N2/N2S coordination motif for S04. Related N2S targets S01/S02 are designed derivatives, not structures established by this paper.",
+      "url": "https://pubs.rsc.org/en/content/articlelanding/1991/dt/dt9910002335",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/RUSULF-crossref.json",
+      "bibliographic_title": "Different bonding modes in octahedral complexes of 6-(2-thienyl)-2,2\u2032-bipyridine (HL) with transition metal ions: crystal structures of [Ru(HL)(py)Cl\n                    <sub>3</sub>\n                    ](py = pyridine) and [Ru(HL)\n                    <sub>2</sub>\n                    Cl][BF\n                    <sub>4</sub>\n                    ]\u00b7CH\n                    <sub>2</sub>\n                    Cl\n                    <sub>2</sub>",
+      "authors": [
+        "Edwin C. Constable",
+        "Roland P. G. Henney",
+        "Derek A. Tocher"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1039/DT9910002335"
+    },
+    {
+      "id": "ALLYL",
+      "doi": "10.1016/S1631-0748(02)01406-6",
+      "title": "Synthesis and characterisation of bite angle-dependent (eta1-allyl)Rh and (eta3-allyl)Rh complexes bearing diphosphine ligands",
+      "year": 2002,
+      "evidence": "Experimental coupling of bite angle and allyl binding mode; catalytic relevance. Supplies mechanism context, not coordinates or a population reference for the authored Pd allyl target.",
+      "url": "https://comptes-rendus.academie-sciences.fr/chimie/articles/10.1016/S1631-0748(02)01406-6/",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/ALLYL-crossref.json",
+      "bibliographic_title": "Synthesis and characterisation of bite angle-dependent (\u03b71-allyl)Rh and (\u03b73-allyl)Rh complexes bearing diphosphine ligands. Implications for nucleophilic substitution reactions",
+      "authors": [
+        "Richard J. van Haaren",
+        "Erik Zuidema",
+        "Jan Fraanje",
+        "Kees Goubitz",
+        "Paul C.J. Kamer",
+        "Piet W.N.M. van Leeuwen",
+        "Gino P.F. van Strijdonck"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1016/S1631-0748(02)01406-6"
+    },
+    {
+      "id": "DOTA09",
+      "doi": "10.1021/ic9017008",
+      "title": "The Effect of the Regiochemistry of Butyl Amide Substituents on the Solution-State Structures of Lanthanide(III) DOTA-tetraamide Complexes",
+      "year": 2009,
+      "evidence": "Solution SAP/TSAP isomers and butyl-amide substitution effects; the cited DTMA 3.2:1 ratio is contextual until temperature and medium are recovered. The four fixed S centers of D02 are explicit authored stereochemistry.",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2929580/",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/DOTA09-crossref.json",
+      "bibliographic_title": "Effect of the Regiochemistry of Butyl Amide Substituents on the Solution-State Structures of Lanthanide(III) DOTA-Tetraamide Complexes",
+      "authors": [
+        "Tomoyasu Mani",
+        "Gyula Tircs\u00f3",
+        "Piyu Zhao",
+        "A. Dean Sherry",
+        "Mark Woods"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1021/ic9017008"
+    },
+    {
+      "id": "HOPO",
+      "doi": "10.1021/acs.bioconjchem.5b00572",
+      "title": "p-SCN-Bn-HOPO: A Superior Bifunctional Chelator for 89Zr ImmunoPET",
+      "year": 2015,
+      "evidence": "The paper reports a Zr complex of unfunctionalized 3,4,3-LI(1,2-HOPO) with all eight O donors bound. D03 uses that unfunctionalized chelator, not the antibody-conjugation derivative in the title.",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC4962612/",
+      "coordinate_reference_status": "experimental_CIF_and_mapped_heavy_atoms",
+      "metadata_file": "challenge/HOPO-crossref.json",
+      "bibliographic_title": "<i>p</i>-SCN-Bn-HOPO: A Superior Bifunctional Chelator for <sup>89</sup>Zr ImmunoPET",
+      "authors": [
+        "Melissa A. Deri",
+        "Shashikanth Ponnala",
+        "Paul Kozlowski",
+        "Benjamin P. Burton-Pye",
+        "Huseyin T. Cicek",
+        "Chunhua Hu",
+        "Jason S. Lewis",
+        "Lynn C. Francesconi"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1021/acs.bioconjchem.5b00572",
+      "coordinate_artifacts": [
+        "challenge/HOPO-bc5b00572_si_002.cif"
+      ]
+    },
+    {
+      "id": "TPATCN",
+      "doi": "10.1002/hlca.200900150",
+      "title": "Water Stability and Luminescence of Lanthanide Complexes of Tripodal Ligands Derived from 1,4,7-Triazacyclononane: Pyridinecarboxamide versus Pyridinecarboxylate Donors",
+      "year": 2009,
+      "evidence": "Establishes the TACN/picolinate ligand family. This study examines Eu/Tb; D05's Lu substitution is a motif-level selection, not an exact reference structure from this paper.",
+      "url": "https://onlinelibrary.wiley.com/doi/10.1002/hlca.200900150",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/TPATCN-crossref.json",
+      "bibliographic_title": "Water Stability and Luminescence of Lanthanide Complexes of Tripodal Ligands Derived from 1,4,7\u2010Triazacyclononane: Pyridinecarboxamide <i>versus</i> Pyridinecarboxylate Donors",
+      "authors": [
+        "Gr\u00e9gory Nocton",
+        "Aline Nonat",
+        "Christelle Gateau",
+        "Marinella Mazzanti"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1002/hlca.200900150"
+    },
+    {
+      "id": "BUEA",
+      "doi": "10.1021/ja061618x",
+      "title": "X-ray Absorption Spectroscopy and Density Functional Theory Studies of [(H3buea)FeIII-X]n- (X = S2-, O2-, OH-)",
+      "year": 2006,
+      "evidence": "Primary/secondary sphere and hydrogen-bonded Fe-hydroxo chemistry for P01; P02 is a deliberately designed NH-blocked analogue.",
+      "url": "https://pubs.acs.org/doi/10.1021/ja061618x",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/BUEA-crossref.json",
+      "bibliographic_title": "X-ray Absorption Spectroscopy and Density Functional Theory Studies of [(H<sub>3</sub>buea)Fe<sup>III</sup><sup>-</sup>X]<i><sup>n</sup></i><sup>-</sup> (X = S<sup>2-</sup>, O<sup>2-</sup>, OH<sup>-</sup>):\u2009 Comparison of Bonding and Hydrogen Bonding in Oxo and Sulfido Complexes",
+      "authors": [
+        "Abhishek Dey",
+        "Rosalie K. Hocking",
+        "Peter Larsen",
+        "Andrew S. Borovik",
+        "Keith O. Hodgson",
+        "Britt Hedman",
+        "Edward I. Solomon"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1021/ja061618x"
+    },
+    {
+      "id": "MO69",
+      "doi": "10.1039/C29690001392",
+      "title": "A trans-dinitrogen complex of molybdenum",
+      "year": 1969,
+      "evidence": "Establishes a diphosphine-supported trans-Mo dinitrogen motif using dppe. N01 uses depe; this source alone does not establish its exact geometry or cis population.",
+      "url": "https://pubs.rsc.org/en/content/articlelanding/1969/c2/c29690001392",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/MO69-crossref.json",
+      "bibliographic_title": "A trans-dinitrogen complex of molybdenum",
+      "authors": [
+        "M. Hidai",
+        "K. Tominari",
+        "Y. Uchida",
+        "A. Misono"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1039/C29690001392"
+    },
+    {
+      "id": "MOEPR",
+      "doi": "10.1021/ja1004619",
+      "title": "Experimental and Theoretical EPR Study of Jahn-Teller-Active [HIPTN3N]MoL Complexes (L = N2, CO, NH3)",
+      "year": 2010,
+      "evidence": "Low-spin d3 Mo in a protected triamidoamine pocket. N02 is a smaller Dipp-substituted designed model; measured spin/vibronic properties of HIPTN3N are not transferred as ground truth.",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2891091/",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/MOEPR-crossref.json",
+      "bibliographic_title": "Experimental and Theoretical EPR Study of Jahn\u2212Teller-Active [HIPTN<sub>3</sub>N]MoL Complexes (L = N<sub>2</sub>, CO, NH<sub>3</sub>)",
+      "authors": [
+        "Rebecca L. McNaughton",
+        "Michael Roemelt",
+        "Jia Min Chin",
+        "Richard R. Schrock",
+        "Frank Neese",
+        "Brian M. Hoffman"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1021/ja1004619"
+    },
+    {
+      "id": "CUPP",
+      "doi": "10.3390/molecules24213934",
+      "title": "Hinged and Wide: A New P^P Ligand for Emissive [Cu(P^P)(N^N)][PF6] Complexes",
+      "year": 2019,
+      "evidence": "Mechanism context for hinged/wide P,P chelates, interligand packing and Cu(I) luminescence. Not an experimental structure for every substituent combination in B04.",
+      "url": "https://www.mdpi.com/1420-3049/24/21/3934",
+      "coordinate_reference_status": "not_archived",
+      "metadata_file": "challenge/CUPP-crossref.json",
+      "bibliographic_title": "Hinged and Wide: A New P^P Ligand for Emissive [Cu(P^P)(N^N)][PF6] Complexes",
+      "authors": [
+        "Sarah Keller",
+        "Matthias Bantle",
+        "Alessandro Prescimone",
+        "Edwin C. Constable",
+        "Catherine E. Housecroft"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.3390/molecules24213934"
+    },
+    {
+      "id": "XLXANT",
+      "doi": "10.1021/acs.organomet.9b00141",
+      "title": "XL-Xantphos: Design and Synthesis of a Mechanistic Probe of Xantphos O-Coordination in Catalytic Reactions",
+      "year": 2019,
+      "evidence": "Matched Xantphos/XL-Xantphos Pd(II) systems have opposite computed cis/trans preferences. A computed preference is neither a barrier nor a measured thermal population.",
+      "url": "https://pubs.acs.org/doi/10.1021/acs.organomet.9b00141",
+      "coordinate_reference_status": "published_computed_coordinates_and_mappings",
+      "metadata_file": "challenge/XLXANT-crossref.json",
+      "bibliographic_title": "XL-Xantphos: Design and Synthesis of a Mechanistic Probe of Xantphos <i>O</i>-Coordination in Catalytic Reactions",
+      "authors": [
+        "Gregory T. Whiteker",
+        "Fangzheng Li",
+        "Robert D. J. Froese",
+        "Michael L. Tulchinsky",
+        "Amaruka Hazari",
+        "Jerzy Klosin"
+      ],
+      "metadata_url": "https://api.crossref.org/works/10.1021/acs.organomet.9b00141",
+      "coordinate_artifacts": [
+        "challenge/XLXANT-om9b00141_si_002.xyz"
+      ]
+    }
+  ]
+}

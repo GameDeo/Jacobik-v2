@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-29",
+  "authorization": "Owner requested R2 energy evaluation after G-3a prime sanity checkpoint",
+  "scope": "Eight original O1 parents only, seed 11; exploratory CPU full solves and unrelaxed MACE single points",
+  "parents": [
+    "HEDJOP",
+    "FEKKAJ",
+    "NUWFAM",
+    "QEZVEY",
+    "DAMVAQ",
+    "USAPOU",
+    "NEPNEF",
+    "AJAQAD"
+  ],
+  "arms": {
+    "C0": "200 production Adam steps",
+    "R2": "250 delivered-score iRprop+ steps, no Adam, fallback delta0=.01",
+    "R2_minus": "250 delivered-score iRprop- steps, no Adam; same .01 initial step, bounds and stopping rule as R2"
+  },
+  "reproduction": "Same default eight-chunk layout; bound executor concurrency to five. Verify delivered top1 scores against g3prime_r2.json before interpreting energies. Save all returned coordinates and symbols from each conf.complex.atoms, with explicit equality assertions.",
+  "primary": "Paired top1 unrelaxed energy difference R2 minus C0; mean with parent-clustered bootstrap 95% CI and median, all eight parents. Energies relative to correctly labelled frame reference.",
+  "secondary": [
+    "per-parent top1 energies and score changes",
+    "minimum delivered energy (floor)",
+    "obscene rate >200 kJ/mol across all delivered rows",
+    "worst delivered slot",
+    "solver time, noting different iteration counts"
+  ],
+  "bootstrap": {
+    "unit": "parent",
+    "replicates": 10000,
+    "seed": 11,
+    "interval": "percentile 2.5,97.5"
+  },
+  "interpretation": "Exploratory eight-parent check, no production adoption or panel pass claim. Report score-up/energy-up inversions. No tuning against results.",
+  "prohibited": [
+    "cal/tail panel-scale runs",
+    "locked sets",
+    "relaxation",
+    "FIRE retuning",
+    "G-3b"
+  ],
+  "failure_policy": "Record each parent/arm failure and continue; no imputation. Reproduction failures invalidate the corresponding comparison.",
+  "checkpoint": "Report, commit, stop",
+  "amendment": "Owner additionally requested iRprop- afterwards; fixed before any minus-arm results.",
+  "irprop_minus": "Igel/Huesken 2003 section2.4/Fig3: on sign flip shrink delta, zero update and stored gradient; no weight backtracking; everything else identical to plus",
+  "algorithm_source": "https://christian-igel.github.io/paper/EEotIRLA.pdf",
+  "additional_comparison": "R2_minus versus both paired R2 and C0, same primary and secondary metrics; descriptive eight-parent follow-up, no tuning or adoption gate."
+}

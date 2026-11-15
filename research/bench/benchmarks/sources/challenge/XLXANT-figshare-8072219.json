@@ -1,0 +1,214 @@
+﻿{
+    "files":  [
+                  {
+                      "id":  15042911,
+                      "name":  "om9b00141_si_002.xyz",
+                      "size":  94165,
+                      "is_link_only":  false,
+                      "download_url":  "https://ndownloader.figshare.com/files/15042911",
+                      "supplied_md5":  "af145e986fae842948b10ef6646e6426",
+                      "computed_md5":  "af145e986fae842948b10ef6646e6426",
+                      "mimetype":  "text/plain"
+                  }
+              ],
+    "folder_structure":  {
+
+                         },
+    "authors":  [
+                    {
+                        "id":  1398331,
+                        "full_name":  "Gregory T. Whiteker",
+                        "first_name":  "Gregory T.",
+                        "last_name":  "Whiteker",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1398334,
+                        "full_name":  "Fangzheng Li",
+                        "first_name":  "Fangzheng",
+                        "last_name":  "Li",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  2348245,
+                        "full_name":  "Robert D. J. Froese",
+                        "first_name":  "Robert",
+                        "last_name":  "D. J. Froese",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  2870756,
+                        "full_name":  "Michael L. Tulchinsky",
+                        "first_name":  "Michael L.",
+                        "last_name":  "Tulchinsky",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1621246,
+                        "full_name":  "Amaruka Hazari",
+                        "first_name":  "Amaruka",
+                        "last_name":  "Hazari",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    },
+                    {
+                        "id":  1508728,
+                        "full_name":  "Jerzy Klosin",
+                        "first_name":  "Jerzy",
+                        "last_name":  "Klosin",
+                        "is_active":  false,
+                        "url_name":  "_",
+                        "orcid_id":  ""
+                    }
+                ],
+    "custom_fields":  [
+
+                      ],
+    "figshare_url":  "https://acs.figshare.com/articles/dataset/XL-Xantphos_Design_and_Synthesis_of_a_Mechanistic_Probe_of_Xantphos_i_O_i_Coordination_in_Catalytic_Reactions/8072219",
+    "download_disabled":  false,
+    "description":  "The\nsynthesis and characterization of an analog of the Xantphos\nligand that is geometrically incapable of coordination of the xanthene\nbridging oxygen atom is reported. This new ligand, XL-Xantphos, ((9,9-dimethyl-9\u003ci\u003eH\u003c/i\u003e-xanthene-4,5-diyl)­bis­(4,1-phenylene))­bis­(diphenylphosphane),\nwas studied in homogeneous, catalytic reactions for comparison with\nXantphos. The XL-Xantphos ligand performed essentially identically\nto Xantphos in Rh-catalyzed hydroformylation of 1-octene, which suggests\nthat the high regioselectivity for linear aldehyde is due to the large\nbite angle of these ligands and is not influenced by oxygen coordination\nto the metal. The Pd-catalyzed amidocarbonylation of 4-bromoanisole\nwith dimethylhydroxylamine hydrochloride similarly showed no difference\nbetween Xantphos and XL-Xantphos. Computations on Pd­(II) phosphine\ncomplexes at the DLPNO–CCSD­(T) level of theory indicated that\nthese ligands have different preferences for \u003ci\u003ecis\u003c/i\u003e and \u003ci\u003etrans\u003c/i\u003e coordination modes. The XL-Xantphos ligand has a thermodynamic\npreference for \u003ci\u003etrans\u003c/i\u003e-chelated structures, whereas\nthe \u003ci\u003ecis\u003c/i\u003e-[(Xantphos)­PdCl\u003csub\u003e2\u003c/sub\u003e] isomer was calculated\nto be thermodynamically more stable than its \u003ci\u003etrans\u003c/i\u003e isomer. Given the key role of d\u003csup\u003e8\u003c/sup\u003e square planar Pd intermediates\nin many catalytic cycles, the greater preference of Xantphos to form \u003ci\u003ecis\u003c/i\u003e chelates may indeed be a factor which has made this\nligand particularly effective.",
+    "funding":  null,
+    "funding_list":  [
+
+                     ],
+    "version":  1,
+    "status":  "public",
+    "size":  94165,
+    "created_date":  "2019-05-02T19:13:19Z",
+    "modified_date":  "2023-06-03T04:24:52Z",
+    "is_public":  true,
+    "is_confidential":  false,
+    "is_metadata_record":  false,
+    "confidential_reason":  "",
+    "metadata_reason":  "",
+    "license":  {
+                    "value":  10,
+                    "name":  "CC BY-NC 4.0",
+                    "url":  "https://creativecommons.org/licenses/by-nc/4.0/"
+                },
+    "tags":  [
+                 "preference",
+                 "XL-Xantphos ligand",
+                 "DLPNO",
+                 "form cis chelates",
+                 "trans coordination modes"
+             ],
+    "keywords":  [
+                     "preference",
+                     "XL-Xantphos ligand",
+                     "DLPNO",
+                     "form cis chelates",
+                     "trans coordination modes"
+                 ],
+    "categories":  [
+                       {
+                           "id":  1,
+                           "title":  "Biophysics",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  4,
+                           "title":  "Biochemistry",
+                           "parent_id":  38,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  7,
+                           "title":  "Medicine",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  12,
+                           "title":  "Cell Biology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  14,
+                           "title":  "Molecular Biology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  21,
+                           "title":  "Biotechnology",
+                           "parent_id":  48,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       },
+                       {
+                           "id":  873,
+                           "title":  "Chemical Sciences not elsewhere classified",
+                           "parent_id":  38,
+                           "path":  "",
+                           "source_id":  "",
+                           "taxonomy_id":  10
+                       }
+                   ],
+    "references":  [
+                       "https://doi.org/10.1021/acs.organomet.9b00141"
+                   ],
+    "has_linked_file":  false,
+    "citation":  "Whiteker, Gregory T.; Li, Fangzheng; D. J. Froese, Robert; Tulchinsky, Michael L.; Hazari, Amaruka; Klosin, Jerzy (2019). XL-Xantphos: Design and Synthesis of a Mechanistic\nProbe of Xantphos O‑Coordination in Catalytic\nReactions. ACS Publications. Dataset. https://doi.org/10.1021/acs.organomet.9b00141.s002",
+    "related_materials":  [
+                              {
+                                  "id":  34793501,
+                                  "identifier":  "10.1021/acs.organomet.9b00141",
+                                  "title":  "XL-Xantphos: Design and Synthesis of a Mechanistic\nProbe of Xantphos O‑Coordination in Catalytic\nReactions",
+                                  "relation":  "IsSupplementTo",
+                                  "identifier_type":  "DOI",
+                                  "is_linkout":  true,
+                                  "link":  "https://doi.org/10.1021/acs.organomet.9b00141"
+                              }
+                          ],
+    "is_embargoed":  false,
+    "embargo_date":  null,
+    "embargo_type":  null,
+    "embargo_title":  "",
+    "embargo_reason":  "",
+    "embargo_options":  [
+
+                        ],
+    "id":  8072219,
+    "title":  "XL-Xantphos: Design and Synthesis of a Mechanistic\nProbe of Xantphos \u003ci\u003eO\u003c/i\u003e‑Coordination in Catalytic\nReactions",
+    "doi":  "10.1021/acs.organomet.9b00141.s002",
+    "handle":  "",
+    "url":  "https://api.figshare.com/v2/articles/8072219",
+    "published_date":  "2019-05-02T19:13:19Z",
+    "thumb":  "",
+    "defined_type":  3,
+    "defined_type_name":  "dataset",
+    "group_id":  2532,
+    "url_private_api":  "https://api.figshare.com/v2/account/articles/8072219",
+    "url_public_api":  "https://api.figshare.com/v2/articles/8072219",
+    "url_private_html":  "https://figshare.com/account/articles/8072219",
+    "url_public_html":  "https://acs.figshare.com/articles/dataset/XL-Xantphos_Design_and_Synthesis_of_a_Mechanistic_Probe_of_Xantphos_i_O_i_Coordination_in_Catalytic_Reactions/8072219",
+    "timeline":  {
+                     "posted":  "2019-05-02T19:13:19",
+                     "firstOnline":  "2019-05-02"
+                 },
+    "resource_title":  "XL-Xantphos: Design and Synthesis of a Mechanistic\nProbe of Xantphos \u003ci\u003eO\u003c/i\u003e‑Coordination in Catalytic\nReactions",
+    "resource_doi":  "10.1021/acs.organomet.9b00141"
+}

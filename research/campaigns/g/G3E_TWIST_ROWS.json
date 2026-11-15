@@ -1,0 +1,435 @@
+{
+  "rule": "highest returned-score >45-degree octahedral-start R2s row per AZUSIA/USAPOU/HEDJOP seed; one highest-score row over seeds from next parent by count",
+  "counts": {
+    "DOHTOM": 0,
+    "NUCKUS": 0,
+    "UBOBUI": 0,
+    "USAPOU": 115,
+    "XEVDAE": 0,
+    "XOJHIN": 0,
+    "YUYGOP": 0,
+    "ZAQNUE": 0,
+    "ZEFXAM": 0,
+    "AJAQAD": 0,
+    "AZUSIA": 159,
+    "BOTYUH": 0,
+    "CEHDUS": 0,
+    "CIXYUD": 0,
+    "HEDJOP": 94,
+    "LEGXEA": 0,
+    "LUQVOK": 0,
+    "MEJYIN": 0,
+    "NOYTUS": 0,
+    "NUWFAM": 0,
+    "OMAGAK": 3,
+    "QEZVEY": 0,
+    "RIQDEB": 0,
+    "SESWIZ": 0
+  },
+  "partner_rule": "nearest <=45-degree, unchanged-class, same starting assignment and embed variant from frozen C1/R2s/IA unit union; heavy-atom fixed-order Kabsch RMSD",
+  "dof_recovery": "full production FK coordinate fitting only; Cartesian RMSD <=1e-5 A and returned-score agreement <=1e-4 nats required; failed rows ledgered without substitution",
+  "path": "align untwisted pose globally to twisted by heavy-atom Kabsch; linearly interpolate FK DOFs at 21 points, use nearest equivalent angle branches; fixed starting-shell scorer keys; no score optimization",
+  "barrier": "twisted score minus minimum score on the path; report interior minimum, endpoint ordering and gradient norms; a 1-D path alone does not establish a full-space local maximum",
+  "rows": [
+    {
+      "code": "AZUSIA",
+      "seed": 11,
+      "twisted": {
+        "arm": "R2s",
+        "index": 6,
+        "key": [
+          null,
+          2,
+          223
+        ],
+        "score": 0.9900240898132324
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          7
+        ],
+        "score": 1.491261601448059
+      },
+      "untwisted": {
+        "arm": "IA",
+        "index": 15,
+        "key": [
+          null,
+          2,
+          157
+        ],
+        "score": 0.8423811793327332,
+        "nearest_heavy_Kabsch_RMSD_A": 0.5134219579149055
+      },
+      "source_sha256": {
+        "C1": "a89e89fbeb80b703c6697f86cabe576a536220bb0b9a6000c6b7b03f7b72bdea",
+        "R2s": "eb68c4a9cebc2f2eb72d683e766044dac3affce4ea2590426bd120fcef2f6f17",
+        "IA": "8dbb8821f99d9f458977cf89b39fea93d2691ef3a8000bbe948863e8371d42b1"
+      }
+    },
+    {
+      "code": "AZUSIA",
+      "seed": 12,
+      "twisted": {
+        "arm": "R2s",
+        "index": 6,
+        "key": [
+          null,
+          2,
+          143
+        ],
+        "score": 0.9888418912887573
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          63
+        ],
+        "score": 1.483493447303772
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 18,
+        "key": [
+          null,
+          2,
+          161
+        ],
+        "score": 0.7051478028297424,
+        "nearest_heavy_Kabsch_RMSD_A": 0.5559222824846914
+      },
+      "source_sha256": {
+        "C1": "9ba9c6a4c493f3165a84b0d89e776093a6344fc145fb3ec6f8ea3b0ec34d291e",
+        "R2s": "361f3e2b32ff0f7b167abe09a89c2b9b51da3ac43ccd85e4bbeece5bdee46986",
+        "IA": "c47def67dcd3a2b4612d2e482fa67b3d9bec6de9994be1001ff17c279dc755ee"
+      }
+    },
+    {
+      "code": "AZUSIA",
+      "seed": 13,
+      "twisted": {
+        "arm": "R2s",
+        "index": 6,
+        "key": [
+          null,
+          2,
+          223
+        ],
+        "score": 0.9883803129196167
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          30
+        ],
+        "score": 1.4854545593261719
+      },
+      "untwisted": {
+        "arm": "IA",
+        "index": 13,
+        "key": [
+          null,
+          2,
+          253
+        ],
+        "score": 0.8407647609710693,
+        "nearest_heavy_Kabsch_RMSD_A": 0.557976956651181
+      },
+      "source_sha256": {
+        "C1": "91447124ce454afc5ec9cfe193278c88b663e838736fd059fd8e4fe24e17cfda",
+        "R2s": "6877c68aad3c73c2ed479cda669fb98fca053f94668797456f8097ff1f01d4df",
+        "IA": "02a82fed63af103aa3255f9071af509bf5bdd0456cb677398030df2fe77b6d18"
+      }
+    },
+    {
+      "code": "USAPOU",
+      "seed": 11,
+      "twisted": {
+        "arm": "R2s",
+        "index": 10,
+        "key": [
+          null,
+          0,
+          42
+        ],
+        "score": -0.6482239961624146
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          1,
+          90
+        ],
+        "score": 0.4932267665863037
+      },
+      "untwisted": {
+        "arm": "R2s",
+        "index": 1,
+        "key": [
+          null,
+          0,
+          30
+        ],
+        "score": 0.47306057810783386,
+        "nearest_heavy_Kabsch_RMSD_A": 1.2937894962778533
+      },
+      "source_sha256": {
+        "C1": "f3108ac0dd80c2bba993fa7776e9f11fb98fdb772ad70b821f97608a55feaf14",
+        "R2s": "c02ebf9ebc47e0a6ae6579f537859f0d2022c955487f2af68b96675f32cb183c",
+        "IA": "e2ee056845cec289d6f961322709b57c93d661a62e4f22c2289e388c272f8fc7"
+      }
+    },
+    {
+      "code": "USAPOU",
+      "seed": 12,
+      "twisted": {
+        "arm": "R2s",
+        "index": 8,
+        "key": [
+          null,
+          0,
+          3
+        ],
+        "score": -0.4977381229400635
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          3,
+          206
+        ],
+        "score": 0.6567175984382629
+      },
+      "untwisted": {
+        "arm": "IA",
+        "index": 56,
+        "key": [
+          null,
+          0,
+          10
+        ],
+        "score": -2.559937000274658,
+        "nearest_heavy_Kabsch_RMSD_A": 0.9475442044259125
+      },
+      "source_sha256": {
+        "C1": "557bd7841a3270cdaef9ed35905b7f07d638ca3a7895ab759926d01c0b68ca42",
+        "R2s": "a73dcaef4819df5b02f3a75965e13d4ea2d2e122a3fb003e8f20f2aa5ea4ee01",
+        "IA": "d5daf066797d2a6f55229c4f60ca31a24e13ad823b9016db08217faba9cdbd4a"
+      }
+    },
+    {
+      "code": "USAPOU",
+      "seed": 13,
+      "twisted": {
+        "arm": "R2s",
+        "index": 17,
+        "key": [
+          null,
+          0,
+          11
+        ],
+        "score": -1.0027942657470703
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          3,
+          197
+        ],
+        "score": 0.5365643501281738
+      },
+      "untwisted": {
+        "arm": "R2s",
+        "index": 6,
+        "key": [
+          null,
+          0,
+          45
+        ],
+        "score": -0.058313269168138504,
+        "nearest_heavy_Kabsch_RMSD_A": 1.038229610404777
+      },
+      "source_sha256": {
+        "C1": "f54b4ce6f1be6c93e8a18a8f4adc6df024dedf53986a7757d84e696cdd9fb13e",
+        "R2s": "556ef440a7336ae0c13c356636f27e17a551cf6a82a335d057b6bf11cfac516b",
+        "IA": "95f65ab8953808449ad8a0d0d648fa42b2b34c1696f9e9c573b3293ca755ded0"
+      }
+    },
+    {
+      "code": "HEDJOP",
+      "seed": 11,
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          96
+        ],
+        "score": 0.3561590015888214
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          96
+        ],
+        "score": 0.3561590015888214
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 8,
+        "key": [
+          null,
+          0,
+          96
+        ],
+        "score": 0.14263485372066498,
+        "nearest_heavy_Kabsch_RMSD_A": 1.3326789741517042
+      },
+      "source_sha256": {
+        "C1": "f221be936686a03ce98a79c1cc88e3a063ba04a4cc9e77eefb9d9dcfebb3d7ce",
+        "R2s": "ffe0177d2ec66ecc69d599e51f3e096899211f113b73f3589f09c7809e7a0ff9",
+        "IA": "f4dee4bb424946763ec37f34bd0c8ae1932e8eb780fb80a5000d629326a6aaa9"
+      }
+    },
+    {
+      "code": "HEDJOP",
+      "seed": 12,
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          8
+        ],
+        "score": 0.35402384400367737
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          8
+        ],
+        "score": 0.35402384400367737
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 23,
+        "key": [
+          null,
+          0,
+          79
+        ],
+        "score": 0.12534186244010925,
+        "nearest_heavy_Kabsch_RMSD_A": 1.511543485184256
+      },
+      "source_sha256": {
+        "C1": "67e2e2aa9f906cd8a3f727888adfa3c4e2076668bf03ce2c3ffdba658d6713c6",
+        "R2s": "c419a4913a2ffddf027f9cb12d9c05286fcc76b48e8ee89e25c6d90b67cd47bc",
+        "IA": "9704a634d49a072d500c43b4d865221b0254e1192a564b5185be258f8a559441"
+      }
+    },
+    {
+      "code": "HEDJOP",
+      "seed": 13,
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          45
+        ],
+        "score": 0.35926634073257446
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          45
+        ],
+        "score": 0.35926634073257446
+      },
+      "untwisted": {
+        "arm": "IA",
+        "index": 17,
+        "key": [
+          null,
+          0,
+          37
+        ],
+        "score": 0.24301838874816895,
+        "nearest_heavy_Kabsch_RMSD_A": 1.0846421804280484
+      },
+      "source_sha256": {
+        "C1": "0a5cb68b95e18aa7736ef9353482ec805177855ff68cf24e40c159c3b7a3f452",
+        "R2s": "0cf7842dc278b856ceb06486ace493998f7a494b6bdbbd4d56c104f064d67395",
+        "IA": "b05d4246c1a0f0b81f517cca5e2ca6f71fc093ddc0b76a1ab8c390ea507af245"
+      }
+    },
+    {
+      "code": "OMAGAK",
+      "seed": 12,
+      "twisted": {
+        "arm": "R2s",
+        "index": 1,
+        "key": [
+          null,
+          0,
+          1
+        ],
+        "score": -2.1485376358032227
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          63
+        ],
+        "score": 0.17451174557209015
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          80
+        ],
+        "score": -0.12916886806488037,
+        "nearest_heavy_Kabsch_RMSD_A": 1.9058040236682676
+      },
+      "source_sha256": {
+        "C1": "68258d9cbdce13af77c9420b91547e4226a2daf0f9c044333bca81b9217f6c75",
+        "R2s": "3f21c264f3745422e4fa3a8fe999e651e0eb0ac964793025a1d354dfa4a7dbf6",
+        "IA": "10e269b057335ccbc8c85d13443b10d74fed05cb1e098746b7ccb6dfbb2e748f"
+      }
+    }
+  ]
+}

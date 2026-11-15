@@ -1,0 +1,1019 @@
+{
+ "footprint": {
+  "change": "dof_step_scale {'ring': 0.5} (demonstration of the mechanism, not a proposal)",
+  "tags": [
+   "macrocycle",
+   "chelate_ring7",
+   "chelate_ring8plus"
+  ],
+  "parents": [],
+  "fingerprint_change_ok": true
+ },
+ "rows": [
+  {
+   "code": "SUQWEG",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta3",
+    "haptic_eta5",
+    "lanthanide"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": null,
+   "d_offset": null,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": null,
+     "d_offset": null
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": null,
+   "d_bucket_offset": null,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.3591432571411133,
+    "dE_unrel": 628.9832979389466,
+    "strain": null,
+    "offset": null,
+    "md_bond_dev": 11811.417895592374,
+    "rmsd": 2.3603746895088085,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.3591432571411133,
+    "dE_unrel": 628.9832979389466,
+    "strain": null,
+    "offset": null,
+    "md_bond_dev": 11811.417895592374,
+    "rmsd": 2.3603746895088085,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "CAFWIQ",
+   "inside": true,
+   "bit_identical": false,
+   "n_seeds": 3,
+   "tags": [
+    "anionic_N",
+    "anionic_halide",
+    "chelate_ring5",
+    "cn6_trig_pris",
+    "haptic_eta2",
+    "macrocycle"
+   ],
+   "d_score": -0.007582495609919221,
+   "d_dE_unrel": -41.6813383108626,
+   "d_strain": -61.79653979372233,
+   "d_offset": 20.115201482859753,
+   "d_md_bond_dev": 0.07367699105978431,
+   "n_buckets_control": 12.0,
+   "n_buckets_arm": 12.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": true,
+     "d_score": -0.014578625559806824,
+     "d_dE_unrel": 150.87844333425164,
+     "d_strain": 173.95934467669576,
+     "d_offset": -23.080901342444122
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": -0.004780791699886322,
+     "d_dE_unrel": 736.9014748502523,
+     "d_strain": 746.8862728951499,
+     "d_offset": -9.984798044897616
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      11
+     ],
+     "is_top1": false,
+     "d_score": -0.15668635070323944,
+     "d_dE_unrel": -701.414722491987,
+     "d_strain": -703.8598091807216,
+     "d_offset": 2.445086688734591
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": 0.04084314405918121,
+     "d_dE_unrel": -37.89211519435048,
+     "d_strain": -39.98710973281413,
+     "d_offset": 2.094994538463652
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": -0.0077806999906897545,
+     "d_dE_unrel": -0.9715943075716496,
+     "d_strain": -7.520219630561769,
+     "d_offset": 6.5486253229901195
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": -0.02985995728522539,
+     "d_dE_unrel": -261.10391586180776,
+     "d_strain": -235.47593749128282,
+     "d_offset": -25.627978370524943
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": -0.03310162713751197,
+     "d_dE_unrel": 124.72997067123652,
+     "d_strain": 137.98525523208082,
+     "d_offset": -13.255284560844302
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": false,
+     "d_score": -0.09355264343321323,
+     "d_dE_unrel": 37.87152123451233,
+     "d_strain": 25.303444831632078,
+     "d_offset": 12.568076402880251
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": true,
+     "d_score": 0.0055402666330337524,
+     "d_dE_unrel": 21.135983826592565,
+     "d_strain": 25.30571094248444,
+     "d_offset": -4.169727115891874
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": -0.016660630702972412,
+     "d_dE_unrel": 239.32862574141473,
+     "d_strain": 234.3685114812106,
+     "d_offset": 4.960114260204136
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      11
+     ],
+     "is_top1": false,
+     "d_score": -0.01198289543390274,
+     "d_dE_unrel": -85.95530008338392,
+     "d_strain": -81.6918021030724,
+     "d_offset": -4.263497980311513
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": -0.0074924565851688385,
+     "d_dE_unrel": 2.132438015192747,
+     "d_strain": 4.10095920599997,
+     "d_offset": -1.9685211908072233
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": false,
+     "d_score": -0.029521575255785137,
+     "d_dE_unrel": -169.07431993354112,
+     "d_strain": -107.88633131887764,
+     "d_offset": -61.18798861466348
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": -0.015024931402876973,
+     "d_dE_unrel": 7.218994595110416,
+     "d_strain": 8.770872119814157,
+     "d_offset": -1.551877524703741
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": false,
+     "d_score": -0.13999865297228098,
+     "d_dE_unrel": -332.3797117555514,
+     "d_strain": -333.3182362196967,
+     "d_offset": 0.9385244641453028
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      9
+     ],
+     "is_top1": true,
+     "d_score": -0.015131831169128418,
+     "d_dE_unrel": 4.410251942463219,
+     "d_strain": -59.32811177428812,
+     "d_offset": 63.73836371675134
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      6
+     ],
+     "is_top1": false,
+     "d_score": -5.1625072956085205e-05,
+     "d_dE_unrel": -4.5623499751091,
+     "d_strain": -7.234757759608328,
+     "d_offset": 2.672407784499228
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": -0.029544368386268616,
+     "d_dE_unrel": 300.9365266226232,
+     "d_strain": 192.1826196424663,
+     "d_offset": 108.7539069801569
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": false,
+     "d_score": -0.023524411022663116,
+     "d_dE_unrel": -9.975420817732811,
+     "d_strain": -10.968031411990523,
+     "d_offset": 0.9926105942577124
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": -0.004119150340557098,
+     "d_dE_unrel": 10.394134731963277,
+     "d_strain": 8.250029531307518,
+     "d_offset": 2.1441052006557584
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": -0.16883885487914085,
+     "d_dE_unrel": -39.32639126107097,
+     "d_strain": -26.698877815157175,
+     "d_offset": -12.627513445913792
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      7
+     ],
+     "is_top1": false,
+     "d_score": -0.011180795729160309,
+     "d_dE_unrel": -512.3886654349044,
+     "d_strain": -513.3215640923008,
+     "d_offset": 0.9328986573964357
+    }
+   ],
+   "buckets_unmatched": 2,
+   "d_bucket_strain": -25.917171271433208,
+   "d_bucket_offset": 2.3214375645514918,
+   "d_bucket_dE_unrel": -23.595733706881717,
+   "control": {
+    "score": 0.14000877986351648,
+    "dE_unrel": 535.986512622796,
+    "strain": 512.2435177145526,
+    "offset": 23.742994908243418,
+    "md_bond_dev": 85.43999724313362,
+    "rmsd": 1.5113971791376721,
+    "n_seeds": 3,
+    "n_buckets": 12.0
+   },
+   "arm": {
+    "score": 0.13242628425359726,
+    "dE_unrel": 494.3051743119334,
+    "strain": 450.44697792083025,
+    "offset": 43.85819639110317,
+    "md_bond_dev": 85.5136742341934,
+    "rmsd": 1.4719578035177079,
+    "n_seeds": 3,
+    "n_buckets": 12.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "MUNSUJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta4"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.5389151573181152,
+    "dE_unrel": 128.0574080022052,
+    "strain": 117.34806886781007,
+    "offset": 10.709339134395123,
+    "md_bond_dev": 46.41104589844921,
+    "rmsd": 1.8599329562249287,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.5389151573181152,
+    "dE_unrel": 128.0574080022052,
+    "strain": 117.34806886781007,
+    "offset": 10.709339134395123,
+    "md_bond_dev": 46.41104589844921,
+    "rmsd": 1.8599329562249287,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SIKNAE",
+   "inside": true,
+   "bit_identical": true,
+   "n_seeds": 3,
+   "tags": [
+    "anionic_C",
+    "anionic_N",
+    "bulky_phosphine",
+    "chelate_ring4",
+    "chelate_ring5",
+    "chelate_ring7",
+    "chelate_ring8plus",
+    "cn5_trig_bipyr"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 2.0,
+   "n_buckets_arm": 2.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 12,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 13,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.08732552329699199,
+    "dE_unrel": 166.85913625856242,
+    "strain": 151.026380535836,
+    "offset": 15.832755722726384,
+    "md_bond_dev": 198.63717547391556,
+    "rmsd": 1.358003885552849,
+    "n_seeds": 3,
+    "n_buckets": 2.0
+   },
+   "arm": {
+    "score": 0.08732552329699199,
+    "dE_unrel": 166.85913625856242,
+    "strain": 151.026380535836,
+    "offset": 15.832755722726384,
+    "md_bond_dev": 198.63717547391556,
+    "rmsd": 1.358003885552849,
+    "n_seeds": 3,
+    "n_buckets": 2.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "RIGWAJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "carbene_other",
+    "cn6_octahedral"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.768609642982483,
+    "dE_unrel": 40.81212569400668,
+    "strain": 8.925740735605359,
+    "offset": 31.886384958401322,
+    "md_bond_dev": 2.290670462819121,
+    "rmsd": 0.6320376864404912,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.768609642982483,
+    "dE_unrel": 40.81212569400668,
+    "strain": 8.925740735605359,
+    "offset": 31.886384958401322,
+    "md_bond_dev": 2.290670462819121,
+    "rmsd": 0.6320376864404912,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "YUNPIG",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "anionic_S",
+    "chelate_ring6",
+    "cn4_square_plan"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 2.0,
+   "n_buckets_arm": 2.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.0341144800186157,
+    "dE_unrel": 70.19483765214682,
+    "strain": 62.49603853933513,
+    "offset": 7.698799112811685,
+    "md_bond_dev": 12.295791580142447,
+    "rmsd": 0.6760232499310486,
+    "n_seeds": 1,
+    "n_buckets": 2.0
+   },
+   "arm": {
+    "score": 1.0341144800186157,
+    "dE_unrel": 70.19483765214682,
+    "strain": 62.49603853933513,
+    "offset": 7.698799112811685,
+    "md_bond_dev": 12.295791580142447,
+    "rmsd": 0.6760232499310486,
+    "n_seeds": 1,
+    "n_buckets": 2.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SUXROT",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "carbene_nhc",
+    "cn4_see_saw",
+    "haptic_eta2"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 4.0,
+   "n_buckets_arm": 4.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.4653155505657196,
+    "dE_unrel": 1047.6557871149853,
+    "strain": 992.4397257617675,
+    "offset": 55.21606135321781,
+    "md_bond_dev": 24.05862726910158,
+    "rmsd": 1.94815768651114,
+    "n_seeds": 1,
+    "n_buckets": 4.0
+   },
+   "arm": {
+    "score": 0.4653155505657196,
+    "dE_unrel": 1047.6557871149853,
+    "strain": 992.4397257617675,
+    "offset": 55.21606135321781,
+    "md_bond_dev": 24.05862726910158,
+    "rmsd": 1.94815768651114,
+    "n_seeds": 1,
+    "n_buckets": 4.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "CANXAQ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "cn4_tetrahedral",
+    "haptic_eta6"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 1.0,
+   "n_buckets_arm": 1.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 1.837519645690918,
+    "dE_unrel": 12.613085937686265,
+    "strain": 10.487441326491535,
+    "offset": 2.12564461119473,
+    "md_bond_dev": 8.389058877456161,
+    "rmsd": 1.7232614932209418,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "arm": {
+    "score": 1.837519645690918,
+    "dE_unrel": 12.613085937686265,
+    "strain": 10.487441326491535,
+    "offset": 2.12564461119473,
+    "md_bond_dev": 8.389058877456161,
+    "rmsd": 1.7232614932209418,
+    "n_seeds": 1,
+    "n_buckets": 1.0
+   },
+   "status": "ok"
+  },
+  {
+   "code": "SISKAJ",
+   "inside": false,
+   "bit_identical": true,
+   "n_seeds": 1,
+   "tags": [
+    "anionic_O",
+    "anionic_halide",
+    "chelate_ring5",
+    "cn5_square_pyr"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_md_bond_dev": 0.0,
+   "n_buckets_control": 12.0,
+   "n_buckets_arm": 12.0,
+   "buckets": [
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      1
+     ],
+     "is_top1": true,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      2
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      0
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      5
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      3
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      4
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      8
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    },
+    {
+     "seed": 11,
+     "bucket": [
+      0,
+      10
+     ],
+     "is_top1": false,
+     "d_score": 0.0,
+     "d_dE_unrel": 0.0,
+     "d_strain": 0.0,
+     "d_offset": 0.0
+    }
+   ],
+   "buckets_unmatched": 0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "control": {
+    "score": 0.8180252313613892,
+    "dE_unrel": 81.14095147745684,
+    "strain": 103.2818773468025,
+    "offset": -22.140925869345665,
+    "md_bond_dev": 124.86753275673078,
+    "rmsd": 1.348103136205661,
+    "n_seeds": 1,
+    "n_buckets": 12.0
+   },
+   "arm": {
+    "score": 0.8180252313613892,
+    "dE_unrel": 81.14095147745684,
+    "strain": 103.2818773468025,
+    "offset": -22.140925869345665,
+    "md_bond_dev": 124.86753275673078,
+    "rmsd": 1.348103136205661,
+    "n_seeds": 1,
+    "n_buckets": 12.0
+   },
+   "status": "ok"
+  }
+ ],
+ "per_trope": {
+  "chelate_ring7": {
+   "parents": [
+    "SIKNAE"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0
+  },
+  "chelate_ring8plus": {
+   "parents": [
+    "SIKNAE"
+   ],
+   "d_score": 0.0,
+   "d_dE_unrel": 0.0,
+   "d_strain": 0.0,
+   "d_offset": 0.0,
+   "d_bucket_dE_unrel": 0.0,
+   "d_bucket_strain": 0.0,
+   "d_bucket_offset": 0.0
+  },
+  "macrocycle": {
+   "parents": [
+    "CAFWIQ"
+   ],
+   "d_score": -0.007582495609919221,
+   "d_dE_unrel": -41.6813383108626,
+   "d_strain": -61.79653979372233,
+   "d_offset": 20.115201482859753,
+   "d_bucket_dE_unrel": -23.595733706881717,
+   "d_bucket_strain": -25.917171271433208,
+   "d_bucket_offset": 2.3214375645514918
+  }
+ },
+ "outside_violations": [],
+ "outside_ok": true,
+ "note": "a filter before panels; the panels decide. <=12 parents: no CI claimed."
+}

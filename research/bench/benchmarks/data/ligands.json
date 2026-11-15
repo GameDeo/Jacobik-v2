@@ -1,0 +1,437 @@
+{
+  "schema_version": 1,
+  "index_convention": "Zero-based heavy-atom indices in the exact SMILES, before explicit hydrogens; do not canonicalize or reorder.",
+  "ligands": [
+    {
+      "id": "chloride",
+      "name": "chloride",
+      "smiles": "[Cl-]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "Cl"
+      ],
+      "formal_charge": -1,
+      "family": "monodentate"
+    },
+    {
+      "id": "fluoride",
+      "name": "fluoride",
+      "smiles": "[F-]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "F"
+      ],
+      "formal_charge": -1,
+      "family": "monodentate"
+    },
+    {
+      "id": "water",
+      "name": "water",
+      "smiles": "O",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate"
+    },
+    {
+      "id": "ammine",
+      "name": "ammonia",
+      "smiles": "N",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate"
+    },
+    {
+      "id": "ncs_n",
+      "name": "N-bound thiocyanate",
+      "smiles": "N#C[S-]",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "N"
+      ],
+      "formal_charge": -1,
+      "family": "ambidentate"
+    },
+    {
+      "id": "en",
+      "name": "ethane-1,2-diamine",
+      "smiles": "NCCN",
+      "donor_indices": [
+        0,
+        3
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "flexible_chelate"
+    },
+    {
+      "id": "bpy",
+      "name": "2,2'-bipyridine",
+      "smiles": "n1ccccc1-c2ccccn2",
+      "donor_indices": [
+        0,
+        11
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "rigid_chelate"
+    },
+    {
+      "id": "terpy",
+      "name": "2,2':6',2''-terpyridine",
+      "smiles": "n1ccccc1-c2cccc(-c3ccccn3)n2",
+      "donor_indices": [
+        0,
+        16,
+        17
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "rigid_chelate"
+    },
+    {
+      "id": "clterpy",
+      "name": "4'-chloro-2,2':6',2''-terpyridine",
+      "smiles": "n1ccccc1-c2cc(Cl)cc(-c3ccccn3)n2",
+      "donor_indices": [
+        0,
+        17,
+        18
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "rigid_chelate"
+    },
+    {
+      "id": "phen",
+      "name": "1,10-phenanthroline",
+      "smiles": "c1cc2ccc3cccnc3c2nc1",
+      "donor_indices": [
+        9,
+        12
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "rigid_chelate"
+    },
+    {
+      "id": "acac",
+      "name": "acetylacetonate",
+      "smiles": "CC(=O)C=C(C)[O-]",
+      "donor_indices": [
+        2,
+        6
+      ],
+      "donor_elements": [
+        "O",
+        "O"
+      ],
+      "formal_charge": -1,
+      "family": "delocalized_chelate"
+    },
+    {
+      "id": "oxalate",
+      "name": "oxalate",
+      "smiles": "[O-]C(=O)C(=O)[O-]",
+      "donor_indices": [
+        0,
+        5
+      ],
+      "donor_elements": [
+        "O",
+        "O"
+      ],
+      "formal_charge": -2,
+      "family": "rigid_chelate"
+    },
+    {
+      "id": "ambim",
+      "name": "2-amino-1-methylbenzimidazole",
+      "smiles": "Cn1c(N)nc2ccccc21",
+      "donor_indices": [
+        4
+      ],
+      "donor_elements": [
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate"
+    },
+    {
+      "id": "hdmg",
+      "name": "mono-deprotonated dimethylglyoxime",
+      "smiles": "CC(=NO)C(C)=N[O-]",
+      "donor_indices": [
+        2,
+        6
+      ],
+      "donor_elements": [
+        "N",
+        "N"
+      ],
+      "formal_charge": -1,
+      "family": "hydrogen_bonded_chelate"
+    },
+    {
+      "id": "mpy",
+      "name": "3-methylpyridine",
+      "smiles": "n1cc(C)ccc1",
+      "donor_indices": [
+        0
+      ],
+      "donor_elements": [
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate"
+    },
+    {
+      "id": "dien",
+      "name": "diethylenetriamine",
+      "smiles": "NCCNCCN",
+      "donor_indices": [
+        0,
+        3,
+        6
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "flexible_chelate"
+    },
+    {
+      "id": "tren",
+      "name": "tris(2-aminoethyl)amine",
+      "smiles": "N(CCN)(CCN)CCN",
+      "donor_indices": [
+        0,
+        3,
+        6,
+        9
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "branched_chelate"
+    },
+    {
+      "id": "cyclam",
+      "name": "1,4,8,11-tetraazacyclotetradecane",
+      "smiles": "N1CCNCCCNCCNCCC1",
+      "donor_indices": [
+        0,
+        3,
+        7,
+        10
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "macrocycle"
+    },
+    {
+      "id": "cyclen",
+      "name": "1,4,7,10-tetraazacyclododecane",
+      "smiles": "N1CCNCCNCCNCC1",
+      "donor_indices": [
+        0,
+        3,
+        6,
+        9
+      ],
+      "donor_elements": [
+        "N",
+        "N",
+        "N",
+        "N"
+      ],
+      "formal_charge": 0,
+      "family": "macrocycle"
+    },
+    {
+      "id": "salen",
+      "name": "salen dianion",
+      "smiles": "[O-]c1ccccc1C=NCCN=Cc2ccccc2[O-]",
+      "donor_indices": [
+        0,
+        8,
+        11,
+        19
+      ],
+      "donor_elements": [
+        "O",
+        "N",
+        "N",
+        "O"
+      ],
+      "formal_charge": -2,
+      "family": "tetradentate_chelate"
+    },
+    {
+      "id": "edta",
+      "name": "ethylenediaminetetraacetate",
+      "smiles": "[O-]C(=O)CN(CC(=O)[O-])CCN(CC(=O)[O-])CC(=O)[O-]",
+      "donor_indices": [
+        0,
+        4,
+        8,
+        11,
+        15,
+        19
+      ],
+      "donor_elements": [
+        "O",
+        "N",
+        "O",
+        "N",
+        "O",
+        "O"
+      ],
+      "formal_charge": -4,
+      "family": "hexadentate_chelate"
+    },
+    {
+      "id": "dppe",
+      "name": "1,2-bis(diphenylphosphino)ethane",
+      "smiles": "c1ccccc1P(c2ccccc2)CCP(c3ccccc3)c4ccccc4",
+      "donor_indices": [
+        6,
+        15
+      ],
+      "donor_elements": [
+        "P",
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "bulky_chelate"
+    },
+    {
+      "id": "dmdtc",
+      "name": "dimethyldithiocarbamate",
+      "smiles": "CN(C)C(=S)[S-]",
+      "donor_indices": [
+        4,
+        5
+      ],
+      "donor_elements": [
+        "S",
+        "S"
+      ],
+      "formal_charge": -1,
+      "family": "sulfur_chelate"
+    },
+    {
+      "id": "dipic",
+      "name": "pyridine-2,6-dicarboxylate",
+      "smiles": "[O-]C(=O)c1cccc(C(=O)[O-])n1",
+      "donor_indices": [
+        0,
+        10,
+        11
+      ],
+      "donor_elements": [
+        "O",
+        "O",
+        "N"
+      ],
+      "formal_charge": -2,
+      "family": "mixed_donor_chelate"
+    },
+    {
+      "id": "crown18",
+      "name": "18-crown-6",
+      "smiles": "O1CCOCCOCCOCCOCCOCC1",
+      "donor_indices": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15
+      ],
+      "donor_elements": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "macrocycle"
+    },
+    {
+      "id": "pme3",
+      "name": "trimethylphosphine",
+      "smiles": "CP(C)C",
+      "donor_indices": [
+        1
+      ],
+      "donor_elements": [
+        "P"
+      ],
+      "formal_charge": 0,
+      "family": "monodentate"
+    },
+    {
+      "id": "diglyme",
+      "name": "bis(2-methoxyethyl) ether",
+      "smiles": "COCCOCCOC",
+      "donor_indices": [
+        1,
+        4,
+        7
+      ],
+      "donor_elements": [
+        "O",
+        "O",
+        "O"
+      ],
+      "formal_charge": 0,
+      "family": "flexible_chelate"
+    }
+  ]
+}

@@ -1,0 +1,284 @@
+diff --git a/src/jacobik/profile.py b/src/jacobik/profile.py
+index f94a248..6303818 100644
+--- a/src/jacobik/profile.py
++++ b/src/jacobik/profile.py
+@@ -82,6 +82,9 @@ FIELDS: Dict[str, Tuple[str, str, Any, str]] = {
+     "out_dedup": ("jacobik.ik.dedup", "OUT_DEDUP", True, "symmetry-aware RMSD dedup of the output"),
+     "dedup_rmsd": ("jacobik.ik.dedup", "DEDUP_RMSD", 0.5, "dedup threshold (A, heavy atoms + metal)"),
+     "out_window": ("jacobik.engine", "OUT_WINDOW", 200.0, "output score window (summed nats); 0 = off"),
++    # --- SMILES donor mapping (roadmap_generation_v1.md S7) ----------------------------------------------------------
++    "ring_closure_dative_donors": ("jacobik.stats.mapping", "RING_CLOSURE_DATIVE_DONORS", False,
++                                   "SMILES with a ring-closure dative (-> or <- followed by a digit): two SMILES donors that remap onto one xyz atom keep their own atoms instead of collapsing (False = legacy)"),
+ }
+ 
+ #: the fields that existed when the fingerprint was defined (2026-10-16 .. 10-25). Frozen: the fingerprint hashes these
+diff --git a/src/jacobik/stats/mapping.py b/src/jacobik/stats/mapping.py
+index 0512358..2463b7e 100644
+--- a/src/jacobik/stats/mapping.py
++++ b/src/jacobik/stats/mapping.py
+@@ -7,6 +7,7 @@ Synthesizes raw tmQM data into fully-assembled TMComplex objects.
+ from __future__ import annotations
+ 
+ import logging
++import re
+ from collections import Counter
+ from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+ 
+@@ -92,6 +93,11 @@ METALS: FrozenSet[str] = frozenset(
+ # when building the connectivity graph for component decomposition.
+ _LIGAND_BO_THRESHOLD: float = 0.5
+ 
++# roadmap_generation_v1.md S7: False = legacy. True: a SMILES donor whose proximity remap lands on an xyz atom that is
++# already a donor keeps its own atom (only for SMILES with a ring-closure dative); see _apply_smiles_path.
++RING_CLOSURE_DATIVE_DONORS: bool = __import__("jacobik.profile", fromlist=["get"]).get("ring_closure_dative_donors")
++_RING_CLOSURE_DATIVE_RE = re.compile(r"(?:->|<-)\d")
++
+ # Raw BO thresholds for the no-SMILES fallback quantizer.
+ # These are applied after metal and aromatic-ring detection.
+ _BO_SINGLE_LO: float = 0.75  # raw BO >= this -> single (below = coordination)
+@@ -620,6 +626,7 @@ def _apply_smiles_path(
+     # M--X BO edges are used separately to suppress direct Q6 contacts, not to
+     # turn weak/far contacts into donors here.
+     xyz_donor_indices: Set[int] = set()
++    ring_closure_dative = bool(RING_CLOSURE_DATIVE_DONORS and _RING_CLOSURE_DATIVE_RE.search(smiles))
+ 
+     for smi_donor_idx in donor_smi_map:
+         xyz_donor = full_map.get(smi_donor_idx)
+@@ -638,6 +645,10 @@ def _apply_smiles_path(
+                 if cand_bo > best_bo:
+                     best_bo = cand_bo
+                     best_atom = candidate
++            if ring_closure_dative and best_atom in xyz_donor_indices:
++                # S7: the remap target is already another donor (two SMILES donors with no raw M-X bond both
++                # land on the same atom, and the set below would silently keep one). Keep this SMILES atom.
++                best_atom = xyz_donor
+             xyz_donor = best_atom
+ 
+         # Only add non-H atoms — H is only a valid donor when the SMILES
+diff --git a/tests/jgen/test_ring_closure_donors.py b/tests/jgen/test_ring_closure_donors.py
+new file mode 100644
+index 0000000..4cfaf8a
+--- /dev/null
++++ b/tests/jgen/test_ring_closure_donors.py
+@@ -0,0 +1,74 @@
++"""ring_closure_dative_donors (roadmap_generation_v1.md S7): legacy False; True keeps both SMILES donors when their
++proximity remap lands on one xyz atom. Legacy output is the stored behaviour; a parent with no ring-closure dative is
++unchanged by construction."""
++import re
++
++import pytest
++
++from tests.jgen._data import need_data
++
++RC = re.compile(r"(?:->|<-)\d")
++
++
++def _donor_sites(code, shard, dataset, flag):
++    from jacobik.stats import mapping as M
++    from tools.jgen.inputs import load_mol
++
++    old = M.RING_CLOSURE_DATIVE_DONORS
++    M.RING_CLOSURE_DATIVE_DONORS = flag
++    try:
++        mol = load_mol(code, shard, dataset)
++        assert mol is not None, code
++        return sorted(tuple(s.donor_indices) for s in mol.coord_sites), len(mol.donor_labels)
++    finally:
++        M.RING_CLOSURE_DATIVE_DONORS = old
++
++
++def test_legacy_default_is_false():
++    import jacobik.profile as P
++    from jacobik.stats import mapping as M
++
++    assert P.FIELDS["ring_closure_dative_donors"][2] is False
++    assert "ring_closure_dative_donors" not in P.PROFILES["u1"]
++    assert M.RING_CLOSURE_DATIVE_DONORS is False
++
++
++@need_data
++def test_legacy_nepnef_has_four_donor_labels():
++    from tools.jgen.inputs import frame_shards
++
++    shard, ds = frame_shards()["NEPNEF"]
++    sites, n_labels = _donor_sites("NEPNEF", shard, ds, False)
++    assert n_labels == 4
++    assert len(sites) == 4
++
++
++@need_data
++def test_on_nepnef_has_five_donor_labels():
++    from tools.jgen.inputs import frame_shards
++
++    shard, ds = frame_shards()["NEPNEF"]
++    sites, n_labels = _donor_sites("NEPNEF", shard, ds, True)
++    assert n_labels == 5
++    assert len(sites) == 5
++
++
++@need_data
++def test_on_tinnio_gains_the_second_nitrate_oxygen():
++    from tools.jgen.inputs import frame_shards
++
++    shard, ds = frame_shards()["TINNIO"]
++    _, off = _donor_sites("TINNIO", shard, ds, False)
++    _, on = _donor_sites("TINNIO", shard, ds, True)
++    assert (off, on) == (3, 4)
++
++
++@need_data
++def test_parent_without_ring_closure_dative_is_unchanged():
++    from tools.jgen.inputs import frame_shards, tmqm_smiles, CLEAN
++
++    smiles = tmqm_smiles(CLEAN / "tmQM")
++    frame = frame_shards()
++    code = next(c for c in sorted(frame) if c in smiles and smiles[c] and not RC.search(smiles[c]))
++    shard, ds = frame[code]
++    assert _donor_sites(code, shard, ds, False) == _donor_sites(code, shard, ds, True), code
+diff --git a/tools/jgen/diag/d33_s7_prevalence.py b/tools/jgen/diag/d33_s7_prevalence.py
+new file mode 100644
+index 0000000..03fbf55
+--- /dev/null
++++ b/tools/jgen/diag/d33_s7_prevalence.py
+@@ -0,0 +1,47 @@
++"""S7 prevalence (roadmap_generation_v1.md S7 step 3): for every parent of the frame (or the codes given), the donor
++count of the solver shell with ring_closure_dative_donors off (legacy) and on, and whether the fix changes the parent.
++Reads SMILES and geometry only (tools/jgen/inputs.py). Writes JSON to stdout.
++
++    python -m tools.jgen diag d33_s7_prevalence [CODE ...] > out.json
++"""
++import json
++import re
++import sys
++
++RC = re.compile(r"(?:->|<-)\d")
++
++
++def main():
++    from jacobik.stats import mapping as M
++    from tools.jgen import inputs
++
++    shards = inputs.frame_shards()
++    codes = sys.argv[1:] or sorted(shards)
++    smiles = inputs.tmqm_smiles(inputs.CLEAN / "tmQM")
++    rows = []
++    for code in codes:
++        rec = dict(code=code, ring_closure_dative=bool(RC.search(smiles.get(code) or "")))
++        try:
++            shard, ds = shards[code]
++            counts = {}
++            for flag in (False, True):
++                M.RING_CLOSURE_DATIVE_DONORS = flag
++                mol = inputs.load_mol(code, shard, ds)
++                if mol is None:
++                    raise RuntimeError("no geometry")
++                counts[flag] = sorted(tuple(s.donor_indices) for s in mol.coord_sites)
++            M.RING_CLOSURE_DATIVE_DONORS = False
++            rec.update(n_sites_legacy=len(counts[False]), n_sites_on=len(counts[True]),
++                       changed=counts[False] != counts[True])
++        except Exception as exc:  # recorded, never raised
++            rec.update(error=f"{type(exc).__name__}: {str(exc)[:160]}", changed=False)
++        rows.append(rec)
++    n = len(rows)
++    summary = dict(parents=n, with_ring_closure_dative=sum(r["ring_closure_dative"] for r in rows),
++                   changed=sum(r["changed"] for r in rows), errors=sum("error" in r for r in rows),
++                   changed_codes=[r["code"] for r in rows if r["changed"]])
++    print(json.dumps(dict(summary=summary, rows=rows), indent=1))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/jgen/diag/d34_s7_lost_trace.py b/tools/jgen/diag/d34_s7_lost_trace.py
+new file mode 100644
+index 0000000..fa0b4c9
+--- /dev/null
++++ b/tools/jgen/diag/d34_s7_lost_trace.py
+@@ -0,0 +1,88 @@
++"""S7 trace (roadmap_generation_v1.md S7 step 1) for the parents the ring-closure fix does not reach: for each SMILES
++dative donor, where it goes in _apply_smiles_path (heavy isomorphism, H assignment, no-bond proximity remap, H guard,
++donor set). Reads SMILES and geometry only (tools/jgen/inputs.py). Writes JSON to stdout.
++
++    python -m tools.jgen diag d34_s7_lost_trace CODE [CODE ...] > out.json
++"""
++import json
++import sys
++
++import networkx as nx
++
++
++def main():
++    from jacobik.stats import mapping as M
++    from jacobik.stats.parser import _assemble_raw, _iter_bo_blocks, _iter_xyz_blocks
++    from jacobik.topology.graph import build_heavy_ligand_graph
++    from tools.jgen import inputs
++
++    shards = inputs.frame_shards()
++    smiles = inputs.tmqm_smiles(inputs.CLEAN / "tmQM")
++    out = []
++    for code in sys.argv[1:]:
++        rec = dict(code=code)
++        try:
++            shard, ds = shards[code]
++            parent = inputs.CLEAN / "tmQM"
++            for (comment, atoms), (c, bonds) in zip(_iter_xyz_blocks(parent / "xyz" / f"tmQM_{shard}.xyz"),
++                                                    _iter_bo_blocks(parent / "bo" / f"tmQM_{shard}.BO")):
++                if c == code:
++                    break
++            raw = _assemble_raw(comment, atoms, c, bonds, inputs._Row(smiles.get(code)))
++            atoms, bonds = raw.atoms, raw.bonds
++            smi = raw.smiles
++            metal_idx = M._find_metal(atoms).idx
++            mol, mol_h = M._smiles_to_rdkit(smi)
++            G_smi, _, donor_smi_map = M._build_smiles_heavy_graph(mol)
++            G_bo_heavy = build_heavy_ligand_graph(atoms, bonds, metal_idx, bo_threshold=M._LIGAND_BO_THRESHOLD)
++            G_bo_full = M._build_bo_full_graph(atoms, bonds, metal_idx)
++            rec["n_smiles_donors"] = len(donor_smi_map)
++            try:
++                heavy = M._align_components(G_smi, G_bo_heavy)
++            except ValueError as exc:
++                rec["drop"] = f"_align_components raises (whole SMILES path falls back): {str(exc)[:120]}"
++                out.append(rec)
++                continue
++            full = {**heavy, **M._assign_hydrogens(heavy, mol_h, G_bo_full)}
++            raw_bo = {(min(b.i, b.j), max(b.i, b.j)): b.order for b in bonds}
++            sym = {a.idx: a.symbol for a in atoms}
++            donors = []
++            taken = set()
++            for sd, sm in donor_smi_map.items():
++                x = full.get(sd)
++                d = dict(smi_idx=sd, metal_pair=sm, xyz=x, symbol_smiles_atom=mol.GetAtomWithIdx(sd).GetSymbol())
++                if x is None:
++                    d["drop"] = "not in full_map (no heavy/H match)"
++                    donors.append(d)
++                    continue
++                bo = raw_bo.get((min(metal_idx, x), max(metal_idx, x)), 0.0)
++                d["mapped_bo"] = bo
++                best = x
++                if bo < 0.15:  # local constant _COORD_BO_SUPPLEMENT in _apply_smiles_path
++                    comp = nx.node_connected_component(G_bo_heavy, x) if x in G_bo_heavy else {x}
++                    bb = bo
++                    for cand in comp:
++                        cb = raw_bo.get((min(metal_idx, cand), max(metal_idx, cand)), 0.0)
++                        if cb > bb:
++                            bb, best = cb, cand
++                d["remap_atom"] = best
++                d["remap_symbol"] = sym.get(best)
++                d["remap_bo"] = raw_bo.get((min(metal_idx, best), max(metal_idx, best)), 0.0)
++                if sym.get(best) == "H":
++                    d["drop"] = "remap target is H (H guard)"
++                elif best in taken:
++                    d["drop"] = "remap target already a donor (set collision)"
++                else:
++                    taken.add(best)
++                    d["kept"] = best
++                donors.append(d)
++            rec["donors"] = donors
++            rec["n_kept"] = len(taken)
++        except Exception as exc:  # recorded, never raised
++            rec["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
++        out.append(rec)
++    print(json.dumps(out, indent=1, default=str))
++
++
++if __name__ == "__main__":
++    main()

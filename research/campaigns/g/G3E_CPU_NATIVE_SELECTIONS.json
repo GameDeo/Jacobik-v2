@@ -1,0 +1,417 @@
+{
+  "stage": "all native CPU identities frozen before remaining paths",
+  "units": [
+    {
+      "unit": {
+        "code": "AZUSIA",
+        "seed": 11
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 5,
+        "key": [
+          null,
+          2,
+          223
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          7
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 33,
+        "key": [
+          null,
+          2,
+          151
+        ],
+        "rmsd_A": 0.5291306372766336
+      },
+      "wall_s": 74.13418399100192
+    },
+    {
+      "unit": {
+        "code": "AZUSIA",
+        "seed": 12
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 5,
+        "key": [
+          null,
+          2,
+          143
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          63
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 21,
+        "key": [
+          null,
+          2,
+          229
+        ],
+        "rmsd_A": 0.699268321301497
+      },
+      "wall_s": 80.69802470100001
+    },
+    {
+      "unit": {
+        "code": "AZUSIA",
+        "seed": 13
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 5,
+        "key": [
+          null,
+          2,
+          222
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          30
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 9,
+        "key": [
+          null,
+          2,
+          220
+        ],
+        "rmsd_A": 0.3259585488359526
+      },
+      "wall_s": 91.78340269700004
+    },
+    {
+      "unit": {
+        "code": "USAPOU",
+        "seed": 11
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 14,
+        "key": [
+          null,
+          0,
+          40
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          1,
+          76
+        ]
+      },
+      "untwisted": {
+        "arm": "R2s",
+        "index": 63,
+        "key": [
+          null,
+          0,
+          24
+        ],
+        "rmsd_A": 1.4405937391900463
+      },
+      "wall_s": 204.94131967499993
+    },
+    {
+      "unit": {
+        "code": "USAPOU",
+        "seed": 12
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 10,
+        "key": [
+          null,
+          2,
+          184
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          3,
+          255
+        ]
+      },
+      "untwisted": {
+        "arm": "R2s",
+        "index": 8,
+        "key": [
+          null,
+          2,
+          152
+        ],
+        "rmsd_A": 2.6270319501058665
+      },
+      "wall_s": 201.99097101799998
+    },
+    {
+      "unit": {
+        "code": "USAPOU",
+        "seed": 13
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 15,
+        "key": [
+          null,
+          3,
+          213
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          3,
+          229
+        ]
+      },
+      "untwisted": {
+        "arm": "R2s",
+        "index": 5,
+        "key": [
+          null,
+          3,
+          247
+        ],
+        "rmsd_A": 1.2468400410660072
+      },
+      "wall_s": 202.883994358
+    },
+    {
+      "unit": {
+        "code": "HEDJOP",
+        "seed": 11
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          96
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          96
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 8,
+        "key": [
+          null,
+          0,
+          96
+        ],
+        "rmsd_A": 1.3326783060762033
+      },
+      "wall_s": 85.22928372399997
+    },
+    {
+      "unit": {
+        "code": "HEDJOP",
+        "seed": 12
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          8
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          8
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 23,
+        "key": [
+          null,
+          0,
+          79
+        ],
+        "rmsd_A": 1.5115448300681762
+      },
+      "wall_s": 76.30571307799994
+    },
+    {
+      "unit": {
+        "code": "HEDJOP",
+        "seed": 13
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          45
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          45
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 27,
+        "key": [
+          null,
+          0,
+          74
+        ],
+        "rmsd_A": 1.4371732712548055
+      },
+      "wall_s": 71.50888208600009
+    },
+    {
+      "unit": {
+        "code": "OMAGAK",
+        "seed": 12
+      },
+      "status": "selected",
+      "twisted": {
+        "arm": "R2s",
+        "index": 1,
+        "key": [
+          null,
+          0,
+          57
+        ]
+      },
+      "top1": {
+        "arm": "R2s",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          77
+        ]
+      },
+      "untwisted": {
+        "arm": "C1",
+        "index": 0,
+        "key": [
+          null,
+          0,
+          96
+        ],
+        "rmsd_A": 1.8959484264310043
+      },
+      "wall_s": 29.299393785000007
+    }
+  ],
+  "sha256": {
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_11/C1.json": "d4e3cc1fecba5539ac0cda0686968de0af6ca34c075d92e55dae6110ebb4a45c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_11/C1.npz": "8dd41cc879fed37880a204fcd46b9060689937c2f346c84cd366261ab27278a4",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_11/R2s.json": "7b65eef1521600a697f72f46aaf90caa3a52ef7b47e3129ce5a22629bd19f6da",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_11/R2s.npz": "1507bbfe93bf25a37f29dd163450a0582994d8787229898f1fc0592ba9022f66",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_11/selection.json": "c2ced2c137cc0413d68ee4b79292a485339887cd91a742dc80309aa55c337b1c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_12/C1.json": "fdd564beadb0e06b89a5071215ded877693d43407c6c6c78f5a92d230148c60b",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_12/C1.npz": "5ec806ef60b3b6c077e6aa4ff2bcfc2eab64242d411e7c2a8ffeaeed7d712f75",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_12/R2s.json": "88cd25b9e9450ab346b21d86ac21783fbfff1832d740357da241395027e80159",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_12/R2s.npz": "aa951723e2369b67ec8c88574dfd076ce195a61c226810fcec4f3c2db0fc863a",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_12/selection.json": "e7faedfd83ec9f52e86d60ae9f09a01ccfc065ae32e366f6cf635e0a8204d77e",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_13/C1.json": "0699db84c54b1585049f92ef3c8455a78e1a9be8231ef0dc117c5206521ac4fe",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_13/C1.npz": "9d288c3f4be25949ced61c7979fcf41210f82eeaaee6dfb1d9809c3da69852d5",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_13/R2s.json": "14b4038709d30b8b5f5b03f2e8ce420449ba9d9212229ed0e8fd3f176ab78818",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_13/R2s.npz": "7232e3dcf753133c70618eb225bb1c9604055848c41820922b1f27a4fd0a984c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/AZUSIA_13/selection.json": "183b5474ab01c6ee991b73877387a2ab1e8a5e16809eccced5d378a2913cba32",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_11/C1.json": "c5fdb0fa4888c1d46fdef0e0262076e7d98eb462b16c4d94a466ff9a05b9bb8a",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_11/C1.npz": "e0237a45db0c0b89286c55a5c487f76506927bf3c652cc6690b251664c65f45d",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_11/R2s.json": "82c3e03cf161850dd8eec5f7bbed29b90d94d5dd966d3042a0270dc724e81ad4",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_11/R2s.npz": "4fb618a40ffa7f4ec3e1537585cf61de432e312b65c8bdcf8279760843556c99",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_11/selection.json": "881a7b2f01ab11d8119f1c398d5bb7d5e400203dac4ae0af3e37b619f5b862d2",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_12/C1.json": "bf33bb7c24140233d83fd9bbc880c97e8ee113d5c2dc98d1222c1bf1eddabb2d",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_12/C1.npz": "34c6d8f0ecae99d17209185de6f4cf6d33c0a742a9ebe0054303f020e3069a94",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_12/R2s.json": "c5b81f80171815a887d3a971e760e74aefbfd34e5fcadd22207ad7d645559e8a",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_12/R2s.npz": "388b1f92ec6cafb5e17a283ded926a760823390823878e7575509ad26989850a",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_12/selection.json": "f69c3d8a18843430e7e9113231a7b5027e7962ba9aafa48fee4c203804710707",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_13/C1.json": "ab976ba737b8303e4201bde42ae6bb3aeb3828d0371783edfc9fef8e8fd4e999",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_13/C1.npz": "67657e3f7ce1d52fff002451ceed10b56444d0255aea7aa94cb62b8ca5bb26af",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_13/R2s.json": "b18b95d4c25c99e90e8c2a8751dcacc60402a245e473f4979ee82bfef13b266c",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_13/R2s.npz": "dc8f72d199120fadb977857cc2b20de59f4385fe386d9ed1701a844154878f19",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/USAPOU_13/selection.json": "308c0899045b65138add20be63742cba832309d77c7175beae5a60fc7249c5dd",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_11/C1.json": "f062320cfe3547a0d463f0578ee78a29d4a704e863388f8fa50818318fbb3dcd",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_11/C1.npz": "f7d703f2f172c685bfda000c9afb448f63b88dc83e7542cb3945f3c2b2b02e95",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_11/R2s.json": "4c7b15bfdeeb256d718926776448382756d64fbb5d64b7cf38c80f1ac52d13eb",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_11/R2s.npz": "82897684d394f26fec765850e1e40bbb6058dc999f8f129645df723022c962f9",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_11/selection.json": "23296fb2a7d8c5d0c5c0633556007f356576e52dc3b329b666f93f98df28c65f",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_12/C1.json": "3bfb77b275e460e095f4180bc33e77bff7219c0c3e942a7ae46de3b3b90dba71",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_12/C1.npz": "5530dc59389789c3e49134776721a7815cdad5dc7ee3dbeb8a0e3978271839fa",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_12/R2s.json": "9d147baac7e9fc902c323dc8322398132ac10131e0703025b953603f2005e2c6",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_12/R2s.npz": "2daac8cc807cff687e34177448717e11101ea3ded1ace9894861160fab9076ad",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_12/selection.json": "d9176f800abc6c874b13fb495277fc73261fbc065e7b70233e49b1060cfcf9f5",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_13/C1.json": "e1026555ccfa7e7c2ad095cbcba8609fdd90b4779798b428e1a152f9796cea1d",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_13/C1.npz": "9d617df2abfe73b574a80f51352a5231f5e03515473844afb09af8ccb445ab01",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_13/R2s.json": "c0fa7e8ae63f96ae42783c566dd6ad9acc1f71f24d828b361da2c555e7039848",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_13/R2s.npz": "4dc18708c9e2eaa5fe801ae4e3162dd3c22415a58887f50e4b8c271706659f56",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/HEDJOP_13/selection.json": "b9afebe34fc657c7c6a675eeb22f94b1a42f8ab7df15664a9ebceee4f7a9c41a",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/OMAGAK_12/C1.json": "8c7bbcc7f1c34f9b7a45cb692fcfd83755baea19e3f885e756230661c5213ba6",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/OMAGAK_12/C1.npz": "27a8ab3e3f34c2c3ac7105727ef57006cc356a479e858dda383a3d2a52607f02",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/OMAGAK_12/R2s.json": "271d00b8ab2aa4f4d1cd0feb232031b0c54899cc5b843567df3dd30afcb24113",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/OMAGAK_12/R2s.npz": "8dac0db0c2185d4164e2015d45efe7ce570a9456d84f6dcf3a276513c409be3e",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3e/native_twist/OMAGAK_12/selection.json": "b20a0fd3724d09ee87e230d7f984632dc7e9e534890f9d5de441cc7aab4bf094"
+  }
+}

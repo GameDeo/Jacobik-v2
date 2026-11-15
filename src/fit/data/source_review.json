@@ -1,0 +1,44 @@
+{
+ "version": "source_review.1",
+ "date": "2026-11-10",
+ "note": "Reviewed source populations. 'fit_effect' is none everywhere: no observation is excluded automatically. Entries are data for the ledger and the corpus review, never read by the generator.",
+ "entries": [
+  {
+   "code": "AGAPEG",
+   "status": "decided",
+   "issue": "single declaration maps to a near O; the earlier audit overlay also kept the weak distal O as kappa2",
+   "decision": "kappa1 on the near, evidence-backed O; the weak distal O is not added as a second donor (owner, 2026-11-10)",
+   "fit_effect": "none",
+   "target_overlay": "kappa1"
+  },
+  {
+   "code": "ILEPOE",
+   "status": "decided",
+   "issue": "single declaration maps to a near O; the earlier audit overlay also kept the weak distal O as kappa2",
+   "decision": "kappa1 on the near, evidence-backed O; the weak distal O is not added as a second donor (owner, 2026-11-10)",
+   "fit_effect": "none",
+   "target_overlay": "kappa1"
+  },
+  {
+   "code": "BADQIH",
+   "status": "decided",
+   "issue": "ambiguous declarations share N6; real heteroarene N4 unrepresented; non-injective ring mapping; CSD name: three N donors + two eta2 alkenes. Declarations land on symmetry-equivalent images (N3 pyridine, N7 amine) of the binding N2/N4/N6 in a C3-like macrocycle; needs whole-ligand automorphism assignment",
+   "decision": "Rh with N2, N4, N6 (macrocycle N,N',N'') + two eta2 norbornadiene faces, from the evidence-ranked donor assignment (`donor_assignment`); CSD name and owner inspection agree (2026-11-11)",
+   "fit_effect": "none"
+  },
+  {
+   "code": "JAYCEV",
+   "status": "decided",
+   "issue": "four N donors (two backbone N, one binding ring N per pyrimidine arm); the declaration landed on the far twin ring N of each pyrimidine and the prior rule collided both onto one atom",
+   "decision": "kappa4 N: each pyrimidine's far ring N is exchanged for its binding sibling (local azine-pair rule); CSD name and owner confirmation: four N bound, no carbon (2026-11-11)",
+   "fit_effect": "none"
+  },
+  {
+   "code": "NUHPEL",
+   "status": "decided",
+   "issue": "spurious distant eta3 aryl face unchanged by the eta2 rejection rule; CSD name: Ag(I) Br + 3 AsPh3, four-coordinate, no hapto face; needs a generic rule (aryl on a kappa-bound As/P is a substituent unless declared)",
+   "decision": "Ag with Br + 3 As (four-coordinate, no haptic face): a face of >= 3 atoms with no metal BO on any member and none within bonding distance is not a haptic interaction (`donor_assignment`, event hapto_face_unsupported); CSD name and owner confirmation (2026-11-11)",
+   "fit_effect": "none"
+  }
+ ]
+}

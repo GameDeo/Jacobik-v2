@@ -1,0 +1,62 @@
+{
+  "drift": {
+    "angles": "degrees; central element plus unordered endpoint-element pair",
+    "include_paired_absolute_shifts": true,
+    "quantiles": [
+      0.5,
+      0.95
+    ],
+    "ring_lengths": [
+      5,
+      6
+    ],
+    "ring_metric": "RMS distance to best-fit plane",
+    "weighting": "equal parent/group mass, equal seed mass, equal pose and occurrence mass"
+  },
+  "frozen_before_scaled_pool_access": true,
+  "health": {
+    "angle_score_scale_degrees": 10.0,
+    "bottom_parent_decile": 0.1,
+    "bottom_parent_quartile": 0.25,
+    "drop_nonfinite": true,
+    "drop_recomputed_coord_intact_false": true,
+    "drop_stored_coord_intact_false": true,
+    "max_HF_bond_distance_angstrom": 3.0,
+    "max_covalent_bond_relative_deviation": 0.1,
+    "max_shell_shift_angstrom": 0.3,
+    "min_nonbonded_heavy_distance_angstrom": 1.5,
+    "min_nonbonded_radius_ratio": 0.6,
+    "no_energy_selection_or_weights": true,
+    "pucker_score_scale_angstrom": 0.1,
+    "score": "1/(1+equal-seed equal-pose mean severity)",
+    "severity": "max_bond_relative/0.10 + max_shell_shift/0.30 + angle_RMS_shift/10deg + pucker_RMS_shift/0.10A + max(0,0.60-min_nonbonded_radius_ratio)/0.60 + invalid_pose_indicator",
+    "tail_rounding": "ceil; ties by parent code"
+  },
+  "placebo": {
+    "candidate_root_min_groups_unchanged": 20,
+    "diagnostic_local_min_ess": 3.0,
+    "diagnostic_local_min_groups": 3,
+    "diagnostic_min_root_groups": 3,
+    "diagnostic_report_min_reliability": 0.5,
+    "exclude_all_admitted_anchor_cross_pairs": true,
+    "features": "certified features_torch radial coordinate only",
+    "fitting": {
+      "interior_knots": 4,
+      "lambda_0": 0.01,
+      "lambda_r": 0.1,
+      "lambda_z": 0.1
+    },
+    "graph_separations_edges": [
+      2,
+      3
+    ],
+    "heavy_atoms_only": true,
+    "interligand_reference_band_angstrom": [
+      3.5,
+      5.5
+    ],
+    "noise_floor_aggregation": "class-balanced root mass inside diagnostic support; per-root results also reported"
+  },
+  "threshold_basis": "v1 placebo and health policy frozen on pilot/recert development inputs. The v2 1.5 A nonbonded heavy-heavy cutoff was supplied by the auditor note and motivated by an auditor observation on Step 2; this is indirect Step 2-derived information, not a pilot/recert-only empirical cutoff. No Step 2 pool or overlay was read by this agent. The 3.0 A H/F-bond cutoff was declared from conservative covalent geometry and tested on synthetic stray cases before development incidence replay; no such stray occurred in pilot/recert. Values unchanged.",
+  "version": "solver-artifact-controls.2"
+}

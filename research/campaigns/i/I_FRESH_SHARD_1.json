@@ -1,0 +1,131 @@
+{
+  "seeds": [
+    31,
+    32,
+    33
+  ],
+  "parents": [
+    {
+      "code": "NUHPEL"
+    },
+    {
+      "code": "GOTWET"
+    },
+    {
+      "code": "CIFZEZ"
+    },
+    {
+      "code": "HOYBED"
+    },
+    {
+      "code": "DOHTOM"
+    },
+    {
+      "code": "MIDQEY"
+    },
+    {
+      "code": "LIPDEU"
+    },
+    {
+      "code": "BOHWUT"
+    },
+    {
+      "code": "AWONOR"
+    },
+    {
+      "code": "LEGXEA"
+    },
+    {
+      "code": "AYOGUR"
+    },
+    {
+      "code": "CAQLEP"
+    },
+    {
+      "code": "JUCBIV"
+    },
+    {
+      "code": "CEXPOM"
+    },
+    {
+      "code": "JAYCEV"
+    },
+    {
+      "code": "JEGPUJ"
+    },
+    {
+      "code": "EPUWAQ"
+    },
+    {
+      "code": "BABNAV"
+    },
+    {
+      "code": "EQODOF"
+    },
+    {
+      "code": "IYUKOC"
+    },
+    {
+      "code": "FELSAU"
+    },
+    {
+      "code": "BOTYUH"
+    },
+    {
+      "code": "YABYEJ"
+    },
+    {
+      "code": "WEYJIT"
+    },
+    {
+      "code": "TEDPOI"
+    },
+    {
+      "code": "ZAQNUE"
+    },
+    {
+      "code": "PANBOY"
+    },
+    {
+      "code": "TIKZOF"
+    },
+    {
+      "code": "UMUBAF"
+    },
+    {
+      "code": "QUTWOT"
+    },
+    {
+      "code": "SESWIZ"
+    },
+    {
+      "code": "OWAWIU"
+    },
+    {
+      "code": "YISQUM"
+    },
+    {
+      "code": "XEVDAE"
+    },
+    {
+      "code": "MUBREJ"
+    },
+    {
+      "code": "PIWHAF"
+    },
+    {
+      "code": "RIQDEB"
+    },
+    {
+      "code": "OMAGAK"
+    },
+    {
+      "code": "SIVBUV"
+    },
+    {
+      "code": "UBOBUI"
+    }
+  ],
+  "cost_basis": "recorded 2060 timings; greedy cost balance, QEZVEY separate",
+  "estimated_serial_s": 3472.8625
+}

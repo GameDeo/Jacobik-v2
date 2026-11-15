@@ -1,0 +1,42 @@
+{
+  "commit": "06566b5d8d26210897d10a476381fc65827ac593",
+  "VMs": {
+    "jgB1": {
+      "parents": 59,
+      "records": 354,
+      "exports": 354,
+      "statuses": {
+        "ok": 354
+      },
+      "paired_start_digests_equal": true
+    },
+    "jgB2": {
+      "parents": 61,
+      "records": 366,
+      "exports": 360,
+      "statuses": {
+        "failed": 6,
+        "ok": 360
+      },
+      "paired_start_digests_equal": true
+    }
+  },
+  "record_pairing_and_input_hashes_verified": true,
+  "credits_before": 478.58,
+  "credits_after": 476.36,
+  "units_spent": 2.22,
+  "owned_down": [
+    "jgB1",
+    "jgB2"
+  ],
+  "sha256": {
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/credits_before.txt": "b541b29106e8fab3ec71f642af73ac64838d431086bb358bbda49a55d71baf1e",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/credits_after.txt": "28c51a012ca05cd932029e2de00e567e168d9eca29a368b2f2ffa3923d604f0b",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/colab_ref.txt": "882175647f40f95d34165248f655a1956039f24571caaf1a750570537bb64e53",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/colab_journal.jsonl": "4295a0e91154b1c865ebaef78e55a9864cf5e996a29774265fd4e81c2a8e3d0e",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/l4/jgB1/g3f_jgB1/nvidia-smi.txt": "30c1bd6bec6bc10317fb695828b152092a2f127585a51fa82214b0b2100a56f3",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/l4/jgB2/g3f_jgB2/nvidia-smi.txt": "a05a3e3f8ab5be1c063cc1e9c1c7d5256ffd8f4213f620459edc8e3ce9393a95",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/l4/jgB1/g3f_jgB1/timing.json": "00a4c15cf8f34cb20d4237b90d229c104489581e914f1fd07a61279e5cfb9e41",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/jgen/campaign/B/g3f/l4/jgB2/g3f_jgB2/timing.json": "5c57c57ab5edc40fb9d32e38f556d93270a18d418bfa8817ee9a296c574c6e58"
+  }
+}

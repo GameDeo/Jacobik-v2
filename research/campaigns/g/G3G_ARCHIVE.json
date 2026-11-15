@@ -1,0 +1,13 @@
+{
+  "source": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/data/golden",
+  "archive": "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/research/archive/data/2026-11_golden_history/golden_273f2ccbf892",
+  "archive_sha256": {
+    "legacy-2026-10.npz": "47123f0344e1a253e8eae6a3be6ab1d5e0300fdb34c53c333ce4ac12073a2bc1",
+    "production.npz": "439a373b38da9fff3d90d04a1f2e4648d9e5cf6466fcb6ca8d818273b4249f2d",
+    "u1.npz": "439a373b38da9fff3d90d04a1f2e4648d9e5cf6466fcb6ca8d818273b4249f2d"
+  },
+  "inputs_sha256": {
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/data/db/constraints_2026-11-01.json": "d87b81a5d6297e0251a881b871f477678ede79fc2bce694b72c4dba1c5fe10c4",
+    "/mnt/e/Dev/Projects/jacobik_2026-10-02_full/data/db/constraints_2026-11-01.meta.json": "66558e6e2910cb5255f6aea01d37976fd17a81c54b29f7d4617412e0f2700709"
+  }
+}
