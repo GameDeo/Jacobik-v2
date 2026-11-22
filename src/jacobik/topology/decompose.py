@@ -13,6 +13,8 @@ from typing import Dict, List, Set, Tuple
 
 import networkx as nx
 
+from jacobik.core import profile as _profile
+
 from jacobik.core.types import (
     Ligand,
     PivotChain,
@@ -114,6 +116,18 @@ def _find_ring_edges(G: nx.Graph) -> Set[Tuple[int, int]]:
 # ---------------------------------------------------------------------------
 
 _MACRO_MIN_SIZE = 8
+#: v1.0b (profile field macro_root): a ligand with a jointed macrocycle is rooted at the ring itself. The default root
+#: rule picks a donor-free body >= 2 hops from every donor, which on a macrocycle with pendant arms is the far end of
+#: one arm (Eu-DTMA: the N-methyl of arm 1; Gd-DOTA: an arm CH2), so the ring and the other arms hang off that arm
+#: on a long lever and the arm's own donors sit on root-adjacent axes. The ring's atoms are moved by its macro joints,
+#: so its donors stay correctable with the root inside it.
+MACRO_ROOT = _profile.get("macro_root")
+#: v1.0b (profile field macro_fused): a ring of >= 8 atoms with >= 2 donors is a macrocycle even when some of its bonds
+#: are not single or are shared with another ring (benzo-fused, Schiff-base imine, ring alkene: UYOVUA's 13-ring had
+#: one aromatic fused bond and stayed one rigid body, frozen at its embed). Those bonds stay rigid in the FK; it needs
+#: >= _MACRO_FUSED_MIN_FREE unshared single bonds to flex.
+MACRO_FUSED = _profile.get("macro_fused")
+_MACRO_FUSED_MIN_FREE = 4
 _MACRO_MIN_DONORS = 2
 #: Ring torsion joints for small donor rings (2026-09-30, profile field ring_joints, on after revision 2). A non-aromatic, non-fused ring of
 #: >= _RING_JOINT_MIN_SIZE atoms holding >= 2 donor atoms (kappa or haptic) gets the macrocycle treatment: torsion joints
@@ -156,7 +170,10 @@ def _find_macrocycles(
             continue
         bos = [bo_map.get((min(u, v), max(u, v)), 0.0) for u, v in sub.edges()]
         all_single = all(abs(b - _BO_SINGLE) <= _BO_SINGLE_TOL for b in bos)
-        if not (len(nodes) >= _MACRO_MIN_SIZE and all_single):
+        free = sum(abs(b - _BO_SINGLE) <= _BO_SINGLE_TOL and edge_use[(min(u, v), max(u, v))] == 1
+                   for (u, v), b in zip(sub.edges(), bos))
+        big_ok = len(nodes) >= _MACRO_MIN_SIZE and (all_single or (MACRO_FUSED and free >= _MACRO_FUSED_MIN_FREE))
+        if not big_ok:
             # small donor ring (RING_JOINTS): non-aromatic, not fused, enough single bonds for joints + a closure bond
             if not RING_JOINTS or len(nodes) < _RING_JOINT_MIN_SIZE:
                 continue
@@ -433,6 +450,10 @@ def decompose_ligand(mol: TMComplex, ligand: Ligand) -> None:
     # --- Root body: never a donor-containing body when a donor-free one
     # exists (see _select_root_body docstring) ---
     root_body = _select_root_body(body_of, body_sets, body_adj, donor_set)
+    if MACRO_ROOT:
+        big = [r for r in ligand.macrocycles if len(r) >= _MACRO_MIN_SIZE and r[0] in body_of]
+        if big:
+            root_body = body_of[max(big, key=len)[0]]
 
     # --- Pivot chains ---
     pivot_chains: List[PivotChain] = []

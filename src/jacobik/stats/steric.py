@@ -11,6 +11,7 @@ Every non-bonded atom pair (> 3 bonds apart) is scored purely repulsively:
 """
 from __future__ import annotations
 
+import functools
 import math
 from typing import Dict, List, Optional, Tuple
 
@@ -35,9 +36,12 @@ ALVAREZ_RADII: Dict[str, float] = {
 }
 
 
+@functools.lru_cache(maxsize=None)
 def rep_pair_params(e1: str, e2: str, scale: float = 1.0) -> Optional[Tuple[float, float, float, float]]:
     """(A kJ/mol, b 1/A, r_m A, r_lin A) of the physical repulsion of an element pair, or None without parameters.
-    ``scale`` moves the onset to scale * r_m (A and b unchanged); r_lin is recomputed for the moved onset."""
+    ``scale`` moves the onset to scale * r_m (A and b unchanged); r_lin is recomputed for the moved onset.
+    Memoized: a pure function of its arguments, called once per atom pair by build_runtime (230k calls, 16 s of
+    FUTSOD's 55 s profiled run before 2026-11-18)."""
     e1, e2 = ("H" if e1 == "Hp" else e1), ("H" if e2 == "Hp" else e2)
     if e1 not in REP_PARAMS or e2 not in REP_PARAMS or e1 not in ALVAREZ_RADII or e2 not in ALVAREZ_RADII:
         return None
@@ -197,8 +201,8 @@ def _interp(T, rows, d, r_lo, dr, G):
     return torch.where(u >= G - 1, torch.zeros_like(w), w)
 
 
-def evaluate(rt, X, a_idx, b_idx):
-    """(B,) sum over Q6 pairs of purely repulsive penalty w >= 0 (kT)."""
+def _evaluate_autograd(rt, X, a_idx, b_idx):
+    """evaluate() through autograd (every temporary saved for the backward pass); needed for second derivatives."""
     import torch
 
     d = (X[:, a_idx] - X[:, b_idx]).norm(dim=-1)
@@ -219,3 +223,143 @@ def evaluate(rt, X, a_idx, b_idx):
         # omitted from the whole Q6 term by the enabled mask.
         w_out = torch.where(rt["rep"][None], w_out * rt.get("rep_weight", 1.0)[None], w_out)
     return w_out.sum(-1)
+
+
+def _pair_terms(rt, d):
+    """Per-pair penalty w(d) and its derivative dw/dd, (B, M) each, without autograd: the same pieces as
+    _evaluate_autograd, differentiated by hand (every branch is an elementwise function of d)."""
+    import torch
+
+    T, rows, r_lo, dr, G = rt["T"], rt["tot"], rt["r_lo"], rt["dr"], rt["G"]
+    cache = rt.get("_w0_pair")
+    if cache is None or cache.device != d.device:          # w at r0: one value per pair (not per row)
+        cache = rt["_w0_pair"] = _interp(T, rows, rt["r0"][rows][None], r_lo, dr, G)[0]
+    w0 = cache[None]
+    u = (d - r_lo) / dr
+    i0 = torch.clamp(torch.floor(u), 0, G - 2).long()
+    wa = T[rows[None, :], i0]
+    s = T[rows[None, :], i0 + 1] - wa                       # table rise per grid step
+    w = wa + (u - i0.to(u.dtype)) * s
+    del wa, i0
+    out = u >= G - 1
+    del u
+    w = w.masked_fill(out, 0.0)
+    s = (s.to(d.dtype) / dr).masked_fill(out, 0.0)         # dw/dd (autograd's precision: d's dtype)
+    del out
+    wc = w - w0
+    del w
+    core = (d < rt["r0"][rows][None]) & (wc >= 0)           # clamp(min=0) passes its gradient at wc >= 0
+    w_core = torch.where(core, wc, 0.0)
+    g = torch.where(core, s, 0.0)
+    del wc, s, core
+    sig2 = rt["sigma"].clamp(min=1e-7) ** 2
+    t = (rt["mu"] - d).clamp(min=0.0)
+    has = rt["has"][None]
+    w_out = torch.where(has, w_core, t * t / (2.0 * sig2))
+    g = torch.where(has, g, -t / sig2)
+    del t, w_core
+    if rt.get("rep_any"):
+        A, b, rm, rl = (rt[k][None].to(d.dtype) for k in ("rep_A", "rep_b", "rep_rm", "rep_rl"))
+        em = torch.exp(-b * rm)
+        slope = A * b * (torch.exp(-b * rl) - em) / RT_KJ
+        u_rl = A * (torch.exp(-b * rl) - em + b * em * (rl - rm)) / RT_KJ
+        dm = torch.maximum(d, rl)
+        ed = torch.exp(-b * dm)
+        lo = d < rl
+        u_rep = torch.where(lo, u_rl + slope * (rl - d), A * (ed - em + b * em * (dm - rm)) / RT_KJ)
+        g_rep = torch.where(lo, -slope, A * b * (em - ed) / RT_KJ)
+        del ed, dm, lo
+        inside = d < rm
+        rep = rt["rep"][None]
+        w_out = torch.where(rep, torch.where(inside, u_rep, 0.0), w_out)
+        g = torch.where(rep, torch.where(inside, g_rep, 0.0), g)
+        del u_rep, g_rep, inside
+    en = rt.get("enabled")
+    if en is not None:
+        w_out = torch.where(en[None], w_out, 0.0)
+        g = torch.where(en[None], g, 0.0)
+    if rt.get("rep_any"):
+        rw = rt.get("rep_weight", 1.0)
+        rw = rw[None] if torch.is_tensor(rw) else rw
+        w_out = torch.where(rt["rep"][None], w_out * rw, w_out)
+        g = torch.where(rt["rep"][None], g * rw, g)
+    return w_out, g
+
+
+#: rows per block of the Q6 pair temporaries: (rows, pairs, 3) float32 kept near 128 MB
+_Q6_BLOCK_BYTES = 128 * 2 ** 20
+
+
+def _rows_per_chunk(n_pairs: int) -> int:
+    return max(1, int(_Q6_BLOCK_BYTES // max(1, 12 * int(n_pairs))))
+
+
+def _q6_rows(rt, X, a_idx, b_idx):
+    """(rows,) Q6 sum and (rows, M) dw/dd / d for a block of rows (no autograd)."""
+    import torch
+
+    f = X[:, a_idx]
+    d = f.sub_(X[:, b_idx]).norm(dim=-1)
+    del f
+    w, g = _pair_terms(rt, d)
+    val = w.sum(-1)
+    del w
+    return val, torch.where(d > 0, g / d.clamp(min=1e-30), 0.0)      # norm's gradient is 0 at d == 0
+
+
+def _q6_function():
+    import torch
+
+    class _Q6(torch.autograd.Function):
+        """(B,) Q6 sum with a hand-written backward: saves one (B, M) tensor (dw/dd / d) instead of the ~20
+        temporaries autograd keeps (D03, 16896 rows x 3456 pairs: 6.8 GB solve peak, 75 % of it here)."""
+
+        @staticmethod
+        def forward(ctx, X, rt_box, a_idx, b_idx):
+            rt = rt_box[0]
+            B, M = X.shape[0], a_idx.shape[0]
+            step = _rows_per_chunk(M)
+            with torch.no_grad():
+                if step >= B:
+                    val, g = _q6_rows(rt, X, a_idx, b_idx)
+                else:                       # row blocks: the (rows, M, 3) temporaries stay bounded
+                    val = X.new_empty(B)
+                    g = X.new_empty(B, M)
+                    for s in range(0, B, step):
+                        val[s:s + step], g[s:s + step] = _q6_rows(rt, X[s:s + step], a_idx, b_idx)
+            ctx.save_for_backward(X, g, a_idx, b_idx)
+            ctx.rt = rt
+            return val
+
+        @staticmethod
+        def backward(ctx, grad_out):
+            X, g, a_idx, b_idx = ctx.saved_tensors
+            if torch.is_grad_enabled():   # create_graph=True (curvature step sizes): a differentiable backward
+                v = _evaluate_autograd(ctx.rt, X, a_idx, b_idx)
+                return torch.autograd.grad(v, X, grad_out, create_graph=True)[0], None, None, None
+            with torch.no_grad():
+                B = X.shape[0]
+                step = _rows_per_chunk(a_idx.shape[0])
+                gx = torch.zeros_like(X)
+                for s in range(0, B, step):
+                    Xs = X[s:s + step]
+                    f = Xs[:, a_idx]
+                    f.sub_(Xs[:, b_idx]).mul_((grad_out[s:s + step, None] * g[s:s + step])[..., None])
+                    gx[s:s + step].index_add_(1, a_idx, f).index_add_(1, b_idx, f.neg_())
+                    del f
+            return gx, None, None, None
+
+    return _Q6
+
+
+_Q6FN = None
+
+
+def evaluate(rt, X, a_idx, b_idx):
+    """(B,) sum over Q6 pairs of purely repulsive penalty w >= 0 (kT)."""
+    import torch
+
+    global _Q6FN
+    if _Q6FN is None:
+        _Q6FN = _q6_function()
+    return _Q6FN.apply(X, [rt], a_idx, b_idx)

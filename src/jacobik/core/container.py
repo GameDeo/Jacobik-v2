@@ -324,191 +324,107 @@ def encode_lossless(
     return arrays
 
 
+def _merged_map(arrays: Dict[str, Any], q: str, has_merged: bool) -> Dict[int, int]:
+    if not has_merged:
+        return {}
+    return {int(i): int(v) for i, v in zip(arrays[f"{q}_merged_from_idx"], arrays[f"{q}_merged_from_val"])}
+
+
+class QuantityRows:
+    """Row decoder for one quantity of a container: ``rows(i)`` is the entry dict of key ``rows.keys[i]``.
+
+    One decoder serves both reads: decode_lossless calls it for every row (columns converted to lists once), and
+    stats.load_db calls it for the rows a solve looks up (columns kept as arrays). A plain class, so it pickles."""
+
+    def __init__(self, arrays: Dict[str, Any], q: str, info: Dict[str, Any], as_lists: bool) -> None:
+        self.q, self.info = q, info
+        self.keys = bytes(arrays[f"{q}_keys"]).decode("utf-8").split("\n")
+        self.n = np.asarray(arrays[f"{q}_n"])
+        self.merged = _merged_map(arrays, q, bool(info.get("has_merged_from")))
+        self.ref = (arrays[f"{q}_ref_ll"], arrays[f"{q}_ref_sd"]) if info.get("has_ref") else None
+        if q in ("Q1", "Q2", "Q3", "Q4"):
+            names = ["n", "n_eff", "k", "means", "means_off", "vars", "vars_off", "weights", "weights_off"]
+            names += [f for f, flag in (("pooled", "has_pooled"), ("src", "has_src"), ("nu", "has_nu")) if info.get(flag)]
+        elif q == "Q5":
+            names = ["n", "n_eff", "k", "tail", "model", "means", "means_off", "kappas", "kappas_off", "weights",
+                     "weights_off"]
+        elif q == "Q6":
+            names = ["n", "k", "mu", "sigma", "model"]
+        else:  # QO
+            names = ["n", "weights", "weights_off", "means_flat", "covs_flat"]
+            shapes = np.asarray(info["means_shapes"], dtype=np.int64).reshape(-1, 2)
+            kd = shapes[:, 0] * shapes[:, 1]
+            self.shapes = shapes.tolist()
+            self.m_off = np.concatenate([[0], np.cumsum(kd)]).tolist()
+            self.c_off = np.concatenate([[0], np.cumsum(kd * shapes[:, 1])]).tolist()
+            self.extra = info.get("extra_list") or [{"meta": m} for m in info.get("meta_list", [])]
+            as_lists = False
+        self.col = {f: (arrays[f"{q}_{f}"].tolist() if as_lists else arrays[f"{q}_{f}"]) for f in names}
+
+    def __len__(self) -> int:
+        return len(self.keys)
+
+    def __call__(self, i: int) -> Dict[str, Any]:
+        c, q, info = self.col, self.q, self.info
+
+        def ragged(f):
+            v = c[f][c[f + "_off"][i]: c[f + "_off"][i + 1]]
+            return v if isinstance(v, list) else v.tolist()
+
+        if q == "Q6":
+            d = {"type": "halfgauss", "n": int(c["n"][i]), "k": int(c["k"][i]),
+                 "mu": float(c["mu"][i]), "sigma": float(c["sigma"][i])}
+            if c["model"][i] > 0:
+                d["model"] = info["model_vocab"][c["model"][i]]
+            return d
+        if q == "QO":
+            (k_val, d_val), m0, c0 = self.shapes[i], self.m_off[i], self.c_off[i]
+            d = {"type": "mvgmm", "n": int(c["n"][i]), "weights": ragged("weights"),
+                 "means": c["means_flat"][m0: self.m_off[i + 1]].reshape((k_val, d_val)).tolist(),
+                 "covs": c["covs_flat"][c0: self.c_off[i + 1]].reshape((k_val, d_val, d_val)).tolist()}
+            if i < len(self.extra):
+                d.update(self.extra[i])
+            return d
+        if q == "Q5":
+            d = {"type": "vmm", "n": int(c["n"][i]), "means": ragged("means"), "kappas": ragged("kappas"),
+                 "weights": ragged("weights"), "k": int(c["k"][i]), "tail": float(c["tail"][i]),
+                 "model": info["model_vocab"][c["model"][i]], "n_eff": float(c["n_eff"][i])}
+        else:
+            d = {"type": info["type"], "n": int(c["n"][i]), "means": ragged("means"), "vars": ragged("vars"),
+                 "weights": ragged("weights"), "k": int(c["k"][i]), "n_eff": float(c["n_eff"][i])}
+            if "pooled" in c:
+                d["pooled"] = bool(c["pooled"][i])
+            if "src" in c:
+                d["src"] = info.get("src_vocab", [])[c["src"][i]]
+            if "nu" in c:
+                d["nu"] = float(c["nu"][i])
+        if i in self.merged:
+            d["merged_from"] = self.merged[i]
+        if self.ref is not None and not np.isnan(ll := self.ref[0][i]):
+            d["ref_ll"], d["ref_sd"] = float(ll), float(self.ref[1][i])
+        return d
+
+
+def quantity_rows(arrays: Dict[str, Any], as_lists: bool = False) -> Tuple[Dict[str, "QuantityRows"], Dict[str, Any]]:
+    """({quantity: QuantityRows}, header) of a container's arrays, in the container's quantity order."""
+    header = json.loads(bytes(arrays["header_json"]).decode("utf-8"))
+    rows = {}
+    for q in ("Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "QO"):
+        info = header["quantities"].get(q)
+        if info and info["count"] > 0:
+            rows[q] = QuantityRows(arrays, q, info, as_lists)
+    return rows, header
+
+
 def decode_lossless(arrays: Dict[str, Any]) -> Dict[str, Any]:
     """Rebuild the exact DB dictionary from arrays dict without pickle."""
-    header = json.loads(bytes(arrays["header_json"]).decode("utf-8"))
+    rows, header = quantity_rows(arrays, as_lists=True)
     rebuilt: Dict[str, Any] = {}
-
-    # Decode Q1, Q2, Q3, Q4
-    for q in ["Q1", "Q2", "Q3", "Q4"]:
-        if q not in header["quantities"]:
-            continue
-        info = header["quantities"][q]
-        N = info["count"]
-        if N == 0:
-            continue
-        keys = bytes(arrays[f"{q}_keys"]).decode("utf-8").split("\n")
-        type_str = info["type"]
-        has_pooled = info.get("has_pooled", False)
-        has_src = info.get("has_src", False)
-        src_vocab = info.get("src_vocab", [])
-        has_nu = info["has_nu"]
-        has_merged = info["has_merged_from"]
-
-        n_arr = arrays[f"{q}_n"]
-        n_eff_arr = arrays[f"{q}_n_eff"]
-        k_arr = arrays[f"{q}_k"]
-        if has_pooled:
-            pooled_arr = arrays[f"{q}_pooled"]
-        if has_src:
-            src_arr = arrays[f"{q}_src"]
-
-        if has_nu:
-            nu_arr = arrays[f"{q}_nu"]
-        if has_merged:
-            m_idx = arrays[f"{q}_merged_from_idx"]
-            m_val = arrays[f"{q}_merged_from_val"]
-            merged_map = {int(idx): int(val) for idx, val in zip(m_idx, m_val)}
-        else:
-            merged_map = {}
-
-        means_arr = arrays[f"{q}_means"]
-        means_off = arrays[f"{q}_means_off"]
-        vars_arr = arrays[f"{q}_vars"]
-        vars_off = arrays[f"{q}_vars_off"]
-        weights_arr = arrays[f"{q}_weights"]
-        weights_off = arrays[f"{q}_weights_off"]
-
-        for i, k_str in enumerate(keys):
-            d = {
-                "type": type_str,
-                "n": int(n_arr[i]),
-                "means": means_arr[means_off[i] : means_off[i + 1]].tolist(),
-                "vars": vars_arr[vars_off[i] : vars_off[i + 1]].tolist(),
-                "weights": weights_arr[weights_off[i] : weights_off[i + 1]].tolist(),
-                "k": int(k_arr[i]),
-                "n_eff": float(n_eff_arr[i]),
-            }
-            if has_pooled:
-                d["pooled"] = bool(pooled_arr[i])
-            if has_src:
-                d["src"] = src_vocab[src_arr[i]]
-            if has_nu:
-                d["nu"] = float(nu_arr[i])
-            if i in merged_map:
-                d["merged_from"] = merged_map[i]
-            if info.get("has_ref"):
-                _add_ref(d, arrays, q, i)
-            rebuilt[k_str] = d
-
-    # Q5: vmm
-    if "Q5" in header["quantities"]:
-        info = header["quantities"]["Q5"]
-        N = info["count"]
-        if N > 0:
-            keys = bytes(arrays["Q5_keys"]).decode("utf-8").split("\n")
-            model_vocab = info["model_vocab"]
-
-            n_arr = arrays["Q5_n"]
-            n_eff_arr = arrays["Q5_n_eff"]
-            k_arr = arrays["Q5_k"]
-            tail_arr = arrays["Q5_tail"]
-            model_arr = arrays["Q5_model"]
-
-            means_arr = arrays["Q5_means"]
-            means_off = arrays["Q5_means_off"]
-            kappas_arr = arrays["Q5_kappas"]
-            kappas_off = arrays["Q5_kappas_off"]
-            weights_arr = arrays["Q5_weights"]
-            weights_off = arrays["Q5_weights_off"]
-
-            if info.get("has_merged_from"):
-                m_idx = arrays["Q5_merged_from_idx"]
-                m_val = arrays["Q5_merged_from_val"]
-                merged_map = {int(idx): int(val) for idx, val in zip(m_idx, m_val)}
-            else:
-                merged_map = {}
-
-            for i, k_str in enumerate(keys):
-                d = {
-                    "type": "vmm",
-                    "n": int(n_arr[i]),
-                    "means": means_arr[means_off[i] : means_off[i + 1]].tolist(),
-                    "kappas": kappas_arr[kappas_off[i] : kappas_off[i + 1]].tolist(),
-                    "weights": weights_arr[weights_off[i] : weights_off[i + 1]].tolist(),
-                    "k": int(k_arr[i]),
-                    "tail": float(tail_arr[i]),
-                    "model": model_vocab[model_arr[i]],
-                    "n_eff": float(n_eff_arr[i]),
-                }
-                if i in merged_map:
-                    d["merged_from"] = merged_map[i]
-                if info.get("has_ref"):
-                    _add_ref(d, arrays, "Q5", i)
-                rebuilt[k_str] = d
-
-    # Q6: halfgauss
-    if "Q6" in header["quantities"]:
-        info = header["quantities"]["Q6"]
-        N = info["count"]
-        if N > 0:
-            keys = bytes(arrays["Q6_keys"]).decode("utf-8").split("\n")
-            model_vocab = info["model_vocab"]
-            n_arr = arrays["Q6_n"]
-            k_arr = arrays["Q6_k"]
-            mu_arr = arrays["Q6_mu"]
-            sigma_arr = arrays["Q6_sigma"]
-            model_arr = arrays["Q6_model"]
-
-            for i, k_str in enumerate(keys):
-                d = {
-                    "type": "halfgauss",
-                    "n": int(n_arr[i]),
-                    "k": int(k_arr[i]),
-                    "mu": float(mu_arr[i]),
-                    "sigma": float(sigma_arr[i]),
-                }
-                m_idx = model_arr[i]
-                if m_idx > 0:
-                    d["model"] = model_vocab[m_idx]
-                rebuilt[k_str] = d
-
-    # QO: mvgmm
-    if "QO" in header["quantities"]:
-        info = header["quantities"]["QO"]
-        N = info["count"]
-        if N > 0:
-            keys = bytes(arrays["QO_keys"]).decode("utf-8").split("\n")
-            n_arr = arrays["QO_n"]
-            weights_arr = arrays["QO_weights"]
-            weights_off = arrays["QO_weights_off"]
-            means_flat = arrays["QO_means_flat"]
-            covs_flat = arrays["QO_covs_flat"]
-
-            means_shapes = info["means_shapes"]
-            covs_shapes = info["covs_shapes"]
-            extra_list = info.get("extra_list", [])
-            if not extra_list and "meta_list" in info:
-                extra_list = [{"meta": m} for m in info["meta_list"]]
-
-            m_pos = 0
-            c_pos = 0
-            for i, k_str in enumerate(keys):
-                k_val, d_val = means_shapes[i]
-                m_len = k_val * d_val
-                m_sub = means_flat[m_pos : m_pos + m_len].reshape((k_val, d_val)).tolist()
-                m_pos += m_len
-
-                c_len = k_val * d_val * d_val
-                c_sub = covs_flat[c_pos : c_pos + c_len].reshape((k_val, d_val, d_val)).tolist()
-                c_pos += c_len
-
-                d = {
-                    "type": "mvgmm",
-                    "n": int(n_arr[i]),
-                    "weights": weights_arr[weights_off[i] : weights_off[i + 1]].tolist(),
-                    "means": m_sub,
-                    "covs": c_sub,
-                }
-                if i < len(extra_list):
-                    d.update(extra_list[i])
-                rebuilt[k_str] = d
-
-    # Small quantities
-    for sq, entries in header.get("small_quantities", {}).items():
-        for k_str, e in entries.items():
-            rebuilt[k_str] = e
-
+    for r in rows.values():
+        for i, k_str in enumerate(r.keys):
+            rebuilt[k_str] = r(i)
+    for entries in header.get("small_quantities", {}).values():
+        rebuilt.update(entries)
     return rebuilt
 
 
@@ -524,6 +440,16 @@ def save_lossless_npz(
     arrays = encode_lossless(db_dict, float_dtype=float_dtype, header_meta=header_meta)
     np.savez_compressed(out_path, **arrays)
     return out_path.stat().st_size
+
+
+def open_lossless_npz(npz_path: Union[str, Path]) -> Tuple[Dict[str, "QuantityRows"], Dict[str, Any], Dict[str, Any]]:
+    """(row decoders, small entries, header meta) of an npz container, without decoding any row (stats.load_db)."""
+    with np.load(Path(npz_path), allow_pickle=False) as loaded:
+        rows, header = quantity_rows({k: loaded[k] for k in loaded.files})
+    small: Dict[str, Any] = {}
+    for entries in header.get("small_quantities", {}).values():
+        small.update(entries)
+    return rows, small, header.get("meta", {})
 
 
 def load_lossless_npz(npz_path: Union[str, Path]) -> Tuple[Dict[str, Any], Dict[str, Any]]:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import contextlib
 from typing import Dict, List, Optional, Tuple
@@ -75,6 +75,7 @@ def attach_solver_state(conformers, thetas, bend) -> None:
         c.solver_state = {"thetas": [h[b].copy() for h in host], "bend_prior": float(bend[b])}
 
 
+
 @dataclass
 class ConformerResult:
     """One conformer from the ensemble."""
@@ -95,6 +96,12 @@ class ConformerResult:
     mirror_of: Optional[int] = None  # out_mirror: trial row this row is the reflection of
     ring_state: Optional[str] = None  # ring_states: start pucker per ligand ("L0:chair/twist"); a descriptor, not a class
     config_derived: bool = False  # config_remote: derived from a solved class by a local remote-element inversion
+    #: EnsembleResult.relax: the MACE relaxation of this row (level, energy_kj, energy0_kj, released_kj, fmax_ev_A,
+    #: n_eval, converged, reason, dE_class_kj); the row's coordinates are then the relaxed ones. None = unrelaxed
+    relaxation: Optional[dict] = None
+    #: the settle stage's optimizer state for this row (core.relax.OptState, profile flag relax_carry); the final
+    #: relaxation continues from it while the coordinates are unchanged. Not part of any output
+    opt_state: Optional[object] = field(default=None, repr=False, compare=False)
 
     def descriptors(self) -> dict:
         """The row's class tuple and descriptors (plain types, for pool files)."""
@@ -135,6 +142,8 @@ class EnsembleResult:
     scorer: Optional[object] = None
     assignment_search: Optional[Dict[str, object]] = None
     failure: Optional[str] = None
+    #: wall seconds per pipeline stage of the generate() call that made this result (jacobik.core.timing)
+    timings: Optional[Dict[str, float]] = None
 
     @property
     def best(self) -> Optional[ConformerResult]:
@@ -189,11 +198,110 @@ class EnsembleResult:
 
     def to_records(self) -> List[dict]:
         """One plain dict per conformer in rank order (for a table or a DataFrame): rank, score, delta_nats, converged,
-        class id and the row descriptors."""
+        class id and the row descriptors (plus the relaxation record after relax())."""
         ids = self.class_ids()
         return [dict(rank=int(c.rank), score=float(c.score), delta_nats=self.delta_nats(c), converged=bool(c.converged),
-                     class_id=ids.get(c.class_label), **c.descriptors())
+                     class_id=ids.get(c.class_label), **c.descriptors(),
+                     **({"relaxation": dict(c.relaxation)} if c.relaxation else {}))
                 for c in sorted(self.conformers, key=lambda c: c.rank)]
+
+    def relax(self, level: str = "normal", *, rerank: bool = False, device: str = "auto", dtype: str = "float32",
+              fmax: Optional[float] = None, max_steps: Optional[int] = None, max_batch_atoms: Optional[int] = None,
+              relaxer=None, binding: str = "keep", top: Optional[int] = None,
+              etol: Optional[float] = None) -> "EnsembleResult":
+        """MACE-POLAR relaxation of every conformer in batched passes (jacobik.core.relax; needs the ``mace`` extra).
+
+        level: "loose" (fmax 0.15 eV/A, clears strain, keeps the basin), "normal" (0.05) or "tight" (0.01; use
+        dtype="float64" for converged energies); fmax / max_steps override the level. etol (kJ/mol, None = off): a row
+        also stops, as converged with reason "energy", once its energy fell by less than etol over the last 5
+        evaluations (core.relax.ETOL_WINDOW): energies to about etol, without the long tail of small force steps. Returns a new EnsembleResult
+        whose rows carry the relaxed coordinates and a ``relaxation`` record (energies in kJ/mol; dE_class_kj = energy
+        above the lowest relaxed row of the same class). rerank=True orders rows by relaxed energy within each class
+        and classes by their lowest row; otherwise the solver ranks are kept. A row whose relaxation fails keeps its
+        last good geometry and says why in its record (never raised). Pass a MACERelaxer as ``relaxer`` to reuse a
+        loaded model across ensembles.
+
+        binding: "keep" (default) relaxes inside the requested binding mode (declared donors stay bound, no new metal
+        contacts; strain inside the mode is fully removed; rows that only keep the mode under the hold are flagged in
+        relaxation["binding"]["held"]); "free" is unconstrained and reports contact changes (builder.binding).
+
+        top: relax only the ``top`` best-ranked rows of every configuration class (class_label) and return only those
+        (None: every row); every class the solver found keeps at least one row. With the settle stage the ranking
+        already puts each class's lowest settled row first, so a small ``top`` relaxes the best candidates at a fraction
+        of the cost. Without ``relaxer``, the process's relaxer for (device, dtype, max_batch_atoms) is used
+        (core.relax.shared: the settle stage's when the settings agree; the model loads once)."""
+        import copy
+        from dataclasses import replace as _replace
+
+        from jacobik.core.relax import EV_TO_KJ_MOL, shared
+
+        if not self.conformers:
+            return self
+        if relaxer is None:
+            relaxer = shared(device, dtype, max_batch_atoms=max_batch_atoms)
+        rx = relaxer
+        rows = sorted(self.conformers, key=lambda c: c.rank)
+        if top is not None:                      # the top best-ranked rows of every configuration class
+            if int(top) < 1:
+                raise ValueError("top must be >= 1 or None")
+            seen: Dict[object, int] = {}
+            kept = []
+            for c in rows:
+                n = seen.get(c.class_label, 0)
+                if n < int(top):
+                    kept.append(c)
+                    seen[c.class_label] = n + 1
+            rows = kept
+        structs = [([a.symbol for a in c.complex.atoms], np.array([a.position for a in c.complex.atoms], float),
+                    int(c.complex.charge), int(c.complex.spin_state)) for c in rows]
+        from jacobik.builder import binding as _binding
+
+        if binding not in ("keep", "free"):
+            raise ValueError(f"binding must be 'keep' or 'free', not {binding!r}")
+        rs = None
+        if binding == "keep":
+            rs = []
+            for c, s in zip(rows, structs):
+                try:
+                    rs.append(_binding.keep_restraints(c.complex, s[1]))
+                except Exception:                                  # never fail the batch: that row runs free
+                    rs.append(None)
+            if not any(r is not None for r in rs):
+                rs = None
+        warm = [c.opt_state for c in rows]
+        recs = rx.relax(structs, level=level, fmax=fmax, max_steps=max_steps, restraints=rs, etol=etol,
+                        warm=warm if any(w is not None for w in warm) else None)
+        out = []
+        for k, (c, r) in enumerate(zip(rows, recs)):
+            mol = copy.deepcopy(c.complex)
+            for a, x in zip(mol.atoms, r.positions):
+                a.position = np.asarray(x, dtype=float)
+            out.append(_replace(c, complex=mol, opt_state=None, relaxation=dict(
+                level=level, energy_kj=r.energy_ev * EV_TO_KJ_MOL, energy0_kj=r.energy0_ev * EV_TO_KJ_MOL,
+                released_kj=r.released_kj, fmax_ev_A=r.fmax, n_eval=r.n_eval, converged=r.converged, reason=r.reason)))
+            try:
+                out[-1].relaxation["binding"] = dict(_binding.report(c.complex, structs[k][1], r.positions,
+                                                                     rs[k] if rs is not None else None), policy=binding)
+            except Exception:
+                out[-1].relaxation["binding"] = dict(policy=binding)
+        best = {}
+        for c in out:
+            e = c.relaxation["energy_kj"]
+            if np.isfinite(e):
+                best[c.class_label] = min(best.get(c.class_label, e), e)
+        for c in out:
+            b = best.get(c.class_label)
+            c.relaxation["dE_class_kj"] = (c.relaxation["energy_kj"] - b) if b is not None else float("nan")
+        if rerank:
+            key = lambda c: c.relaxation["energy_kj"] if np.isfinite(c.relaxation["energy_kj"]) else float("inf")
+            cls_best = {}
+            for c in out:
+                cls_best[c.class_label] = min(cls_best.get(c.class_label, float("inf")), key(c))
+            out.sort(key=lambda c: (cls_best[c.class_label], c.class_label or "", key(c)))
+            out = [_replace(c, rank=i) for i, c in enumerate(out, start=1)]
+        res = _replace(self, conformers=out)
+        res.relax_stats = dict(rx.stats)
+        return res
 
     def write_xyz(self, path: str | Path, by_class: bool = False) -> List[Path]:
         """Write the ensemble as multi-frame XYZ, rows in rank order. One file at `path`, or with by_class=True one
@@ -206,6 +314,10 @@ class EnsembleResult:
             dn = self.delta_nats(c)
             extra = "" if dn is None else f" delta_nats={dn:.2f}"
             refl = "" if c.mirror_of is None else " reflected=1"
+            if c.relaxation:
+                r = c.relaxation
+                refl += (f" E_kj={r['energy_kj']:.2f} dE_class_kj={r.get('dE_class_kj', float('nan')):.2f}"
+                         f" relax={r['level']}:{'converged' if r['converged'] else r['reason']}")
             return c.xyz_block(f"rank={c.rank} score={c.score:.4f}{extra} class={ids.get(c.class_label)}{refl} label={c.class_label}")
         written = []
         if by_class:

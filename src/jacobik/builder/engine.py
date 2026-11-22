@@ -18,6 +18,7 @@ import importlib.util
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
@@ -101,6 +102,23 @@ _GFN2_BOND_CHECK_CACHE: Dict[tuple, dict] = {}
 
 
 _POOL_TARGET = 16  # distinct good ring folds wanted
+#: v1.0b: macrocycle ring conformers embedded around a virtual metal (profile field macro_template)
+MACRO_TEMPLATE = _profile.get("macro_template")
+#: v1.0b: refinement of the macrocycle pool conformers: None = free-ligand MMFF only, "gfn2" = then GFN2 like the embed
+MACRO_POOL_REFINE = _profile.get("macro_pool_refine")
+#: v1.0b: every macrocycle ranks its ring pool by all in-ring donor sites (kappa rays + haptic face normals,
+#: beam._donor_face_convergence), not only rings with >= 3 sp3 ring nitrogens
+MACRO_POOL_RANK = _profile.get("macro_pool_rank")
+MACRO_HAPTIC_FILTER = bool(_profile.get("macro_haptic_filter"))
+_HAPTIC_SITE_R = 2.05   # A from a haptic face centroid to the metal (eta2 olefin ~2.0-2.1)
+_HAPTIC_SITE_TOL = 2.5  # A: largest spread of the faces' metal sites a fold may have (free COD: tub 1.1-1.6, chair 3.5)
+#: v1.0b: embed refinement on the MACE surface, batched over every embed of a call (builder.mace_embed): None = GFN2
+#: (production), "mace" = the GFN2 semantics (free ligand, Li caps, donor-donor holds) on MACE
+EMBED_REFINE = _profile.get("embed_refine")
+#: v1.0b: GFN2 embed Li counter-ion caps never coincide (embed._spread_li_caps)
+LI_CAP_SPREAD = _profile.get("li_cap_spread")
+#: v1.0b: xtb --opt level of the GFN2 embed refinement ("crude" = production)
+EMBED_GFN2_OPT = _profile.get("embed_gfn2_opt")
 _POOL_RANDOM_COORDS = False
 _POOL_BATCH = 32  # conformers embedded per batch before re-checking
 _POOL_GOOD = 2.0  # lone-pair convergence score counted as "good"
@@ -135,6 +153,7 @@ from jacobik.builder.result import (  # noqa: E402,F401
 from jacobik.builder.embed import (  # noqa: E402,F401
     _bond_refinement_violations,
     _embed_etkdg_with_retries,
+    _embed_refine,
     _gfn2_refine,
     pop_embed_bond_check_events,
 )
@@ -308,6 +327,8 @@ class ComplexBuilder(_ConfigsPrepMixin, _ConfigsBatchedMixin, _AssignmentMixin, 
         out_window: Optional[float] = None,
         dedup_rmsd: Optional[float] = None,
         dedup_max_dev: Optional[float] = None,
+        settle_steps: Optional[int] = None,
+        settle_top: Optional[int] = None,
     ) -> EnsembleResult:
         """
         Solve for a conformer ensemble.
@@ -388,6 +409,13 @@ class ComplexBuilder(_ConfigsPrepMixin, _ConfigsBatchedMixin, _AssignmentMixin, 
                            RMSD is at most this many Angstrom (default 0.5, profile field ``dedup_rmsd``).
         dedup_max_dev    : optional maximum per-atom heavy deviation threshold in Angstrom (default 0.0 = off,
                            profile field ``dedup_max_dev``).
+        settle_steps     : k > 0 adds the settle stage (builder.settle): a candidate pool settle_pool x the requested
+                           size, k batched MACE-POLAR steps with metal-donor distances held, dedup, then per-class
+                           output by settled energy (needs the mace extra). Default: profile field settle_steps.
+        settle_top       : with the settle stage, settle and return only the k rows of each configuration class with the
+                           lowest MACE energy at the solver geometry (one evaluation per row picks them; the score is
+                           a worse pick, builder.settle). Default None: every row (k = 8-12 keeps the class leaders at
+                           a third to half of the settle cost).
         The five options out_per_class_k, out_per_class_window, out_window, dedup_rmsd and dedup_max_dev are process-wide
         module settings that this call sets for its own duration and restores afterwards (not thread-safe for concurrent
         solves with different values). Left at None they change nothing.
@@ -396,6 +424,35 @@ class ComplexBuilder(_ConfigsPrepMixin, _ConfigsBatchedMixin, _AssignmentMixin, 
         -------
         EnsembleResult with conformers sorted best to worst by score.
         """
+        from jacobik.builder import mace_embed
+        from jacobik.builder import settle as _settle_mod
+
+        mace_embed.set_context(device)  # every embed refinement below (prefetches of every class path) on this device
+        _settle_k = _settle_mod.SETTLE_STEPS if settle_steps is None else int(settle_steps)
+        if settle_top is not None and int(settle_top) < 1:
+            raise ValueError("settle_top must be >= 1 or None")
+        if _settle_k > 0 and not getattr(self, "_settle_inner", False):
+            import inspect
+
+            _loc = locals()
+            _kw = {k: _loc[k] for k in inspect.signature(ComplexBuilder.solve).parameters
+                   if k not in ("self", "settle_steps", "settle_top")}
+            _opc = self.out_per_class if out_per_class is None else out_per_class
+            if _opc is None:
+                _opc = OUT_PER_CLASS
+            _k_pc = (out_per_class_k or OUT_PER_CLASS_K) if _opc else None
+            if _settle_mod.SETTLE_POOL > 1.0:              # enlarge a cap; no cap (the window limits) stays none
+                if _opc:
+                    _kw["out_per_class_k"] = _settle_mod.enlarged(_k_pc, _settle_mod.SETTLE_POOL)
+                if n_conformers is not None:
+                    _kw["n_conformers"] = _settle_mod.enlarged(n_conformers, _settle_mod.SETTLE_POOL)
+            self._settle_inner = True
+            try:
+                _res = self.solve(**_kw)
+            finally:
+                self._settle_inner = False
+            return _settle_mod.settle(_res, _settle_k, device=str(device), pool=_settle_mod.SETTLE_POOL,
+                                      dedup_rmsd=dedup_rmsd, n_request=n_conformers, per_class=_k_pc, top=settle_top)
         _opts = {k: v for k, v in (
             ("out_per_class_k", out_per_class_k),
             ("out_per_class_window", out_per_class_window),
@@ -517,6 +574,12 @@ class ComplexBuilder(_ConfigsPrepMixin, _ConfigsBatchedMixin, _AssignmentMixin, 
             np.random.seed(seed)
 
         stats = self._load_stats(constraints_db, stats, shannon=shannon)
+        if EMBED_REFINE and not getattr(self, "_capture_prep", False):
+            with mace_embed.collecting():  # every ligand of this shell refined in one MACE batch
+                try:
+                    self._build_shell(fast_embed, False, embed_seed=embed_seed, chelate_embed=chelate_embed, embed=embed)
+                except Exception as exc:
+                    log.debug("embed prefetch failed (%s)", exc)
         try:
             mol, rdmols, donor_idx_full = self._build_shell(
                 fast_embed, debug, embed_seed=embed_seed, chelate_embed=chelate_embed, embed=embed
@@ -565,7 +628,37 @@ class ComplexBuilder(_ConfigsPrepMixin, _ConfigsBatchedMixin, _AssignmentMixin, 
         if use_symmetry_enumeration and not fully_explicit:
             candidates = self._run_symmetry_enumeration(ctx, assignment, debug, embed_aware=embed_aware_dedup)
 
-        return self._solve_for_assignments(ctx, candidates, beam_width, n_ik_steps)
+        return self._solve_degrading(ctx, candidates, beam_width, n_ik_steps)
+
+    def _solve_degrading(self, ctx, candidates, beam_width, n_ik_steps):
+        """_solve_for_assignments; on CUDA out of memory the batch (candidates x beam_width x n_coord_samples rows) is
+        re-solved with beam width and coordinate samples halved, down to 1 x 1, then with the baseline assignment
+        alone: the generator degrades instead of failing (challenge_D03, 1488 assignments x 16 x 8 rows, 2026-11-20).
+        Batches that fit are untouched."""
+        import dataclasses
+
+        bw, cands, cur = int(beam_width), list(candidates), ctx
+        while True:
+            try:
+                return self._solve_for_assignments(cur, cands, bw, n_ik_steps)
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+                if not isinstance(exc, torch.cuda.OutOfMemoryError) and "out of memory" not in str(exc):
+                    raise
+                M = int(cur.n_coord_samples or 1)
+                if bw > 1 or M > 1:
+                    nbw, nM = max(1, bw // 2), max(1, M // 2)
+                elif len(cands) > 1:
+                    nbw, nM, cands = bw, M, cands[:1]
+                else:
+                    raise
+                log.warning("joint IK batch out of GPU memory (%d assignments x beam %d x %d samples); retrying with "
+                            "%d x %d x %d", len(candidates), bw, M, len(cands), nbw, nM)
+            import gc
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            bw, cur = nbw, dataclasses.replace(cur, n_coord_samples=nM)
 
 
 _LIGAND_LIBRARY_CACHE: Dict[Path, object] = {}
@@ -665,13 +758,20 @@ def generate(
     constraints_db: str | Path | None = None,
     device: str = "auto",
     check_env: bool = True,
+    relax: Optional[str] = None,
+    relax_binding: str = "keep",
+    relax_top: Optional[int] = None,
+    relax_etol: Optional[float] = None,
     **solve_kwargs,
 ) -> EnsembleResult:
     """High-level single-call conformer ensemble generator.
 
     Validates runtime environment (``xtb`` when ``embed='gfn2'`` and constraints DB unless
     ``stats=`` is passed), resolves ``device='auto'``, builds a ``ComplexBuilder``, and
-    returns ``builder.solve(...)``.
+    returns ``builder.solve(...)``. ``relax="loose"|"normal"|"tight"`` then relaxes every row with MACE-POLAR
+    (EnsembleResult.relax; needs the ``mace`` extra); ``relax_top=k`` relaxes and returns only the k best-ranked rows of each configuration class; ``relax_etol``
+    (kJ/mol) adds the energy stop of EnsembleResult.relax(etol=...).
+    ``settle_top=k`` (a solve option) settles only the k lowest-energy rows of each class (ComplexBuilder.solve).
     """
     norm_ligands = _normalize_ligands(ligands)
     if check_env:
@@ -693,4 +793,12 @@ def generate(
         stereo_enum=solve_kwargs.get("stereo_enum"),
         out_per_class=solve_kwargs.get("out_per_class"),
     )
-    return builder.solve(constraints_db=constraints_db, device=resolved_device, **solve_kwargs)
+    from jacobik.core import timing
+
+    timing.reset()
+    t0 = time.perf_counter()
+    res = builder.solve(constraints_db=constraints_db, device=resolved_device, **solve_kwargs)
+    if relax:
+        res = res.relax(level=relax, device=str(resolved_device), binding=relax_binding, top=relax_top, etol=relax_etol)
+    res.timings = dict(timing.snapshot(), total=round(time.perf_counter() - t0, 3))
+    return res

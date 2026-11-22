@@ -1,19 +1,22 @@
-# environment and caches
+# Only the published tree is tracked: source, docs, interface and the top-level project files below.
+# Everything else (development tree, data, agent notes, editor state) stays local.
+/*
+!/.gitignore
+!/src/
+!/docs/
+!/interface/
+!/ARCHITECTURE.md
+!/LICENSE
+!/PERFORMANCE.md
+!/README.md
+!/pixi.lock
+!/pixi.toml
+!/pyproject.toml
+!/requirements.txt
+
+# environments and caches
 .pixi/
 __pycache__/
 *.pyc
 .pytest_cache/
 .ipynb_checkpoints/
-
-# data: inputs, refit outputs, pools, energies (archived separately, see ARCHITECTURE.md)
-/data
-/research
-/dev
-
-# IDE and local editor state
-.claude/
-AGENTS.md
-GEMINI.md
-CLAUDE.md
-CHANGELOG.md
-

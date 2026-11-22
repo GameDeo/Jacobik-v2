@@ -137,15 +137,16 @@ def default_db_path() -> Optional[Path]:
     return None
 
 
-def _default_mace_model() -> Path:
+def _default_mace_model() -> Optional[Path]:
     env = os.environ.get("JACOBIK_MACE_MODEL")
     if env:
         return Path(env)
     base = REPO_ROOT if REPO_ROOT is not None else Path.cwd()
-    return base / "research" / "bench" / "tools" / "jdev" / "MACE-POLAR-1-S.model"
+    local = base / "research" / "bench" / "tools" / "jdev" / "MACE-POLAR-1-S.model"
+    return local if local.is_file() else None   # None: the official release file is downloaded to ~/.cache/mace on first use
 
 
-#: the MACE-POLAR-1-S model file of the energy benchmark (``JACOBIK_MACE_MODEL`` overrides)
+#: a local MACE-POLAR-1-S model file (``JACOBIK_MACE_MODEL`` overrides); None when there is none (the weights are not part of the repository)
 MACE_MODEL_PATH = _default_mace_model()
 
 

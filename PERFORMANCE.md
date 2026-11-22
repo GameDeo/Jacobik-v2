@@ -1,4 +1,61 @@
-# Jacobik Performance Report (`v1.0a`)
+# Jacobik Performance Report (`v1.0b`)
+
+Benchmark record for Jacobik `v1.0b` (fingerprint `1e4cde06304f`), in both builds: PyTorch (`v1.0b`) and GPU (`v1.0b-gpu`, CuPy + Triton). The previous release (`v1.0a`, `2c87e2940af2`) is the comparison baseline; its report follows below. Paths into `research/` (campaign records) refer to the maintainers' development tree, which is not part of this repository.
+
+## 1. Setup
+
+| Field | Value |
+|---|---|
+| Panel | 120 unlocked `cal`+`tail` parents (5 locked `tail` parents excluded), seeds `11, 12, 13` (360 units) |
+| Hardware | One shared NVIDIA A100-SXM4-40GB per job (Perlmutter), 3 parallel lanes with MPS, 5 min per-parent cap |
+| Jobs | v1.0b GPU build `61754061`; v1.0b PyTorch build `61752192` (6 parents rerun in `61754061` after a benchmark-harness fix); v1.0a `61628515` (same panel, seeds and GPU type) |
+| Statistics DB | `constraints_2026-11-12.npz` (packaged default; identical in all arms) |
+| Energies | MACE-POLAR-1-S single points relative to the GFN2-relaxed crystal reference ($\Delta E = E_{\text{row}} - E_{\text{ref}}$, kJ/mol) |
+| Coverage (A4c) | GFN2-xTB relaxation (200 cycles) of up to 5 class-aware rows per unit and of the reference, MACE energies, class-aware basin match (jobs `61756764`, `61758485`) |
+| Statistics | Paired per unit; 95% parent-clustered bootstrap CIs |
+
+## 2. Robustness
+
+| | v1.0a | v1.0b PyTorch | v1.0b GPU |
+|---|---|---|---|
+| Parents with every unit solved | 111 / 120 | **120 / 120** | **120 / 120** |
+| Failures | `NEPNEF`, `UYOVUA` (GFN2 embed failure), `QEZVEY` (timeout); 6 parents not evaluated (harness fault) | none | none |
+| Timeouts | 1 | 0 | 0 |
+
+## 3. Energy of the delivered rows (111 parents solved by all three)
+
+| Metric | v1.0a | v1.0b PyTorch | v1.0b GPU |
+|---|---|---|---|
+| Top-1 $\Delta E$ median (kJ/mol) | 44.45 | **-19.06** | **-18.26** |
+| Top-1 $\Delta E \le 5$ kJ/mol | 0.051 | **0.877** | **0.889** |
+| Floor $\Delta E \le 5$ kJ/mol | 0.108 | **0.961** | **0.964** |
+| Top-1 $\Delta E > 200$ kJ/mol | 0.030 | **0** | **0** |
+
+v1.0b returns settled rows (10 MACE-POLAR steps, donors held), v1.0a raw solver rows; negative $\Delta E$ means below the MACE energy of the GFN2-relaxed reference geometry. GPU vs PyTorch build on all 120 parents: top-1 $\Delta E$ median difference `+0.08 [-0.03, +0.29]` kJ/mol, floor `+0.03 [-0.06, +0.14]`.
+
+## 4. Coverage after relaxation (A4c, 111 parents / 333 units)
+
+| Bucket | v1.0a | v1.0b PyTorch | Diff `[95% CI]` | v1.0b GPU | Diff `[95% CI]` |
+|---|---|---|---|---|---|
+| `C-TOP1` (top-1 is the reference basin) | 0.414 | **0.505** | `+0.090 [+0.036, +0.144]` | **0.495** | `+0.081 [+0.033, +0.129]` |
+| `C-RANK` (basin found, ranked lower) | 0.360 | 0.393 | `+0.033 [-0.036, +0.105]` | 0.384 | `+0.024 [-0.039, +0.087]` |
+| `C-MISS` (basin not found) | 0.225 | **0.102** | `-0.123 [-0.171, -0.078]` | **0.120** | `-0.105 [-0.153, -0.063]` |
+
+GPU vs PyTorch build on all 120 parents (360 units): `C-MISS` `0.136` vs `0.128`, difference `+0.008 [-0.022, +0.039]`; `C-TOP1` difference `-0.003 [-0.036, +0.031]`. Unrelaxed nearest row to the crystal: median 0.570 A (v1.0a), 0.472 A (PyTorch), 0.482 A (GPU).
+
+## 5. Speed (wall per parent, 3 seeds, one shared A100)
+
+| | v1.0a | v1.0b PyTorch | v1.0b GPU |
+|---|---|---|---|
+| Median (111 common parents) | 10.6 s | 24.3 s | **3.3 s** |
+| Median (all 120 parents) | - | 25.1 s | **3.5 s** |
+| Panel total (all 120 parents) | - | 3972 s | **723 s** |
+
+GPU vs PyTorch build: median ratio **6.3x** (p10 4.0x, p90 9.4x), panel total 5.5x. GPU build vs v1.0a: median 3.3x. The PyTorch build is slower than v1.0a because v1.0b adds the MACE embed refinement and settle. Constraints DB load: 5.5 s -> 0.44 s (entries decoded on first use).
+
+---
+
+# Previous release: Jacobik Performance Report (`v1.0a`)
 
 Production benchmark record for Jacobik `v1.0a` (P2R fold-in onto `master`), compiled from the fresh-seed paired Perlmutter fold-in gate (`research/campaigns/p2r/FOLDIN_GATE_CONTRACT.md`) and associated DS database curvature verification (`research/archive/docs/ds/DS_GATE_RESULTS.md`).
 

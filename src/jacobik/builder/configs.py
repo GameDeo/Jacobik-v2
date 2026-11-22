@@ -296,6 +296,29 @@ class _ConfigsPrepMixin:
                 lig.chiral_fix = lig_fixes[li]["chiral"] or None
                 lig._strict_stereo = True
 
+    def _prefetch_embeds(self, variants, elements, kw, mode) -> None:
+        """embed_refine: one collect pass over every class's shell build, so the ligand embeds of all classes are refined
+        in ONE batched MACE optimisation (builder.mace_embed); the class preparations then read them from its cache."""
+        from jacobik.builder import mace_embed
+
+        try:
+            with mace_embed.collecting():
+                for v in variants:
+                    if mode != "ez" and not getattr(v, "feasible", True):
+                        continue
+                    if mode == "ez":
+                        for lig, f in zip(self.ligands, v):
+                            lig.ez_fix = f
+                    else:
+                        self._set_variant_fixes(v, elements)
+                    try:
+                        self._build_shell(kw.get("fast_embed", False), False, embed_seed=kw.get("embed_seed"),
+                                          chelate_embed=kw.get("chelate_embed", True), embed=kw.get("embed"))
+                    except Exception as exc:  # the class's own preparation reports it
+                        _e().log.debug("embed prefetch: class shell failed (%s)", exc)
+        finally:
+            self._clear_variant_fixes()
+
     def _clear_variant_fixes(self) -> None:
         for lig in self.ligands:
             lig.ez_fix = None
@@ -424,6 +447,8 @@ class _ConfigsBatchedMixin:
         preps, failures = [], []
         inner_attr = "_ez_inner" if mode == "ez" else "_stereo_inner"
         t0 = __import__("time").perf_counter()
+        if _e().EMBED_REFINE:
+            self._prefetch_embeds(variants, elements, kw, mode)
         try:
             setattr(self, inner_attr, True)
             for vi, v in enumerate(variants):
@@ -634,8 +659,11 @@ class _ConfigsBatchedMixin:
                 rs, ks, ts, nr = run_group(g)
                 add(rs, ks)
             except torch.cuda.OutOfMemoryError:
-                if len(g) == 1:
-                    raise
+                if len(g) == 1:   # one class too large for a batch: its own solve, which degrades (engine._solve_degrading)
+                    _e().log.warning("config_states: class %d alone is out of GPU memory; solved on its own", g[0]["vi"])
+                    torch.cuda.empty_cache()
+                    singles.append(g[0])
+                    continue
                 _e().log.warning("config_states: %d-class batch out of GPU memory; classes solved one batch each", len(g))
                 torch.cuda.empty_cache()
                 ts, nr = 0.0, 0

@@ -47,6 +47,11 @@ _BO_THRESHOLD: float = 0.5
 # Production resolved configuration (hardcoded values)
 _SMALL_RING_OPEN_ADJ = True
 
+from jacobik.core import profile as _profile  # noqa: E402
+
+#: v1.0b: macrocycles get the opening-adjacent joints too (profile field macro_open_adj)
+MACRO_OPEN_ADJ = _profile.get("macro_open_adj")
+
 
 def _build_pos_map(mol: "TMComplex") -> Dict[int, int]:
     """atom.idx (1-based CSD) → position index (0-based in mol.atoms)."""
@@ -702,7 +707,14 @@ class ForwardKinematics(_FKEvalMixin):
             def _single(u, v):
                 return abs(_bo.get((min(u, v), max(u, v)), 1.0) - 1.0) < 0.25
 
-            from jacobik.topology.decompose import _RING_JOINT_MIN_SIZE, RING_JOINTS
+            def _pi(x):
+                return any(not _single(x, y) for y in Gl.neighbors(x))
+
+            def _conj(u, v):
+                lp = lambda x: atom_map[x].symbol in ("N", "O", "S")
+                return (_pi(u) and (_pi(v) or lp(v))) or (_pi(v) and (_pi(u) or lp(u)))
+
+            from jacobik.topology.decompose import _RING_JOINT_MIN_SIZE, MACRO_FUSED, RING_JOINTS
             min_n = _RING_JOINT_MIN_SIZE if RING_JOINTS else 8
             # bends this ligand gets (angle_bends): (fixed points, moved atoms) of each, to choose a ring opening no
             # bend disturbs
@@ -745,6 +757,20 @@ class ForwardKinematics(_FKEvalMixin):
                         S = {u, v} | set(Gl.neighbors(u)) | set(Gl.neighbors(v))
                         return all(not (S & mv) or (S - fx) <= mv for fx, mv in _bend_moves)
                     anchor = next((q for q in cands if _undisturbed(q)), None)
+                shared = set()
+                if MACRO_FUSED:
+                    # bonds this ring shares with another ring stay rigid and never open it
+                    for cyc in nx.minimum_cycle_basis(Gl):
+                        if set(cyc) != ring_set:
+                            cs = set(cyc)
+                            shared |= {(min(a, b), max(a, b)) for a, b in Gl.subgraph(cs).edges()}
+                    def _opens(q):
+                        u, v = ring[(q + na) % n], ring[(q + na + 1) % n]
+                        return _single(u, v) and (min(u, v), max(u, v)) not in shared
+                    # keep a bend-safe opening when there is one; else the first anchor whose opening is unshared
+                    if anchor is None or not _opens(anchor):
+                        anchor = next((q for q in cands if _opens(q) and (not _bend_moves or _undisturbed(q))),
+                                      next((q for q in cands if _opens(q)), None))
                 if anchor is None:
                     anchor = next((q for q in cands if _single(ring[(q + na) % n], ring[(q + na + 1) % n])), None)
                 if anchor is None:
@@ -760,19 +786,38 @@ class ForwardKinematics(_FKEvalMixin):
                 # torsion stays at its embed value and a 6-8 ring has no closure-preserving freedom left, so the ring
                 # is locked in its seed fold (COD 2026-09-30: the bound tub unreachable from the free twist-boat).
                 small = n < 8 or not all(_single(ring[q], ring[(q + 1) % n]) for q in range(n))
-                last = 1 if (small and _SMALL_RING_OPEN_ADJ) else 2
+                last = 1 if ((small and _SMALL_RING_OPEN_ADJ) or MACRO_OPEN_ADJ) else 2
                 for arm in (arm_a, arm_b):
                     js: List[Tuple[int, int, int, int]] = []
                     for m in range(len(arm) - last):
                         j_at, k_at = arm[m], arm[m + 1]
                         if not _single(j_at, k_at):
                             continue  # a double bond in the ring stays rigid (no torsion joint)
+                        if MACRO_FUSED:
+                            if (min(j_at, k_at), max(j_at, k_at)) in shared:
+                                continue  # fused bond: rigid
+                            if _conj(j_at, k_at):
+                                continue  # conjugated single bond (amide, aryl-N, aryl-C=O): planar, rigid
+                            H_ = Gl.copy()
+                            H_.remove_edge(j_at, k_at)
+                            H_.remove_edge(cl_u, cl_v)
+                            if nx.has_path(H_, j_at, k_at):
+                                continue  # not a torsion of the opened ring (another path joins its ends)
                         fi = ring[(ring.index(j_at) - 1) % n]
                         if fi == k_at:
                             fi = ring[(ring.index(j_at) + 1) % n]
                         fl = ring[(ring.index(k_at) - 1) % n]
                         if fl == j_at:
                             fl = ring[(ring.index(k_at) + 1) % n]
+                        if MACRO_OPEN_ADJ and not small and {k_at, fl} == {cl_u, cl_v}:
+                            # the joint into an opening atom: its ring neighbour across the opening sits on the other
+                            # arm, so measuring the dihedral to it couples this joint to every joint of that arm (the
+                            # analytic closure Jacobian was off by up to 0.8 A/rad, 2026-11-20); use a substituent
+                            # of the opening atom instead, which moves rigidly with this joint
+                            subs = sorted(x for x in Gl.neighbors(k_at) if x not in (j_at, cl_u, cl_v))
+                            if not subs:
+                                continue
+                            fl = subs[0]
                         js.append((fi, j_at, k_at, fl))
                     arm_joints.append(js)
                 # Interleave the arms so nested (outer) joints follow inner ones.

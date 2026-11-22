@@ -9,9 +9,13 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
 
 from jacobik.core.chemistry import Q6_FALLBACK_DEFAULT_RADIUS, Q6_FALLBACK_RADII, TRANSITION_METALS
 
@@ -120,9 +124,108 @@ class ConstraintDB:
         return {q: len(v) for q, v in self.data.items()}
 
 
+_KEY_TOKEN = re.compile(r"'([^'\\]*)'|(-?\d+)|(None)|(True)|(False)")
+_KEY_LITERALS = {"None": None, "True": True, "False": False}
+
+
+def _parse_key(key_repr: str):
+    """The tuple a DB key string spells (as ast.literal_eval would), parsed without the compiler.
+
+    Keys are flat tuples of quoted strings, integers, None and booleans. The token parse is accepted only when the
+    tuple's own repr reproduces the string exactly; anything else goes to ast.literal_eval. 420k keys: 0.4 s instead
+    of 4 s."""
+    if key_repr.startswith("(") and key_repr.endswith(")"):
+        vals = []
+        for s, i, *lit in _KEY_TOKEN.findall(key_repr):
+            if s or (not i and not any(lit)):
+                vals.append(s)
+            elif i:
+                vals.append(int(i))
+            else:
+                vals.append(_KEY_LITERALS[next(x for x in lit if x)])
+        t = tuple(vals)
+        if repr(t) == key_repr:
+            return t
+    return ast.literal_eval(key_repr)
+
+
+def _fitted(entry: dict) -> FittedDist:
+    """The FittedDist of one DB entry (its fallback level is the entry's 'level' field, else 0)."""
+    return FittedDist(
+        type=entry["type"], n=int(entry.get("n", 0)), level=int(entry.get("level", 0)),
+        means=entry.get("means"), vars=entry.get("vars"), kappas=entry.get("kappas"), weights=entry.get("weights"),
+        mu=entry.get("mu"), sigma=entry.get("sigma"), covs=entry.get("covs"), feats=entry.get("feats"),
+        per_sub=entry.get("per_sub"), ref_ll=entry.get("ref_ll"), ref_sd=entry.get("ref_sd"), nu=entry.get("nu"),
+        pooled=bool(entry.get("pooled", False)), n_eff=entry.get("n_eff"),
+    )
+
+
+_PLAIN_KEY_TYPES = (str, int, bool, type(None))
+
+
+def _key_repr(key) -> str:
+    """The canonical string of a lookup key, as the container stores keys (numpy scalars read as Python ones)."""
+    if type(key) is not tuple:
+        key = (key,)
+    if not all(type(x) in _PLAIN_KEY_TYPES for x in key):
+        key = tuple(x.item() if isinstance(x, np.generic) else x for x in key)
+    return repr(key)
+
+
+class _LazyTable(Mapping):
+    """One quantity of an .npz DB, read on demand.
+
+    Loading builds only a key-string -> row index (0.1 s for the 420k entries); an entry is decoded into its
+    FittedDist the first time it is looked up, and lookups (hits and misses) are memoised. A solve reads a few
+    thousand entries, so a load costs about 1 s and 0.2 GB instead of 5.5 s and 2 GB. Keys are matched by their
+    canonical repr, the form the fit writes them in; iteration parses keys only when asked."""
+
+    def __init__(self, quantity: str, rows, n_min: int) -> None:
+        off = len(quantity) + 1                     # stored keys are "Q1:('Fe', ...)"
+        keep = np.flatnonzero(rows.n >= n_min).tolist()
+        self._rows = rows
+        self._index = {rows.keys[i][off:]: i for i in keep}
+        self._memo: Dict[object, Optional[FittedDist]] = {}
+        self._parsed: Optional[list] = None
+
+    def get(self, key, default=None):
+        try:
+            fd = self._memo[key]
+        except KeyError:
+            i = self._index.get(_key_repr(key))
+            fd = self._memo[key] = None if i is None else _fitted(self._rows(i))
+        return default if fd is None else fd
+
+    def __getitem__(self, key) -> FittedDist:
+        fd = self.get(key)
+        if fd is None:
+            raise KeyError(key)
+        return fd
+
+    def __contains__(self, key) -> bool:
+        return self.get(key) is not None
+
+    def __len__(self) -> int:
+        return len(self._index)
+
+    def __iter__(self):
+        if self._parsed is None:
+            self._parsed = [k if isinstance(k := _parse_key(s), tuple) else (k,) for s in self._index]
+        return iter(self._parsed)
+
+
+#: load_db results by (resolved path, mtime_ns, size, n_min): a ConstraintDB is read-only after loading, and a solve
+#: of several configuration classes, or a script calling generate() repeatedly, otherwise re-reads the 28 MB
+#: container each time (about 8 s per read).
+_DB_CACHE: Dict[tuple, "ConstraintDB"] = {}
+
+
 def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> ConstraintDB:
     """
     Load a constraints DB (.npz container or constraints.json) from disk and return a ConstraintDB.
+
+    Loads of the same file (same resolved path, size and modification time, no explicit ``meta``) return the cached
+    ConstraintDB of the first load.
 
 
     Parameters
@@ -141,6 +244,34 @@ def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> Constrain
         path = default_db_path()
         if path is None:
             raise FileNotFoundError("Constraints DB not found (pass path=..., or set JACOBIK_DB)")
+    cache_key = None
+    if isinstance(path, (str, Path)) and meta is None:
+        try:
+            p_res = Path(path).resolve()
+            st_ = p_res.stat()
+
+            def _side(q):  # a sidecar the load reads beside the path as given: its state is part of the key
+                try:
+                    s = q.stat()
+                    return (s.st_mtime_ns, s.st_size)
+                except OSError:
+                    return None
+
+            pg = Path(path)
+            cache_key = (str(pg), str(p_res), st_.st_mtime_ns, st_.st_size, int(n_min),
+                         _side(pg.with_suffix(".bends.json")), _side(pg.with_name(pg.stem + ".meta.json")))
+        except OSError:
+            cache_key = None
+        if cache_key is not None and cache_key in _DB_CACHE:
+            return _DB_CACHE[cache_key]
+    db = _load_db_uncached(path, n_min, meta)
+    if cache_key is not None:
+        _DB_CACHE[cache_key] = db
+    return db
+
+
+def _load_db_uncached(path, n_min: int, meta: Optional[dict]) -> ConstraintDB:
+    lazy_rows: dict = {}
     if isinstance(path, dict):
         raw: dict = path
         path = None
@@ -148,14 +279,11 @@ def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> Constrain
         if isinstance(path, (str, Path)):
             path = Path(path)
         if str(path).endswith(".npz"):
-            from jacobik.core.container import load_lossless_npz
-            res = load_lossless_npz(path)
-            if isinstance(res, tuple):
-                raw, npz_meta = res
-                if meta is None and npz_meta:
-                    meta = npz_meta
-            else:
-                raw = res
+            from jacobik.core.container import open_lossless_npz
+
+            lazy_rows, raw, npz_meta = open_lossless_npz(path)
+            if meta is None and npz_meta:
+                meta = npz_meta
         else:
             with path.open("r", encoding="utf-8") as fh:
                 raw = json.load(fh)
@@ -184,7 +312,7 @@ def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> Constrain
             # B2.5 hypothesis-layer priors: categorical {labels, p, n}; Q6P = Q6 potential-of-mean-force tables
             # (stats/q6.py, 2026-10-14); kept as plain dicts
             try:
-                kt = ast.literal_eval(key_repr)
+                kt = _parse_key(key_repr)
             except (ValueError, SyntaxError):
                 continue
             cats.setdefault(quantity, {})[kt if isinstance(kt, tuple) else (kt,)] = entry
@@ -199,7 +327,7 @@ def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> Constrain
             continue
 
         try:
-            key_tuple = ast.literal_eval(key_repr)
+            key_tuple = _parse_key(key_repr)
         except (ValueError, SyntaxError) as exc:
             log.warning("Failed to parse key %r: %s", key_repr, exc)
             continue
@@ -209,33 +337,14 @@ def load_db(path=None, n_min: int = 1, meta: Optional[dict] = None) -> Constrain
             # non-tuples indicate a format error.
             key_tuple = (key_tuple,)
 
-        # Determine fallback level from the number of elements in the key
-        # relative to the L0 key for this quantity.  The fitter doesn't
-        # store the level explicitly in all versions — derive it from context.
-        # Use the 'level' field if present, else 0.
-        level = int(entry.get("level", 0))
-
-        fd = FittedDist(
-            type=entry["type"],
-            n=n_obs,
-            level=level,
-            means=entry.get("means"),
-            vars=entry.get("vars"),
-            kappas=entry.get("kappas"),
-            weights=entry.get("weights"),
-            mu=entry.get("mu"),
-            sigma=entry.get("sigma"),
-            covs=entry.get("covs"),
-            feats=entry.get("feats"),
-            per_sub=entry.get("per_sub"),
-            ref_ll=entry.get("ref_ll"),
-            ref_sd=entry.get("ref_sd"),
-            nu=entry.get("nu"),
-            pooled=bool(entry.get("pooled", False)),
-            n_eff=entry.get("n_eff"),
-        )
-        data[quantity][key_tuple] = fd
+        data[quantity][key_tuple] = _fitted(entry)
         n_loaded += 1
+
+    for quantity, rows in lazy_rows.items():
+        if quantity in data:
+            table = data[quantity] = _LazyTable(quantity, rows, n_min)
+            n_loaded += len(table)
+            n_skipped += len(rows) - len(table)
 
     log.info(
         "Loaded %d distributions from %s (%d skipped, n < %d)",

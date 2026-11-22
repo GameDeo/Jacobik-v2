@@ -31,10 +31,12 @@ import os
 import logging
 from collections import OrderedDict
 import itertools
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+
+from jacobik.core import timing
 
 from jacobik.core import profile
 from jacobik.core.env import torch_device
@@ -45,6 +47,148 @@ log = logging.getLogger(__name__)
 DEDUP_FACTORED = profile.get("dedup_factored")
 DEDUP_RMSD = profile.get("dedup_rmsd")
 DEDUP_MAX_DEV = profile.get("dedup_max_dev")
+#: v1.0b speed: closed-form Kabsch (QCP) in the factored match instead of batched 3x3 SVDs
+DEDUP_QCP = profile.get("dedup_qcp")
+#: v1.0b speed (2026-11-20): on capped automorphism groups the factored match decides alone and its core-start scan
+#: runs on the GPU when one is available. On 15 capped parents (QEZVEY, GOTWET, HEDJOP, XAQCAT, ...) the capped-map
+#: scan (_full_any over the first MAX_AUTOMORPHISMS automorphisms) found no duplicate the factored match missed, yet
+#: took half the dedup time. Fewer than 36 core starts is NOT safe: 4 starts missed 5 of 108 duplicates on XAQCAT
+#: (symmetric cores: many donor permutations fit the core equally well).
+DEDUP_CAPPED_FAST = profile.get("dedup_capped_fast")
+#: fast path: after the first alternating round only starts with RMSD <= _ROUND0_CUT * th are refined further (every
+#: duplicate on the 15 capped parents had a start within 1.0 * th after round 0)
+_ROUND0_CUT = 1.5
+#: fast path: starts whose nearest-same-class-atom RMSD at the start rotation exceeds _SCREEN_CUT * th are dropped
+#: before the first round (duplicates on the 15 capped parents: at most 1.75 * th; about 99 % of distinct starts above)
+_SCREEN_CUT = 2.5
+
+
+def _det3(m):
+    return (m[..., 0, 0] * (m[..., 1, 1] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 1])
+            - m[..., 0, 1] * (m[..., 1, 0] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 0])
+            + m[..., 0, 2] * (m[..., 1, 0] * m[..., 2, 1] - m[..., 1, 1] * m[..., 2, 0]))
+
+
+def _kabsch_qcp(H: np.ndarray, rot: bool = False):
+    """Kabsch of correlation matrices H = sum_i q_i k_i^T (..., 3, 3) without SVD: returns (sv, R) with
+    sv = s1 + s2 + sign(det H) s3 (so msd = (|q|^2 + |k|^2 - 2 sv) / n) and, if rot, the proper rotation R with
+    q @ R ~ k (= U diag(1, 1, d) Vt). sv is the top eigenvalue of Horn's 4x4 key matrix found by Newton on its
+    characteristic polynomial (Theobald 2005, QCP), R from its eigenvector (an adjugate column). Elementwise
+    numpy: about 7x (sv) / 3x (sv + R) faster than numpy's batched SVD, agreeing to 1e-12. Entries where Newton
+    has not converged (near-degenerate H: collinear points) are redone by SVD."""
+    H = np.asarray(H, dtype=np.float64)
+    Sxx, Sxy, Sxz = H[..., 0, 0], H[..., 0, 1], H[..., 0, 2]
+    Syx, Syy, Syz = H[..., 1, 0], H[..., 1, 1], H[..., 1, 2]
+    Szx, Szy, Szz = H[..., 2, 0], H[..., 2, 1], H[..., 2, 2]
+    K = np.stack([
+        np.stack([Sxx + Syy + Szz, Syz - Szy, Szx - Sxz, Sxy - Syx], -1),
+        np.stack([Syz - Szy, Sxx - Syy - Szz, Sxy + Syx, Szx + Sxz], -1),
+        np.stack([Szx - Sxz, Sxy + Syx, -Sxx + Syy - Szz, Syz + Szy], -1),
+        np.stack([Sxy - Syx, Szx + Sxz, Syz + Szy, -Sxx - Syy + Szz], -1)], -2)
+    K2 = K @ K
+    tr2 = np.trace(K2, axis1=-2, axis2=-1)
+    tr3 = np.einsum("...ij,...ji->...", K2, K)
+    tr4 = np.einsum("...ij,...ji->...", K2, K2)
+    c2, c1, c0 = -tr2 / 2.0, -tr3 / 3.0, (tr2 ** 2 - 2.0 * tr4) / 8.0
+    lam = np.sqrt(np.maximum(3.0 * (H * H).sum((-1, -2)), 0.0))      # >= s1 + s2 + s3: Newton descends to the top root
+    scale = np.maximum(lam, 1e-300)
+    ok = np.zeros(lam.shape, bool)
+    for _ in range(50):
+        l2 = lam * lam
+        p = (l2 + c2) * l2 + c1 * lam + c0
+        dp = (4.0 * l2 + 2.0 * c2) * lam + c1
+        step = np.where(dp != 0, p / np.where(dp == 0, 1.0, dp), 0.0)
+        lam = lam - step
+        ok = np.abs(step) <= 1e-12 * scale
+        if ok.all():
+            break
+    R = None
+    if rot:
+        M = K - lam[..., None, None] * np.eye(4)
+        rest = [[j for j in range(4) if j != i] for i in range(4)]
+        best = bn = None
+        for c in range(4):
+            col = np.stack([((-1) ** (r + c)) * _det3(M[..., rest[c], :][..., :, rest[r]]) for r in range(4)], -1)
+            nrm = (col * col).sum(-1)
+            if best is None:
+                best, bn = col, nrm
+            else:
+                sel = nrm > bn
+                best = np.where(sel[..., None], col, best)
+                bn = np.where(sel, nrm, bn)
+        ok = ok & (bn > 1e-20 * scale ** 6)
+        qv = best / np.sqrt(np.maximum(bn, 1e-300))[..., None]
+        a, b, c, d = qv[..., 0], qv[..., 1], qv[..., 2], qv[..., 3]
+        R = np.stack([
+            np.stack([a * a + b * b - c * c - d * d, 2 * (b * c + a * d), 2 * (b * d - a * c)], -1),
+            np.stack([2 * (b * c - a * d), a * a - b * b + c * c - d * d, 2 * (c * d + a * b)], -1),
+            np.stack([2 * (b * d + a * c), 2 * (c * d - a * b), a * a - b * b - c * c + d * d], -1)], -2)
+    if not ok.all():
+        bad = ~ok
+        U, S, Vt = np.linalg.svd(H[bad])
+        ds = np.sign(np.linalg.det(U @ Vt))
+        lam[bad] = S[..., 0] + S[..., 1] + ds * S[..., 2]
+        if rot:
+            U[..., :, 2] *= ds[..., None]
+            R[bad] = U @ Vt
+    return lam, R
+def _kabsch_qcp_torch(H: torch.Tensor):
+    """torch port of _kabsch_qcp(H, rot=True) (float64, any device): (sv, R) with q @ R ~ k; SVD where Newton has not
+    converged or the adjugate column is degenerate."""
+    Sxx, Sxy, Sxz = H[..., 0, 0], H[..., 0, 1], H[..., 0, 2]
+    Syx, Syy, Syz = H[..., 1, 0], H[..., 1, 1], H[..., 1, 2]
+    Szx, Szy, Szz = H[..., 2, 0], H[..., 2, 1], H[..., 2, 2]
+    K = torch.stack([
+        torch.stack([Sxx + Syy + Szz, Syz - Szy, Szx - Sxz, Sxy - Syx], -1),
+        torch.stack([Syz - Szy, Sxx - Syy - Szz, Sxy + Syx, Szx + Sxz], -1),
+        torch.stack([Szx - Sxz, Sxy + Syx, -Sxx + Syy - Szz, Syz + Szy], -1),
+        torch.stack([Sxy - Syx, Szx + Sxz, Syz + Szy, -Sxx - Syy + Szz], -1)], -2)
+    K2 = K @ K
+    tr2 = K2.diagonal(dim1=-2, dim2=-1).sum(-1)
+    tr3 = (K2 * K.transpose(-1, -2)).sum((-1, -2))
+    tr4 = (K2 * K2.transpose(-1, -2)).sum((-1, -2))
+    c2, c1, c0 = -tr2 / 2.0, -tr3 / 3.0, (tr2 ** 2 - 2.0 * tr4) / 8.0
+    lam = (3.0 * (H * H).sum((-1, -2))).clamp(min=0.0).sqrt()
+    scale = lam.clamp(min=1e-300)
+    ok = torch.zeros_like(lam, dtype=torch.bool)
+    for _ in range(50):
+        l2 = lam * lam
+        p = (l2 + c2) * l2 + c1 * lam + c0
+        dp = (4.0 * l2 + 2.0 * c2) * lam + c1
+        step = torch.where(dp != 0, p / torch.where(dp == 0, torch.ones_like(dp), dp), torch.zeros_like(dp))
+        lam = lam - step
+        ok = step.abs() <= 1e-12 * scale
+        if bool(ok.all()):
+            break
+    M = K - lam[..., None, None] * torch.eye(4, dtype=H.dtype, device=H.device)
+    rest = [[j for j in range(4) if j != i] for i in range(4)]
+    best = bn = None
+    for c in range(4):
+        col = torch.stack([((-1) ** (r + c)) * _det3(M[..., rest[c], :][..., :, rest[r]]) for r in range(4)], -1)
+        nrm = (col * col).sum(-1)
+        if best is None:
+            best, bn = col, nrm
+        else:
+            sel = nrm > bn
+            best = torch.where(sel[..., None], col, best)
+            bn = torch.where(sel, nrm, bn)
+    ok = ok & (bn > 1e-20 * scale ** 6)
+    qv = best / bn.clamp(min=1e-300).sqrt()[..., None]
+    a, b, c, d = qv[..., 0], qv[..., 1], qv[..., 2], qv[..., 3]
+    R = torch.stack([
+        torch.stack([a * a + b * b - c * c - d * d, 2 * (b * c + a * d), 2 * (b * d - a * c)], -1),
+        torch.stack([2 * (b * c - a * d), a * a - b * b + c * c - d * d, 2 * (c * d + a * b)], -1),
+        torch.stack([2 * (b * d + a * c), 2 * (c * d - a * b), a * a - b * b - c * c + d * d], -1)], -2)
+    if not bool(ok.all()):
+        bad = ~ok
+        U, S, Vt = torch.linalg.svd(H[bad])
+        ds = torch.sign(torch.linalg.det(U @ Vt))
+        lam = lam.clone(); R = R.clone()
+        lam[bad] = S[..., 0] + S[..., 1] + ds * S[..., 2]
+        U = U.clone(); U[..., :, 2] *= ds[..., None]
+        R[bad] = U @ Vt
+    return lam, R
+
 OUT_DEDUP = True
 MAX_AUTOMORPHISMS = 20000
 #: Where the RMSD work of the dedup runs for a CUDA solve: "cpu" (default) or "solver" (on the solver's GPU; same
@@ -277,18 +421,25 @@ class _FactoredDedupMixin:
         Ac = K_core - K_core.mean(1, keepdims=True)
         q_cp = q[cp]
         Bc = q_cp - q_cp.mean(1, keepdims=True)
-        H0_core = np.einsum("kni,pnj->pkij", Bc, Ac)
-        Uc, Sc, Vtc = np.linalg.svd(H0_core)
-        dc = np.sign(np.linalg.det(np.einsum("pkij,pkjl->pkil", Uc, Vtc)))
-        sv = Sc[..., 0] + Sc[..., 1] + dc * Sc[..., 2]
-        msd = ((Ac ** 2).sum((-1, -2))[:, None] + (Bc ** 2).sum((-1, -2))[None] - 2.0 * sv) / nc
-        core_rmsd = np.sqrt(np.maximum(msd, 0.0))
+        fast = DEDUP_CAPPED_FAST and self.is_capped
+        core_rmsd = self._core_rmsd_gpu(Ac, Bc) if fast else None
+        if core_rmsd is None:
+            H0_core = np.einsum("kni,pnj->pkij", Bc, Ac)
+            if DEDUP_QCP:
+                sv = _kabsch_qcp(H0_core)[0]
+            else:
+                Uc, Sc, Vtc = np.linalg.svd(H0_core)
+                dc = np.sign(np.linalg.det(np.einsum("pkij,pkjl->pkil", Uc, Vtc)))
+                sv = Sc[..., 0] + Sc[..., 1] + dc * Sc[..., 2]
+            msd = ((Ac ** 2).sum((-1, -2))[:, None] + (Bc ** 2).sum((-1, -2))[None] - 2.0 * sv) / nc
+            core_rmsd = np.sqrt(np.maximum(msd, 0.0))
         max_core_th = th * np.sqrt(n / nc) + 0.25
 
+        n_starts = 36
         order = np.argsort(core_rmsd, axis=1)
         sorted_vals = np.take_along_axis(core_rmsd, order, axis=1)
-        order36 = order[:, :36]
-        cnt = (sorted_vals[:, :36] <= max_core_th).sum(1)
+        order36 = order[:, :n_starts]
+        cnt = (sorted_vals[:, :n_starts] <= max_core_th).sum(1)
         pidx_l, sidx_l = [], []
         k_fallback = min(2, order.shape[1])
         for p_ in range(P):
@@ -309,10 +460,28 @@ class _FactoredDedupMixin:
         Kc_m = Kc_s.mean(1, keepdims=True)
         Qp_m = Qp_s.mean(1, keepdims=True)
         H0 = (Qp_s - Qp_m).swapaxes(1, 2) @ (Kc_s - Kc_m)
-        U0, _, Vt0 = np.linalg.svd(H0)
-        d0 = np.sign(np.linalg.det(U0 @ Vt0))
-        U0[:, :, 2] *= d0[:, None]
-        Bt = (q[None] - Qp_m) @ (U0 @ Vt0) + Kc_m
+        if DEDUP_QCP:
+            R0 = _kabsch_qcp(H0, rot=True)[1]
+        else:
+            U0, _, Vt0 = np.linalg.svd(H0)
+            d0 = np.sign(np.linalg.det(U0 @ Vt0))
+            U0[:, :, 2] *= d0[:, None]
+            R0 = U0 @ Vt0
+        Bt = (q[None] - Qp_m) @ R0 + Kc_m
+        if fast and len(pidx):
+            # screen at the start rotation: every atom to its nearest same-class atom (no assignment, no refit);
+            # starts above _SCREEN_CUT * th never reach a round (duplicates on 15 capped parents: <= 1.75 * th)
+            sing = np.array([g[0] for g in self.groups if len(g) == 1], dtype=int)
+            d2 = ((Ks[:, sing] - Bt[:, sing]) ** 2).sum((-1, -2)) if len(sing) else np.zeros(len(pidx))
+            for gidx in self.groups:
+                if len(gidx) > 1:
+                    Ka, Bb = Ks[:, gidx], Bt[:, gidx]
+                    C = (Ka * Ka).sum(-1)[:, :, None] + (Bb * Bb).sum(-1)[:, None, :] - 2.0 * (Ka @ Bb.swapaxes(1, 2))
+                    d2 = d2 + np.maximum(C.min(2), 0.0).sum(1)
+            ok = d2 <= (_SCREEN_CUT * th) ** 2 * n
+            if not ok.all():
+                pidx, Ks, Bt = pidx[ok], Ks[ok], Bt[ok]
+                Sn = len(pidx)
 
         small_groups, large_groups = self._factored_groups()
         K_norm2 = (Ks * Ks).sum((-1, -2))
@@ -346,9 +515,12 @@ class _FactoredDedupMixin:
 
             Qn = q[new]
             H = Qn.swapaxes(1, 2) @ Ks
-            U, S_, Vt = np.linalg.svd(H)
-            ds = np.sign(np.linalg.det(U @ Vt))
-            sv = S_[:, 0] + S_[:, 1] + ds * S_[:, 2]
+            if DEDUP_QCP:
+                sv, Rall = _kabsch_qcp(H, rot=True)
+            else:
+                U, S_, Vt = np.linalg.svd(H)
+                ds = np.sign(np.linalg.det(U @ Vt))
+                sv = S_[:, 0] + S_[:, 1] + ds * S_[:, 2]
             rr = np.sqrt(np.maximum((K_norm2 + q_norm2 - 2.0 * sv) / n, 0.0))
             stable = (new == mp).all(1)
 
@@ -360,9 +532,12 @@ class _FactoredDedupMixin:
                         continue
                     m = new[s_idx]
                     if (adj[m][:, m] == adj).all():
-                        U_h = U[s_idx].copy()
-                        U_h[:, 2] *= ds[s_idx]
-                        Rh = U_h @ Vt[s_idx]
+                        if DEDUP_QCP:
+                            Rh = Rall[s_idx]
+                        else:
+                            U_h = U[s_idx].copy()
+                            U_h[:, 2] *= ds[s_idx]
+                            Rh = U_h @ Vt[s_idx]
                         md_h = float(np.sqrt(((Ks[s_idx] - q[m] @ Rh) ** 2).sum(-1).max()))
                         if max_dev_th > 0.0 and md_h > max_dev_th:
                             continue
@@ -373,6 +548,11 @@ class _FactoredDedupMixin:
                             return matched, first_hit
 
             keep_s = (~stable) & (~matched[pidx])
+            if fast and rnd == 0:
+                # the alternating fit never raises rr; every duplicate on 15 capped parents (about 650 pairs) had a
+                # start within th after round 0, distinct pairs mostly far above it: refine only starts within
+                # _ROUND0_CUT * th
+                keep_s &= rr <= _ROUND0_CUT * th
             if not keep_s.any():
                 break
             # Collapse starts on the same candidate that converged to identical permutations
@@ -385,9 +565,12 @@ class _FactoredDedupMixin:
                     else:
                         seen.add(key)
 
-            U_u = U[keep_s]
-            U_u[:, :, 2] *= ds[keep_s, None]
-            Rn = U_u @ Vt[keep_s]
+            if DEDUP_QCP:
+                Rn = Rall[keep_s]
+            else:
+                U_u = U[keep_s]
+                U_u[:, :, 2] *= ds[keep_s, None]
+                Rn = U_u @ Vt[keep_s]
             Bt = q[None] @ Rn
             pidx = pidx[keep_s]
             Ks = Ks[keep_s]
@@ -398,10 +581,293 @@ class _FactoredDedupMixin:
 
         return matched, first_hit
 
+    def _core_rmsd_gpu(self, Ac: np.ndarray, Bc: np.ndarray, budget: int = 1 << 21):
+        """Core RMSD of every candidate (Ac (P, nc, 3), centred) against every core permutation of the query
+        (Bc (Kp, nc, 3), centred) -> (P, Kp), on the GPU (float64, Horn's eigenvalue by Newton: _max_overlap, the same
+        quantity as _kabsch_qcp). None without CUDA or on any failure (the caller computes it on the CPU)."""
+        try:
+            if not (torch.cuda.is_available() and torch.cuda.is_initialized()):
+                return None  # CPU-only runs stay on the CPU (CUDA is initialised once the solver runs there)
+            dev = torch.device("cuda")
+            A = torch.as_tensor(Ac, dtype=torch.float64, device=dev)
+            B = torch.as_tensor(Bc, dtype=torch.float64, device=dev)
+            ga, gb = (A * A).sum((-1, -2)), (B * B).sum((-1, -2))
+            nc = max(1, A.shape[1])
+            out = []
+            step = max(1, budget // max(1, B.shape[0]))
+            for s in range(0, A.shape[0], step):
+                H = torch.einsum("kni,pnj->pkij", B, A[s:s + step])
+                bound = 0.5 * (ga[s:s + step, None] + gb[None])
+                sv = self._max_overlap(H, bound)
+                out.append(((ga[s:s + step, None] + gb[None] - 2.0 * sv) / nc).clamp(min=0.0).sqrt())
+            return torch.cat(out).cpu().numpy()
+        except Exception as exc:  # never fail the dedup: fall back to the CPU scan
+            log.debug("GPU core-start scan failed (%s); CPU scan", exc)
+            return None
+
+    def _factored_pairs(self, Xn: np.ndarray, Xg: torch.Tensor, qi: np.ndarray, kj: np.ndarray, th: float,
+                        max_dev_th: float = 0.0, budget: int = 1 << 21):
+        """The factored symmetric match (dedup_capped_fast form of _factored_match) for many (query, candidate) row
+        pairs at once: is row qi[p] a duplicate of row kj[p]? Xn (B, n, 3) centred rows (numpy float64), Xg the same
+        on the GPU. The core-start scan, the start rotations and the nearest-atom screen run on the GPU for all pairs
+        in chunks; the alternating rounds run on the CPU for the surviving starts of all pairs together. Returns
+        (matched (Pn,) bool, hits {pair: (rmsd, max_dev, perm)})."""
+        Pn = len(qi)
+        matched = np.zeros(Pn, bool)
+        hits: Dict[int, Tuple[float, float, np.ndarray]] = {}
+        if Pn == 0:
+            return matched, hits
+        dev = Xg.device
+        n = Xn.shape[1]
+        core = torch.as_tensor(np.asarray(self.core), device=dev, dtype=torch.long)
+        cp = torch.as_tensor(np.asarray(self.core_perms_arr), device=dev, dtype=torch.long)
+        Kp, nc = cp.shape[0], max(1, len(self.core))
+        Ac_all = Xg[:, core]
+        Ac_all = Ac_all - Ac_all.mean(1, keepdim=True)
+        gA = (Ac_all * Ac_all).sum((-1, -2))
+        max_core_th = th * np.sqrt(n / nc) + 0.25
+        n_starts = min(36, Kp)
+        k_fallback = min(2, Kp)
+        sing = torch.as_tensor([g[0] for g in self.groups if len(g) == 1], device=dev, dtype=torch.long)
+        multi = [torch.as_tensor(g, device=dev, dtype=torch.long) for g in self.groups if len(g) > 1]
+        scut2 = (_SCREEN_CUT * th) ** 2 * n
+        qi_t = torch.as_tensor(qi, device=dev, dtype=torch.long)
+        kj_t = torch.as_tensor(kj, device=dev, dtype=torch.long)
+        surv_p, surv_Bt = [], []
+        step = max(1, min(budget // max(1, Kp), (1 << 15) // n_starts))   # bounded (pair, perm) and (start, atom) work per chunk
+        for s0 in range(0, Pn, step):
+            qc, kc = qi_t[s0:s0 + step], kj_t[s0:s0 + step]
+            Bq = Xg[qc][:, cp]                                      # (c, Kp, nc, 3): query core under every core perm
+            Bq = Bq - Bq.mean(2, keepdim=True)
+            Ak = Ac_all[kc]                                         # (c, nc, 3)
+            H = torch.einsum("ckni,cnj->ckij", Bq, Ak)
+            gB = (Bq * Bq).sum((-1, -2))
+            ga = gA[kc][:, None]
+            sv = self._max_overlap(H, 0.5 * (ga + gB))
+            core_rmsd = ((ga + gB - 2.0 * sv) / nc).clamp(min=0.0).sqrt()
+            del H, Bq, gB, sv
+            vals, order = torch.sort(core_rmsd, dim=1)
+            cnt = (vals[:, :n_starts] <= max_core_th).sum(1)
+            cnt = torch.where(cnt > 0, cnt, torch.full_like(cnt, k_fallback))
+            sel = torch.arange(n_starts, device=dev)[None] < cnt[:, None]          # n_starts >= k_fallback
+            pl = torch.nonzero(sel, as_tuple=False)       # (S, 2): (local pair, start rank)
+            if not pl.shape[0]:
+                continue
+            ploc, srank = pl[:, 0], pl[:, 1]
+            perm = cp[order[ploc, srank]]                           # (S, nc)
+            pg = ploc + s0
+            Ks = Xg[kj_t[pg]]
+            Qs = Xg[qi_t[pg]]
+            Kc_s = Ks[:, core]
+            Qp_s = torch.gather(Qs, 1, perm[..., None].expand(-1, -1, 3))
+            Kc_m = Kc_s.mean(1, keepdim=True)
+            Qp_m = Qp_s.mean(1, keepdim=True)
+            H0 = (Qp_s - Qp_m).transpose(1, 2) @ (Kc_s - Kc_m)
+            R0 = _kabsch_qcp_torch(H0)[1]
+            Bt = (Qs - Qp_m) @ R0 + Kc_m
+            d2 = ((Ks[:, sing] - Bt[:, sing]) ** 2).sum((-1, -2)) if len(sing) else torch.zeros(len(pg), dtype=Xg.dtype, device=dev)
+            for gidx in multi:
+                Ka, Bb = Ks[:, gidx], Bt[:, gidx]
+                C = (Ka * Ka).sum(-1)[:, :, None] + (Bb * Bb).sum(-1)[:, None, :] - 2.0 * (Ka @ Bb.transpose(1, 2))
+                d2 = d2 + C.min(2).values.clamp(min=0.0).sum(1)
+            ok = d2 <= scut2
+            if bool(ok.any()):
+                surv_p.append(pg[ok].cpu().numpy())
+                surv_Bt.append(Bt[ok].cpu().numpy())
+        if not surv_p:
+            return matched, hits
+        pidx = np.concatenate(surv_p)
+        Bt = np.concatenate(surv_Bt)
+        self._pair_rounds(Xn, qi, kj, pidx, Bt, th, max_dev_th, matched, hits)
+        return matched, hits
+
+    def _pair_rounds(self, Xn, qi, kj, pidx, Bt, th, max_dev_th, matched, hits):
+        """The alternating assignment / rotation rounds of _factored_match (fast form) for starts of many pairs:
+        pidx (S,) pair of each start, Bt (S, n, 3) the query rotated onto the candidate. Fills matched / hits."""
+        from scipy.optimize import linear_sum_assignment
+
+        n = Xn.shape[1]
+        Ks = Xn[kj[pidx]]
+        Qs = Xn[qi[pidx]]
+        small_groups, large_groups = self._factored_groups()
+        K_norm2 = (Ks * Ks).sum((-1, -2))
+        Q_norm2 = (Qs * Qs).sum((-1, -2))
+        Kg_small = [(gidx, ar_g, pm, Ks[:, gidx], (Ks[:, gidx] ** 2).sum(-1)[:, :, None]) for gidx, ar_g, pm in small_groups]
+        Kg_large = [(gidx, Ks[:, gidx], (Ks[:, gidx] ** 2).sum(-1)[:, :, None]) for gidx in large_groups]
+        base_row = np.arange(n)
+        mp = np.broadcast_to(base_row, (len(pidx), n)).copy()
+        adj = self.adj
+        for rnd in range(12):
+            L = len(pidx)
+            if not L:
+                break
+            ar = np.arange(L)[:, None]
+            new = np.broadcast_to(base_row, (L, n)).copy()
+            for gidx, ar_g, pm, Ka, Ka2 in Kg_small:
+                Bb = Bt[:, gidx]
+                Bb2 = (Bb * Bb).sum(-1)[:, None, :]
+                C = Ka2 + Bb2 - 2.0 * (Ka @ Bb.swapaxes(1, 2))
+                cost = C[:, ar_g, pm].sum(-1)
+                new[:, gidx] = gidx[pm[cost.argmin(1)]]
+            for gidx, Ka, Ka2 in Kg_large:
+                Bb = Bt[:, gidx]
+                Bb2 = (Bb * Bb).sum(-1)[:, None, :]
+                C = Ka2 + Bb2 - 2.0 * (Ka @ Bb.swapaxes(1, 2))
+                # each row's minimum forms a permutation -> that assignment attains the lower bound sum of row minima,
+                # so it is optimal (the LSAP answer); the solver runs only where it is not a permutation
+                cols = C.argmin(2)
+                g = len(gidx)
+                srt = np.sort(cols, 1)
+                bad = np.flatnonzero((srt != np.arange(g)[None]).any(1))
+                for b in bad:
+                    cols[b] = linear_sum_assignment(C[b])[1]
+                new[:, gidx] = gidx[cols]
+            Qn = Qs[ar, new]
+            H = Qn.swapaxes(1, 2) @ Ks
+            sv, Rall = _kabsch_qcp(H, rot=True)
+            rr = np.sqrt(np.maximum((K_norm2 + Q_norm2 - 2.0 * sv) / n, 0.0))
+            stable = (new == mp).all(1)
+            cand_ok = (rr <= th) & (stable if rnd < 11 else True)
+            if cand_ok.any():
+                for s_idx in np.flatnonzero(cand_ok):
+                    p_row = int(pidx[s_idx])
+                    if matched[p_row]:
+                        continue
+                    m = new[s_idx]
+                    if (adj[m][:, m] == adj).all():
+                        md_h = float(np.sqrt(((Ks[s_idx] - Qs[s_idx][m] @ Rall[s_idx]) ** 2).sum(-1).max()))
+                        if max_dev_th > 0.0 and md_h > max_dev_th:
+                            continue
+                        matched[p_row] = True
+                        hits[p_row] = (float(rr[s_idx]), md_h, m.copy())
+            keep_s = (~stable) & (~matched[pidx])
+            if rnd == 0:
+                keep_s &= rr <= _ROUND0_CUT * th
+            if not keep_s.any():
+                break
+            if int(keep_s.sum()) > 1:
+                seen = set()
+                for idx_k in np.flatnonzero(keep_s):
+                    key = (int(pidx[idx_k]), new[idx_k].tobytes())
+                    if key in seen:
+                        keep_s[idx_k] = False
+                    else:
+                        seen.add(key)
+            Rn = Rall[keep_s]
+            Qs = Qs[keep_s]
+            Bt = Qs @ Rn
+            pidx = pidx[keep_s]
+            Ks = Ks[keep_s]
+            K_norm2 = K_norm2[keep_s]
+            Q_norm2 = Q_norm2[keep_s]
+            mp = new[keep_s]
+            Kg_small = [(gidx, ar_g, pm, Ka[keep_s], Ka2[keep_s]) for gidx, ar_g, pm, Ka, Ka2 in Kg_small]
+            Kg_large = [(gidx, Ka[keep_s], Ka2[keep_s]) for gidx, Ka, Ka2 in Kg_large]
+
+    def _select_capped_pairs(self, X: torch.Tensor, Rr: torch.Tensor, order: List[int], k: Optional[int], th: float,
+                             max_dev_th: float):
+        """select() on capped groups with dedup_capped_fast and a CUDA device: greedy best-first in blocks of rows,
+        every (block row, kept row) pair and every earlier-row pair inside the block decided at once by
+        _factored_pairs (the same pair decision as the row-by-row loop, so the same selection). None without CUDA or
+        on any failure (the caller runs the row-by-row loop)."""
+        try:
+            if not (torch.cuda.is_available() and torch.cuda.is_initialized()):
+                return None
+            dev = torch.device("cuda")
+            Xn = X.detach().to("cpu", torch.float64).numpy()
+            Xg = torch.as_tensor(Xn, device=dev)
+            Rg = Rr.detach().to(dev, torch.float64)
+            keep: List[int] = []
+            merges: List[Dict[str, Any]] = []
+            pos = 0
+            while pos < len(order) and (k is None or len(keep) < k):
+                blk = order[pos:pos + BLOCK_MAX]
+                pos += len(blk)
+                if keep:
+                    bt = torch.as_tensor(blk, device=dev)
+                    kt = torch.as_tensor(keep, device=dev)
+                    rad = ((Rg[bt][:, None] - Rg[kt][None]) ** 2).mean(-1).sqrt() <= th     # (b, K)
+                    bi, ki = [t.cpu().numpy() for t in torch.nonzero(rad, as_tuple=True)]
+                    if len(bi):
+                        blk_a, keep_a = np.asarray(blk), np.asarray(keep)
+                        m, hits = self._factored_pairs(Xn, Xg, blk_a[bi], keep_a[ki], th, max_dev_th)
+                        drop = {}
+                        for p in np.flatnonzero(m):           # the lowest kept position per dropped row
+                            b, kk = int(bi[p]), int(ki[p])
+                            if b not in drop or kk < drop[b][0]:
+                                drop[b] = (kk, p)
+                        for b, (kk, p) in sorted(drop.items()):
+                            r_val, md_val, perm = hits[p]
+                            merges.append({"dropped": blk[b], "kept": keep[kk], "rmsd": r_val, "max_dev": md_val, "perm": perm.tolist()})
+                        blk = [i for a, i in enumerate(blk) if a not in drop]
+                W = None
+                if len(blk) > 1:
+                    bt = torch.as_tensor(blk, device=dev)
+                    Rb = Rg[bt]
+                    rad = ((Rb[:, None] - Rb[None]) ** 2).mean(-1).sqrt() <= th
+                    rad = torch.tril(rad, diagonal=-1)                                   # (a, b): b earlier than a
+                    ai, bj = [t.cpu().numpy() for t in torch.nonzero(rad, as_tuple=True)]
+                    W = {}
+                    if len(ai):
+                        blk_a = np.asarray(blk)
+                        m, hits = self._factored_pairs(Xn, Xg, blk_a[ai], blk_a[bj], th, max_dev_th)
+                        for p in np.flatnonzero(m):
+                            W.setdefault(int(ai[p]), {})[int(bj[p])] = hits[p]
+                new_local: List[int] = []
+                for a, i in enumerate(blk):
+                    if W is not None and a in W:
+                        hit_b = [b for b in new_local if b in W[a]]
+                        if hit_b:
+                            r_val, md_val, perm = W[a][hit_b[0]]
+                            merges.append({"dropped": i, "kept": blk[hit_b[0]], "rmsd": r_val, "max_dev": md_val, "perm": perm.tolist()})
+                            continue
+                    new_local.append(a)
+                    keep.append(i)
+                    if k is not None and len(keep) >= k:
+                        break
+            # merge records only for rows the row-by-row loop would have reached (up to the last kept row)
+            if keep and k is not None and len(keep) >= k:
+                rank = {i: r for r, i in enumerate(order)}
+                last = rank[keep[-1]]
+                merges = [m for m in merges if rank.get(m["dropped"], 0) <= last]
+            self.merges.extend(merges)
+            return keep
+        except Exception as exc:  # never fail the dedup: the row-by-row loop decides
+            log.debug("batched capped dedup failed (%s); row-by-row", exc)
+            return None
+
     def _factored_any(self, K: np.ndarray, q: np.ndarray, th: float, max_dev_th: float = 0.0) -> np.ndarray:
         """factored_sym_upper(K[p], q, th, max_dev_th)[0] for every row p of K (P, n, 3) at once (P2R out_mirror)."""
         return self._factored_match(K, q, th, max_dev_th=max_dev_th, stop_on_any=False)[0]
 
+    def _mirror_pairs(self, A: torch.Tensor, B: torch.Tensor, RA: torch.Tensor, RB: torch.Tensor, th: float,
+                      max_dev_th: float) -> Optional[List[bool]]:
+        """mirror_dup on capped groups with dedup_capped_fast and a CUDA device: every radial candidate pair
+        (reflection i, row j) with j >= i decided at once by _factored_pairs (the pair test of the row loop below;
+        RMSD(refl i, j) = RMSD(refl j, i), so each unordered pair is tested once and a match marks both rows).
+        QEZVEY (A100): 156 row calls, 15.9 s -> one batched call. None without CUDA or on any failure (the caller
+        runs the row loop)."""
+        try:
+            if not (torch.cuda.is_available() and torch.cuda.is_initialized()):
+                return None
+            K = A.shape[0]
+            dev = torch.device("cuda")
+            Xn = np.concatenate([B.detach().to("cpu", torch.float64).numpy(), A.detach().to("cpu", torch.float64).numpy()])
+            Xg = torch.as_tensor(Xn, device=dev)
+            RAg, RBg = RA.detach().to(dev, torch.float64), RB.detach().to(dev, torch.float64)
+            rad = torch.triu(((RAg[:, None] - RBg[None]) ** 2).mean(-1).sqrt() <= th)      # (refl i, row j), j >= i
+            ii, jj = [t.cpu().numpy() for t in torch.nonzero(rad, as_tuple=True)]
+            dup = np.zeros(K, bool)
+            if len(ii):
+                m, _ = self._factored_pairs(Xn, Xg, ii + K, jj, th, max_dev_th)   # rows K.. are the reflections
+                dup[ii[m]] = True
+                dup[jj[m]] = True
+            return dup.tolist()
+        except Exception as exc:  # never fail the dedup: the row loop decides
+            log.debug("batched mirror dedup failed (%s); row loop", exc)
+            return None
+
+    @timing.timed("dedup")
     def mirror_dup(self, Xk: torch.Tensor, th: Optional[float] = None) -> List[bool]:
         """P2R out_mirror: for each kept row i (K, N, 3), is its reflection a duplicate of any kept row j (itself
         included)? The decision of `any_dup(reflections, Xk)`, faster on capped automorphism groups, where the
@@ -409,8 +875,9 @@ class _FactoredDedupMixin:
         are) dominated (HEDJOP 32 rows: 809 pairs, 36 s per seed):
           * the batched capped-map test (_full_any) on every radial candidate, as in any_dup;
           * the factored test once per unordered pair (RMSD(refl i, j) = RMSD(refl j, i), so a pair found for i also
-            marks j), all candidates of a row in one batched call (_factored_any).
-        Uncapped groups: exactly any_dup."""
+            marks j): all pairs in one batched GPU call (_mirror_pairs), else all candidates of a row per call
+            (_factored_any).
+        Uncapped groups: exactly any_dup"""
         if th is None:
             th = DEDUP_RMSD
         K = Xk.shape[0]
@@ -419,18 +886,23 @@ class _FactoredDedupMixin:
         refl = torch.tensor([-1.0, 1.0, 1.0], dtype=Xk.dtype, device=Xk.device)
         if not (DEDUP_FACTORED and (self.is_capped or DEDUP_MAX_DEV > 0.0)):
             return self.any_dup(Xk * refl, Xk, th)
-        A = (Xk * refl)[:, self.heavy].to(self.device, self.dtype); A = A - A.mean(1, keepdim=True)
-        B = Xk[:, self.heavy].to(self.device, self.dtype); B = B - B.mean(1, keepdim=True)
+        Xk = Xk.to(self.device, self.dtype)                  # rows on any device (the deduper's index tensors live here)
+        A = (Xk * refl.to(Xk))[:, self.heavy]; A = A - A.mean(1, keepdim=True)
+        B = Xk[:, self.heavy]; B = B - B.mean(1, keepdim=True)
         RA, RB = self._radial(torch.nan_to_num(A)), self._radial(torch.nan_to_num(B))
         dup = [False] * K
         cands = []
         for i in range(K):
             cand = torch.nonzero(((RB - RA[i]) ** 2).mean(1).sqrt() <= th).flatten()
             cands.append(cand)
-            if cand.numel() and self._full_any(A[i], B[cand], th):
+            if cand.numel() and not (DEDUP_CAPPED_FAST and self.is_capped) and self._full_any(A[i], B[cand], th):
                 dup[i] = DEDUP_MAX_DEV <= 0.0 or self._verify_max_dev(A[i], B[cand], th, DEDUP_MAX_DEV, cand)[0]
         if not self.is_capped:
             return dup
+        if DEDUP_CAPPED_FAST:
+            batched = self._mirror_pairs(A, B, RA, RB, th, DEDUP_MAX_DEV)
+            if batched is not None:
+                return batched
         An, Bn = A.cpu().numpy(), B.cpu().numpy()
         tested = set()
         for i in range(K):
@@ -555,7 +1027,9 @@ class StructureDeduper(_FactoredDedupMixin):
             dp = (4.0 * l2 + 2.0 * c2) * lam + c1
             step = torch.where(dp.abs() > 1e-300, p / dp, torch.zeros_like(p))
             lam = lam - step
-            if float((step.abs() / lam.abs().clamp(min=1e-30)).max()) < 1e-14:
+            # 1e-12: float64 evaluation noise of the quartic keeps relative steps near 1e-13 after convergence, so a
+            # tighter test never fired and every call ran all 60 iterations (~20 reach 1e-12; QEZVEY 2026-11-21)
+            if float((step.abs() / lam.abs().clamp(min=1e-30)).max()) < 1e-12:
                 break
         return lam
 
@@ -734,6 +1208,7 @@ class StructureDeduper(_FactoredDedupMixin):
         return False
 
     # --- public -----------------------------------------------------------------------------------------------------
+    @timing.timed("dedup")
     def any_dup(self, Xq: torch.Tensor, Xk: torch.Tensor, th: Optional[float] = None,
                 factored_rows: Optional[List[List[int]]] = None) -> List[bool]:
         """For each query row (Q, N, 3): is it a duplicate of ANY reference row (K, N, 3)? The same pair decision as
@@ -744,8 +1219,8 @@ class StructureDeduper(_FactoredDedupMixin):
         Q = Xq.shape[0]
         if Q == 0 or Xk.shape[0] == 0:
             return [False] * Q
-        A = Xq[:, self.heavy].to(self.device, self.dtype); A = A - A.mean(1, keepdim=True)
-        B = Xk[:, self.heavy].to(self.device, self.dtype); B = B - B.mean(1, keepdim=True)
+        A = Xq.to(self.device, self.dtype)[:, self.heavy]; A = A - A.mean(1, keepdim=True)
+        B = Xk.to(self.device, self.dtype)[:, self.heavy]; B = B - B.mean(1, keepdim=True)
         RA, RB = self._radial(torch.nan_to_num(A)), self._radial(torch.nan_to_num(B))
         M = self.inv_maps.shape[0]
         out: List[bool] = []
@@ -758,7 +1233,7 @@ class StructureDeduper(_FactoredDedupMixin):
                 if cand.numel():
                     # the batched capped-map test first (the decision is the OR of both tests); the batched factored
                     # test on all candidates, or on the caller's `factored_rows`
-                    if self._full_any(A[i], B[cand], th):
+                    if not (DEDUP_CAPPED_FAST and self.is_capped) and self._full_any(A[i], B[cand], th):
                         dup = DEDUP_MAX_DEV <= 0.0 or self._verify_max_dev(A[i], B[cand], th, DEDUP_MAX_DEV, cand)[0]
                     if not dup and self.is_capped:
                         cl = cand.tolist()
@@ -778,6 +1253,7 @@ class StructureDeduper(_FactoredDedupMixin):
             out += [bool(d) for d in self._pair_dup(A[s0:s0 + nb], B, RA[s0:s0 + nb], RB, th).any(1).tolist()]
         return out
 
+    @timing.timed("dedup")
     def select(self, X_all: torch.Tensor, score: torch.Tensor, k: Optional[int], th: Optional[float] = None,
                exact: bool = True, max_dev_th: Optional[float] = None) -> List[int]:
         """X_all (B, N, 3) full coordinates, score (B,) higher = better. Returns up to k distinct row indices, best first."""
@@ -786,7 +1262,7 @@ class StructureDeduper(_FactoredDedupMixin):
         if max_dev_th is None:
             max_dev_th = DEDUP_MAX_DEV
         self.merges = []
-        X = X_all[:, self.heavy].to(self.device, self.dtype)
+        X = X_all.to(self.device, self.dtype)[:, self.heavy]
         X = X - X.mean(1, keepdim=True)
         sc = torch.nan_to_num(score.detach().to("cpu", torch.float64), nan=-1e30, posinf=-1e30, neginf=-1e30)
         finite = torch.isfinite(X).all(-1).all(-1).cpu()
@@ -839,6 +1315,11 @@ class StructureDeduper(_FactoredDedupMixin):
                 return keep
             else:
                 # Capped parents (or when max_dev_th > 0): factored symmetry + production fallback
+                if DEDUP_CAPPED_FAST and self.is_capped:
+                    kp = self._select_capped_pairs(X, Rr, order, k, th, max_dev_th)
+                    if kp is not None:
+                        return kp
+                    self.merges = []
                 X_np = X.cpu().numpy() if self.is_capped else None
                 for i in order:
                     if keep:
@@ -855,7 +1336,7 @@ class StructureDeduper(_FactoredDedupMixin):
                                     dup_found = True
                                     self.merges.append({"dropped": i, "kept": k_idx, "rmsd": r_val, "max_dev": md_val, "perm": perm.tolist()})
                                     log.info("Factored dedup merge: row %d merged into row %d (RMSD=%.4f A, max_dev=%.4f A)", i, k_idx, r_val, md_val)
-                            if not dup_found:
+                            if not dup_found and not (DEDUP_CAPPED_FAST and self.is_capped):
                                 if self._full_any(X[i], X[cand], th):
                                     if max_dev_th > 0.0:
                                         ok_dev, r_val, md_val, k_matched = self._verify_max_dev(X[i], X[cand], th, max_dev_th, cand)

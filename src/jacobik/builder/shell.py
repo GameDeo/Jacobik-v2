@@ -262,7 +262,7 @@ def _smiles_to_conformer(
             AllChem.MMFFOptimizeMolecule(sur_h)
         spos = sur_h.GetConformer().GetPositions().astype(np.float64)
         if use_gfn2:
-            spos = _e()._gfn2_refine(sur_h, spos, donors, experiment_flags=False)
+            spos = _e()._embed_refine(sur_h, spos, donors, experiment_flags=False)
         orig_h = Chem.AddHs(Chem.MolFromSmiles(smiles))
         positions = _cem.map_surrogate_positions(orig_h, sur_h, spos)
         conf = Chem.Conformer(orig_h.GetNumAtoms())
@@ -285,7 +285,7 @@ def _smiles_to_conformer(
             rdmol_h, positions, info = r
             _e().log.debug("chelate-aware embed %s: %s", smiles, info)
             if use_gfn2:
-                positions = _e()._gfn2_refine(rdmol_h, positions, donors)
+                positions = _e()._embed_refine(rdmol_h, positions, donors)
             return rdmol_h, positions, has_h
 
     mol = Chem.MolFromSmiles(smiles)
@@ -313,7 +313,7 @@ def _smiles_to_conformer(
     conf = mol_h.GetConformer()
     positions = conf.GetPositions().astype(np.float64)  # (N_all, 3) incl. H
     if use_gfn2:
-        positions = _e()._gfn2_refine(mol_h, positions, donors)
+        positions = _e()._embed_refine(mol_h, positions, donors)
 
     return mol_h, positions, has_h
 

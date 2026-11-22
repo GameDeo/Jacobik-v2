@@ -31,7 +31,7 @@ _BEND_PER_Z: bool = True
 _SC_MODE: str = "thermal"
 BEND_RELEASE = [0.1, 100]
 
-from jacobik.core import profile
+from jacobik.core import profile, timing
 from jacobik.core.env import EPS
 DOF_STEP_SCALE = profile.get("dof_step_scale")
 FINISH_PHASE = profile.get("finish_phase")
@@ -824,6 +824,7 @@ class JointIKSolver(_EagerSolveMixin):
             total = total / float(self.scorer._agg_norm())
         return total
 
+    @timing.timed("ik_solve")
     def solve(
         self,
         theta_inits: list,  # [Tensor(B, 6+Ji), ...]

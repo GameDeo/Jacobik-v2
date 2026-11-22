@@ -133,6 +133,53 @@ def _extract_ligand_subgraphs(mol: Any) -> List[Dict[str, Any]]:
     return ligand_data
 
 
+def _rd_graph(G, nodes, strict):
+    """RDKit mol of a ligand heavy-atom graph; atom labels (element, donor flag, H count if strict) in the isotope."""
+    from rdkit import Chem
+
+    pt = Chem.GetPeriodicTable()
+    m = Chem.RWMol()
+    idx = {}
+    for u in nodes:
+        d = G.nodes[u]
+        a = Chem.Atom(pt.GetAtomicNumber(d.get("element", "")))
+        a.SetIsotope(1 + (int(d.get("nh", 0)) if strict else 0) + 64 * int(bool(d.get("is_donor", False))))
+        a.SetNoImplicit(True)
+        idx[u] = m.AddAtom(a)
+    for u, v in G.edges():
+        m.AddBond(idx[u], idx[v], Chem.BondType.SINGLE)
+    m = m.GetMol()
+    m.UpdatePropertyCache(strict=False)
+    return m
+
+
+def _isomorphisms(G_gen, G_ref, strict, node_match, cap):
+    """(gen nodes, (K, n) ref node per gen node) of the isomorphisms G_gen -> G_ref, at most cap + 1 of them; None if
+    not isomorphic. RDKit substructure matching (graphs of equal size: a match is an isomorphism); networkx VF2 when
+    RDKit cannot take the graph."""
+    g_nodes = sorted(G_gen.nodes())
+    if G_gen.number_of_nodes() != G_ref.number_of_nodes() or G_gen.number_of_edges() != G_ref.number_of_edges():
+        return None
+    r_nodes = sorted(G_ref.nodes())
+    try:
+        q = _rd_graph(G_gen, g_nodes, strict)
+        t = _rd_graph(G_ref, r_nodes, strict)
+        ms = t.GetSubstructMatches(q, uniquify=False, useChirality=False, maxMatches=int(cap) + 1)
+        if not ms:
+            return None
+        return g_nodes, np.asarray([[r_nodes[k] for k in m_] for m_ in ms], dtype=np.int64)
+    except Exception:
+        GM = isomorphism.GraphMatcher(G_gen, G_ref, node_match=node_match)
+        if not GM.is_isomorphic():
+            return None
+        rows = []
+        for iso in GM.isomorphisms_iter():
+            rows.append([iso[v] for v in g_nodes])
+            if len(rows) > cap:
+                break
+        return g_nodes, np.asarray(rows, dtype=np.int64)
+
+
 def build_atom_mapping(
     ref_mol: Any,
     gen_mol: Optional[Any] = None,
@@ -251,6 +298,116 @@ def build_atom_mapping(
         best_perm_autos = 1
         best_perm_details = []
 
+        # Each (ref ligand, gen ligand) pairing is matched once and cached: the permutation loop below only sums the
+        # cached pair costs in the same order (identical floats, identical choice). Before 2026-11-18 every permutation
+        # of m identical ligands re-ran the full VF2 enumeration of every pair (m! x m enumerations: SILROY 167 s).
+        pair_cache: Dict[Tuple[int, int], Tuple[bool, float, Dict[int, int], int, Dict[str, Any]]] = {}
+
+        def h_pair(r_idx, g_idx, u_ref, v_gen, memo):
+            """(cost, h_map, valid, matched) of the hydrogens of heavy pair (u_ref, v_gen), as the per-iso loop had it."""
+            key = (u_ref, v_gen)
+            hit = memo.get(key)
+            if hit is not None:
+                return hit
+            h_r = ref_ligs[r_idx]["h_neighbors"][u_ref]
+            h_g = gen_ligs[g_idx]["h_neighbors"][v_gen]
+            out = (0.0, {}, True, False)
+            if len(h_r) == 1 and len(h_g) == 1:
+                dh = P_ref[h_r[0]] - P_gen[h_g[0]]
+                out = (float(dh @ dh), {h_r[0]: h_g[0]}, True, True)
+            elif len(h_r) > 1 and len(h_r) == len(h_g):
+                best_hp = None
+                best_hd = float("inf")
+                for hp in itertools.permutations(h_g):
+                    hd = sum(
+                        float((P_ref[hr] - P_gen[hg]) @ (P_ref[hr] - P_gen[hg]))
+                        for hr, hg in zip(h_r, hp)
+                    )
+                    if hd < best_hd:
+                        best_hd = hd
+                        best_hp = hp
+                if best_hp is not None:
+                    out = (best_hd, dict(zip(h_r, best_hp)), True, True)
+            elif len(h_r) != len(h_g):
+                out = (0.0, {}, False, False)
+            memo[key] = out
+            return out
+
+        def match_pair(r_idx, g_idx):
+            key = (r_idx, g_idx)
+            if key in pair_cache:
+                return pair_cache[key]
+            G_ref = ref_ligs[r_idx]["G"]
+            G_gen = gen_ligs[g_idx]["G"]
+            memo: Dict[Tuple[int, int], Tuple[float, Dict[int, int], bool, bool]] = {}
+            mapping: Dict[int, int] = {}
+            if G_ref.number_of_nodes() == 1:
+                # Single-atom ligand (e.g. halide, aqua, oxo, ammine, methyl)
+                u_ref = list(G_ref.nodes())[0]
+                v_gen = list(G_gen.nodes())[0]
+                mapping[u_ref] = v_gen
+                d = P_ref[u_ref] - P_gen[v_gen]
+                cost = float(d @ d)
+                hc, hm, hv, matched = h_pair(r_idx, g_idx, u_ref, v_gen, memo)
+                if not hv:
+                    res = (False, cost, mapping, 1, {})
+                else:
+                    if matched:
+                        mapping.update(hm)
+                        cost += hc
+                    res = (True, cost, mapping, 1, {
+                        "ref_ligand_idx": r_idx, "gen_ligand_idx": g_idx, "n_heavy": 1, "n_automorphisms": 1,
+                        "cost": cost})
+                pair_cache[key] = res
+                return res
+
+            # Multi-atom ligand: all isomorphisms gen -> ref (RDKit's C++ matcher; networkx VF2 as the fallback), every
+            # one scored at once from the per-atom-pair heavy + hydrogen costs (the hydrogen assignment of a heavy pair
+            # does not depend on the rest of the isomorphism, so it is solved once per pair)
+            isos = None
+            for nm in (node_match_strict, node_match_relaxed):
+                isos = _isomorphisms(G_gen, G_ref, nm is node_match_strict, nm, max_automorphisms)
+                if isos is not None:
+                    break
+            if isos is None:
+                pair_cache[key] = (False, 0.0, {}, 0, {})
+                return pair_cache[key]
+            g_nodes, matches = isos
+            n_autos = int(matches.shape[0])
+            r_nodes = sorted(G_ref.nodes())
+            col = {u: k for k, u in enumerate(r_nodes)}
+            C = np.full((len(g_nodes), len(r_nodes)), np.inf)
+            bad = np.zeros_like(C, dtype=bool)
+            used = np.unique(np.stack([np.repeat(np.arange(len(g_nodes))[None], n_autos, 0).ravel(),
+                                       matches.ravel()], 1), axis=0)
+            for gi, u_ref in used:
+                v_gen = g_nodes[gi]
+                d = P_ref[u_ref] - P_gen[v_gen]
+                hc, _hm, hv, matched = h_pair(r_idx, g_idx, int(u_ref), v_gen, memo)
+                C[gi, col[int(u_ref)]] = float(d @ d) + (hc if matched else 0.0)
+                bad[gi, col[int(u_ref)]] = not hv
+            mcol = np.vectorize(col.get, otypes=[np.int64])(matches) if n_autos else matches
+            ar = np.arange(len(g_nodes))[None]
+            if n_autos > max_automorphisms:
+                mcol = mcol[:max_automorphisms]
+            costs = C[ar, mcol].sum(1)
+            valid = not bool(bad[ar, mcol].any())
+            k_best = int(np.argmin(costs))
+            best_iso_cost = float(costs[k_best])
+            best_iso = {g_nodes[gi]: int(matches[k_best, gi]) for gi in range(len(g_nodes))}
+            h_map: Dict[int, int] = {}
+            for v_gen, u_ref in best_iso.items():
+                mapping[u_ref] = v_gen
+                hc, hm, hv, matched = h_pair(r_idx, g_idx, u_ref, v_gen, memo)
+                if matched:
+                    h_map.update(hm)
+            mapping.update(h_map)
+            res = (valid, best_iso_cost, mapping, n_autos, {
+                "ref_ligand_idx": r_idx, "gen_ligand_idx": g_idx, "n_heavy": G_ref.number_of_nodes(),
+                "n_automorphisms": n_autos, "cost": best_iso_cost})
+            pair_cache[key] = res
+            return res
+
         # For identical ligands (m > 1), evaluate pairings against relative coordinates
         for g_perm in itertools.permutations(g_indices):
             perm_cost = 0.0
@@ -260,128 +417,15 @@ def build_atom_mapping(
             is_valid_perm = True
 
             for r_idx, g_idx in zip(r_indices, g_perm):
-                G_ref = ref_ligs[r_idx]["G"]
-                G_gen = gen_ligs[g_idx]["G"]
-
-                # Single-atom ligand (e.g. halide, aqua, oxo, ammine, methyl)
-                if G_ref.number_of_nodes() == 1:
-                    u_ref = list(G_ref.nodes())[0]
-                    v_gen = list(G_gen.nodes())[0]
-                    perm_mapping[u_ref] = v_gen
-                    d = P_ref[u_ref] - P_gen[v_gen]
-                    cost = float(d @ d)
-
-                    # Match attached hydrogens (e.g. aqua, ammine, methyl)
-                    h_r = ref_ligs[r_idx]["h_neighbors"][u_ref]
-                    h_g = gen_ligs[g_idx]["h_neighbors"][v_gen]
-
-                    if len(h_r) == 1 and len(h_g) == 1:
-                        perm_mapping[h_r[0]] = h_g[0]
-                        dh = P_ref[h_r[0]] - P_gen[h_g[0]]
-                        cost += float(dh @ dh)
-                    elif len(h_r) > 1 and len(h_r) == len(h_g):
-                        best_hp = None
-                        best_hd = float("inf")
-                        for hp in itertools.permutations(h_g):
-                            hd = sum(
-                                float((P_ref[hr] - P_gen[hg]) @ (P_ref[hr] - P_gen[hg]))
-                                for hr, hg in zip(h_r, hp)
-                            )
-                            if hd < best_hd:
-                                best_hd = hd
-                                best_hp = hp
-                        if best_hp is not None:
-                            for hr, hg in zip(h_r, best_hp):
-                                perm_mapping[hr] = hg
-                            cost += best_hd
-                    elif len(h_r) != len(h_g):
-                        is_valid_perm = False
-                        break
-
-                    perm_cost += cost
-                    perm_details.append({
-                        "ref_ligand_idx": r_idx,
-                        "gen_ligand_idx": g_idx,
-                        "n_heavy": 1,
-                        "n_automorphisms": 1,
-                        "cost": cost,
-                    })
-                    continue
-
-                # Multi-atom ligand: Graph isomorphism with VF2
-                GM = isomorphism.GraphMatcher(G_gen, G_ref, node_match=node_match_strict)
-                if not GM.is_isomorphic():
-                    GM = isomorphism.GraphMatcher(G_gen, G_ref, node_match=node_match_relaxed)
-                if not GM.is_isomorphic():
+                ok, cost, mapping, n_autos, detail = match_pair(r_idx, g_idx)
+                if not ok:
                     is_valid_perm = False
                     break
-
-                best_iso = None
-                best_iso_cost = float("inf")
-                best_iso_h_map: Dict[int, int] = {}
-                n_autos = 0
-
-                for iso in GM.isomorphisms_iter():
-                    n_autos += 1
-                    if n_autos > max_automorphisms:
-                        break
-
-                    cost = 0.0
-                    h_map: Dict[int, int] = {}
-
-                    # Score heavy atoms by coordinate proximity
-                    for v_gen, u_ref in iso.items():
-                        d = P_ref[u_ref] - P_gen[v_gen]
-                        cost += float(d @ d)
-
-                        # Match attached hydrogens
-                        h_r = ref_ligs[r_idx]["h_neighbors"][u_ref]
-                        h_g = gen_ligs[g_idx]["h_neighbors"][v_gen]
-
-                        if len(h_r) == 1 and len(h_g) == 1:
-                            h_map[h_r[0]] = h_g[0]
-                            dh = P_ref[h_r[0]] - P_gen[h_g[0]]
-                            cost += float(dh @ dh)
-                        elif len(h_r) > 1 and len(h_r) == len(h_g):
-                            best_hp = None
-                            best_hd = float("inf")
-                            for hp in itertools.permutations(h_g):
-                                hd = sum(
-                                    float((P_ref[hr] - P_gen[hg]) @ (P_ref[hr] - P_gen[hg]))
-                                    for hr, hg in zip(h_r, hp)
-                                )
-                                if hd < best_hd:
-                                    best_hd = hd
-                                    best_hp = hp
-                            if best_hp is not None:
-                                for hr, hg in zip(h_r, best_hp):
-                                    h_map[hr] = hg
-                                cost += best_hd
-                        elif len(h_r) != len(h_g):
-                            is_valid_perm = False
-
-                    if cost < best_iso_cost:
-                        best_iso_cost = cost
-                        best_iso = iso
-                        best_iso_h_map = h_map
-
-                if best_iso is None:
-                    is_valid_perm = False
-                    break
-
-                perm_autos *= max(n_autos, 1)
-                perm_cost += best_iso_cost
-                for v_gen, u_ref in best_iso.items():
-                    perm_mapping[u_ref] = v_gen
-                perm_mapping.update(best_iso_h_map)
-
-                perm_details.append({
-                    "ref_ligand_idx": r_idx,
-                    "gen_ligand_idx": g_idx,
-                    "n_heavy": G_ref.number_of_nodes(),
-                    "n_automorphisms": n_autos,
-                    "cost": best_iso_cost,
-                })
+                perm_cost += cost
+                perm_mapping.update(mapping)
+                if ref_ligs[r_idx]["G"].number_of_nodes() > 1:
+                    perm_autos *= max(n_autos, 1)
+                perm_details.append(detail)
 
             if is_valid_perm and perm_cost < best_perm_cost:
                 best_perm_cost = perm_cost

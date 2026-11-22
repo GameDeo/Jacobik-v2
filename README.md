@@ -5,11 +5,12 @@
 <p align="center">
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-F59E0B?style=flat-square" alt="MIT License"></a>
-  <a href="PERFORMANCE.md"><img src="https://img.shields.io/badge/version-1.0a-0EA5E9?style=flat-square" alt="Version 1.0a"></a>
+  <a href="PERFORMANCE.md"><img src="https://img.shields.io/badge/version-1.0b-0EA5E9?style=flat-square" alt="Version 1.0b"></a>
 </p>
 
 <p align="center">
   <a href="#install">Install</a> ·
+  <a href="#builds">Builds</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#output--options">Output &amp; Options</a> ·
   <a href="#repository">Repository</a> ·
@@ -23,9 +24,10 @@
 1. **Enumerate configurations** — donor-to-site assignments, stereocentres (including metal-binding-induced chirality), and `E`/`Z` double bonds.
 2. **Joint batched inverse kinematics** — optimises ligand torsions, ring puckers, and backbone bond-angle bends together (CPU or CUDA).
 3. **Statistical crystal ranking** — scores structures with log-likelihoods fitted to `tmQM` and `lnQM`, with no force field in the solve loop.
+4. **Settle** — ten batched MACE-POLAR steps with the declared donors held; rows are returned at the settled geometry and ordered by settled energy within each class.
 
 > [!NOTE]
-> Output structures are unrelaxed. Relax or re-rank them with an energy model (e.g. GFN2-xTB or MACE) before quantitative energetic comparison across classes.
+> Settled rows are not converged minima. Relax them (`relax="normal"`, see [Relaxation](#relaxation)) or with another energy model before quantitative energetic comparison across classes.
 
 ---
 
@@ -49,7 +51,25 @@ pip install -r requirements.txt && pip install -e .
 |---|---|
 | `xtb` on `PATH` | Mandatory for GFN2 ligand embed refinement (missing `xtb` falls back to invalid MMFF embeds). Verify with `jacobik check`. |
 | Statistics DB | `src/jacobik/data/constraints_2026-11-12.npz` (~28 MB, self-describing) ships packaged and loads automatically. Override via `constraints_db=`, `--db`, or `JACOBIK_DB`, or rebuild with `python -m fit.build_db`. |
-| Hardware / Optional | Runs on CPU or CUDA (`device="cuda"` / `--device auto`). Energy re-ranking uses optional `.[mace]` extras (`requirements.txt`). |
+| MACE-POLAR (`.[mace]`, in `requirements.txt`) | Embed refinement, settle and relaxation. The MACE-POLAR-1-S weights (Academic Software License, non-commercial) are not part of the repository: they are downloaded from the official `ACEsuit/mace-foundations` release into `~/.cache/mace` on first use; `JACOBIK_MACE_MODEL_PATH` uses a local copy. Without the `mace` extra the generator falls back to GFN2 refinement and unsettled rows, with a warning. |
+| Hardware | Runs on CPU or CUDA (`device="cuda"` / `--device auto`); see [Builds](#builds) for the GPU build. |
+
+### Builds
+
+Jacobik ships as two builds of the same release, with the same API, statistics DB and profile fingerprint (`jacobik fingerprint`). Both install as the `jacobik` package, so install one. They are two branches of this repository:
+
+| Build | Branch | Tag | Runs on | When to use |
+|---|---|---|---|---|
+| PyTorch (portable) | `master` | `v1.0b` | CPU, or any CUDA GPU through PyTorch | Default; CPU-only machines, CPU clusters, Windows |
+| GPU (CuPy + Triton kernels, no PyTorch needed) | `master-triton` | `v1.0b-gpu` | Linux with an NVIDIA GPU (CUDA 12); no CPU path | Throughput: about 6x faster per complex than the PyTorch build on an A100 |
+
+```bash
+git clone <repository-url> && cd jacobik && pixi install -e linux                          # PyTorch build (master)
+git clone --branch master-triton <repository-url> && cd jacobik && pixi install -e linux   # GPU build
+python -c "import jacobik; print(jacobik.__version__, jacobik.BUILD)"
+```
+
+The two builds agree within the confidence intervals of the benchmark (`PERFORMANCE.md`); individual rows can differ because the GPU kernels reduce in a different order.
 
 ---
 
@@ -127,6 +147,20 @@ records = result.to_records()                    # plain dicts: rank, score, del
 | `stereo_enum`, `out_per_class` | profile | Enumerate stereo classes; keep up to `out_per_class_k` (`8`) rows per class. |
 | `use_symmetry_enumeration`, `embed_aware_dedup` | `True` | Symmetry-distinct site enumeration merged only by true embedded ligand symmetry. |
 | `constraints_db`, `stats` | packaged DB | Custom `.npz` path or pre-loaded `StatsLookup`. |
+| `settle_steps` | `10` | MACE-POLAR settle steps after the solve (`0` returns the solver rows as scored). |
+| `settle_top` | all rows | Settle and return only the `k` lowest-energy rows of each class (`--settle-top`). |
+
+### Relaxation
+
+`generate(..., relax="normal")` (or `result.relax(level="normal")`, CLI `--relax normal`) relaxes every returned row with MACE-POLAR in batches on the solve device:
+
+| Option | Default | Effect |
+|---|---|---|
+| `relax` / `level` | off | `"loose"`, `"normal"` or `"tight"` force criterion. |
+| `relax_top` | all rows | Relax and return only the `k` best-ranked rows of each class (`--relax-top`). |
+| `relax_binding` | `"keep"` | `"keep"` relaxes inside the requested binding mode and flags rows held there; `"free"` is unconstrained and reports metal-contact changes. |
+| `relax_etol` | off | Also stop a row once its energy fell by less than `etol` kJ/mol over 5 evaluations: energies to about `etol` without the long tail of small force steps (`--relax-etol`). |
+| `rerank` | `False` | Order rows by relaxed energy within each class (`--relax-rerank`). |
 
 Output deduplication keeps structures with heavy-atom symmetric RMSD above **0.5 A** (`dedup_rmsd`) within a **200 nat** window (`out_window`). Override profile settings before import via `JACOBIK_PROFILE_OVERRIDES='{"dedup_rmsd": 0.3}'` and audit provenance with `jacobik.profile.snapshot()`.
 
@@ -139,9 +173,8 @@ Output deduplication keeps structures with heavy-atom symmetric RMSD above **0.5
 | `src/jacobik/` | Generator package (`builder/`, `core/`, `topology/`, `ik/`, `stats/`, packaged `data/`) |
 | `src/fit/` | Statistics database fitting pipeline (`python -m fit.build_db`) |
 | `interface/` | CLI wrapper (`jacobik_cli.py`), `ligand_library.py`, dataset preparation & notebooks |
-| `dev/` | Unit/parity tests (`dev/tests/`), verification checks (`tools.check`), panel runner (`tools.run`) |
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for pipeline details, [`PERFORMANCE.md`](PERFORMANCE.md) for `v1.0a` benchmarks, and [`CHANGELOG.md`](CHANGELOG.md) for release history.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for pipeline details, [`PERFORMANCE.md`](PERFORMANCE.md) for `v1.0b` benchmarks, [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for release history and [`docs/RELEASE_v1.0b.md`](docs/RELEASE_v1.0b.md) for the release notes. The maintainers' development tree (tests, golden references, benchmark and campaign tooling) is not part of this repository.
 
 ---
 

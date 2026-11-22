@@ -52,6 +52,7 @@ class MACEPolarEvaluator:
     def __init__(
         self, model: str = "polar-1-m", device: str = "auto", dtype: str = "float32",
         model_path: str | Path | None = None, mode: str = "energy-only", threads: int | None = None,
+        enable_cueq: bool = False,
     ):
         """Create an evaluator, optionally with an already-downloaded checkpoint.
 
@@ -78,6 +79,8 @@ class MACEPolarEvaluator:
         configured_path = model_path or os.environ.get("JACOBIK_MACE_MODEL_PATH")
         self.model, self.device, self.dtype, self.mode = model, device, dtype, mode
         self.threads = None if threads is None else int(threads)
+        #: cuEquivariance kernels for the tensor products (CUDA only; needs cuequivariance-torch)
+        self.enable_cueq = bool(enable_cueq) and str(device).startswith("cuda")
         self.model_path = None if configured_path is None else Path(configured_path).expanduser()
         if self.model_path is not None and not self.model_path.is_file():
             raise FileNotFoundError(
@@ -135,8 +138,9 @@ class MACEPolarEvaluator:
                     index = torch.device(self.device).index or 0
                     torch.cuda.set_per_process_memory_fraction(
                         float(os.environ.get("JACOBIK_MACE_MEM_FRACTION", DEFAULT_MEM_FRACTION)), index)
+                extra = {"enable_cueq": True} if self.enable_cueq else {}
                 self._calculator = mace_polar(
-                    model=self.model_path or self.model, device=self.device, default_dtype=self.dtype
+                    model=self.model_path or self.model, device=self.device, default_dtype=self.dtype, **extra
                 )
                 for model in self._calculator.models:
                     model.eval()

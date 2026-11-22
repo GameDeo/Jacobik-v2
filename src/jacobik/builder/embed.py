@@ -420,7 +420,27 @@ def _violation(X, pairs) -> float:
     return v
 
 
+#: process cache of embed() results (deterministic in its arguments; every configuration class of a request re-embedded
+#: the same unchanged ligands: FUTSOD 51 calls, 10 s). Values are copied in and out.
+_EMBED_CACHE: dict = {}
+
+
 def embed(smiles: str, donor_groups: Sequence[Sequence[int]], seed: int = 42, mmff: bool = True, ez_extra=None, chiral_extra=None, *, strict_stereo: bool = False):
+    """Cached _embed (identical result for identical arguments; the caller gets its own copy)."""
+    from rdkit import Chem
+
+    key = (smiles, tuple(tuple(int(a) for a in g) for g in donor_groups), int(seed), bool(mmff), repr(ez_extra),
+           repr(chiral_extra), bool(strict_stereo))
+    if key not in _EMBED_CACHE:
+        r = _embed(smiles, donor_groups, seed, mmff, ez_extra, chiral_extra, strict_stereo=strict_stereo)
+        _EMBED_CACHE[key] = None if r is None else (Chem.Mol(r[0]), np.array(r[1], copy=True), dict(r[2]))
+    hit = _EMBED_CACHE[key]
+    if hit is None:
+        return None
+    return Chem.Mol(hit[0]), hit[1].copy(), dict(hit[2])
+
+
+def _embed(smiles: str, donor_groups: Sequence[Sequence[int]], seed: int = 42, mmff: bool = True, ez_extra=None, chiral_extra=None, *, strict_stereo: bool = False):
     """
     Chelate-aware embed of one ligand. Returns (rdmol_h, positions (N, 3), info) in the engine's atom order,
     AddHs(MolFromSmiles(smiles)), or None when the ligand needs no special treatment (the caller then uses the
@@ -571,8 +591,56 @@ def _bond_refinement_violations(rdmol_h, before: np.ndarray, after: np.ndarray) 
     return issues
 
 
+#: (graph, stereo, seed) -> embedded positions or the failure message of _embed_etkdg_with_retries. ETKDG with a fixed
+#: seed is deterministic, so a hit gives the same conformer; the same ligand is embedded again for every shell build
+#: (MEBHEK: a ring C#S typing artefact makes each embed fail three times first, 27 s per call, 2026-11-20).
+_ETKDG_CACHE: dict = {}
+_ETKDG_CACHE_MAX = 512
+
+
+def _etkdg_key(mol_h, seed: int):
+    atoms = tuple((a.GetAtomicNum(), a.GetFormalCharge(), int(a.GetChiralTag()), a.GetNumExplicitHs(),
+                   a.GetNumRadicalElectrons(), a.GetIsotope()) for a in mol_h.GetAtoms())
+    bonds = tuple((b.GetBeginAtomIdx(), b.GetEndAtomIdx(), int(b.GetBondType()), int(b.GetStereo()),
+                   tuple(b.GetStereoAtoms())) for b in mol_h.GetBonds())
+    return atoms, bonds, int(seed)
+
+
 def _embed_etkdg_with_retries(mol_h, seed: int) -> None:
-    """Embed with the historical deterministic attempt, then bounded random-coordinate retries."""
+    """Embed with the historical deterministic attempt, then bounded random-coordinate retries (memoised)."""
+    from rdkit import Chem
+
+    try:
+        key = _etkdg_key(mol_h, seed)
+    except Exception:  # noqa: BLE001 - an unkeyable molecule just embeds
+        key = None
+    hit = _ETKDG_CACHE.get(key) if key is not None else None
+    if hit is not None:
+        if isinstance(hit, str):
+            raise _e()._LigandEmbedFailure(hit)
+        mol_h.RemoveAllConformers()
+        conf = Chem.Conformer(mol_h.GetNumAtoms())
+        for i, xyz in enumerate(hit):
+            conf.SetAtomPosition(i, xyz.tolist())
+        mol_h.AddConformer(conf, assignId=True)
+        return
+    try:
+        _embed_etkdg_uncached(mol_h, seed)
+    except _e()._LigandEmbedFailure as exc:
+        if key is not None:
+            _etkdg_store(key, str(exc))
+        raise
+    if key is not None and mol_h.GetNumConformers():
+        _etkdg_store(key, np.array(mol_h.GetConformer().GetPositions(), dtype=np.float64, copy=True))
+
+
+def _etkdg_store(key, value) -> None:
+    if len(_ETKDG_CACHE) >= _ETKDG_CACHE_MAX:
+        _ETKDG_CACHE.pop(next(iter(_ETKDG_CACHE)))
+    _ETKDG_CACHE[key] = value
+
+
+def _embed_etkdg_uncached(mol_h, seed: int) -> None:
     from rdkit.Chem import AllChem
 
     params = AllChem.ETKDGv3()
@@ -602,34 +670,20 @@ def pop_embed_bond_check_events() -> List[dict]:
     return events
 
 
-def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flags=True) -> np.ndarray:
-    """embed="gfn2" refinement (the default, DEFAULT_EMBED): GFN2-xTB optimisation (--opt crude) of the free ligand from its ETKDG/MMFF
-    embed, once per ligand (cached). Only the frozen internals IK starts from change. The tmQM references are GFN2
-    geometries, and GFN2 has parameters for every element (no silent no-op as with MMFF on boron). The donor set's
-    own geometry (every distance among donor atoms, incl. within a haptic face) is held at the embed's values: that is
-    what binding imposes (chelate bite, macrocycle cavity, bound diene face); GFN2 relaxes everything else. Any failure
-    keeps the MMFF geometry."""
-    import subprocess
-    import tempfile
+def _embed_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flags=True) -> np.ndarray:
+    """The embed refinement: GFN2 (production) or, with profile field embed_refine, the batched MACE refinement
+    (builder.mace_embed)."""
+    mode = _e().EMBED_REFINE
+    if mode:
+        from jacobik.builder import mace_embed
 
-    from rdkit import Chem
+        return mace_embed.refine(rdmol_h, positions, donors, mode=mode, experiment_flags=experiment_flags)
+    return _e()._gfn2_refine(rdmol_h, positions, donors, experiment_flags=experiment_flags)
 
-    dn = sorted({int(a) for g in (donors or []) for a in g})
-    use_bond_check = bool(experiment_flags and _e().EMBED_BOND_CHECK)
-    use_li_cap = bool(experiment_flags and _e().EMBED_LI_CAP)
-    use_haptic_li_cap = bool(experiment_flags and _e().EMBED_HAPTIC_LI_CAP)
-    # the start geometry is part of the key (2026-10-16): keyed on SMILES alone, every embed_seed after the first got
-    # the first seed's GFN2 geometry back, so solve_multi_embed returned one embed n times under the default embed
-    key = (Chem.MolToSmiles(rdmol_h), positions.shape[0], tuple(dn), use_bond_check, use_li_cap, use_haptic_li_cap,
-           hash(np.round(np.asarray(positions, dtype=np.float64), 4).tobytes()))
-    if key in _e()._GFN2_CACHE:
-        if use_bond_check:
-            detail = _e()._GFN2_BOND_CHECK_CACHE.get(key, {"triggered": False, "bonds": []})
-            _e()._EMBED_BOND_CHECK_EVENTS.append(dict(smiles=Chem.MolToSmiles(rdmol_h), **detail))
-        return _e()._GFN2_CACHE[key].copy()
-    sy = [a.GetSymbol() for a in rdmol_h.GetAtoms()]
-    n_ligand_atoms = len(sy)
-    q_ligand = Chem.GetFormalCharge(rdmol_h)
+
+def _li_cap_positions(rdmol_h, positions, donors, use_li_cap, use_haptic_li_cap, experiment_flags) -> list:
+    """Temporary Li counter-ion positions of the embed refinement (embed_li_cap, embed_haptic_li_cap, li_cap_spread):
+    1.9 A from each locally anionic kappa donor along its lone pair, and above each eligible anionic haptic face."""
     kappa_donors = sorted({int(g[0]) for g in (donors or []) if len(g) == 1})
     def local_group_charge(atom_idx):
         atom = rdmol_h.GetAtomWithIdx(atom_idx)
@@ -688,6 +742,8 @@ def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flag
         else:
             direction = np.array([1.0, 0.0, 0.0])
         li_positions.append(np.asarray(positions[atom_idx], dtype=np.float64) + 1.9 * direction)
+    if li_positions and experiment_flags and _e().LI_CAP_SPREAD:
+        li_positions = _spread_li_caps(np.asarray(positions, dtype=np.float64), li_donors, li_positions)
     heavy = [a.GetIdx() for a in rdmol_h.GetAtoms() if a.GetAtomicNum() > 1]
     haptic_li_positions = []
     try:
@@ -723,6 +779,39 @@ def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flag
         _e().log.warning("haptic Li-cap placement failed (%s); refining without haptic caps", exc)
         haptic_li_positions = []
     li_positions.extend(haptic_li_positions)
+    return li_positions
+
+
+def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flags=True) -> np.ndarray:
+    """embed="gfn2" refinement (the default, DEFAULT_EMBED): GFN2-xTB optimisation (--opt crude) of the free ligand from its ETKDG/MMFF
+    embed, once per ligand (cached). Only the frozen internals IK starts from change. The tmQM references are GFN2
+    geometries, and GFN2 has parameters for every element (no silent no-op as with MMFF on boron). The donor set's
+    own geometry (every distance among donor atoms, incl. within a haptic face) is held at the embed's values: that is
+    what binding imposes (chelate bite, macrocycle cavity, bound diene face); GFN2 relaxes everything else. Any failure
+    keeps the MMFF geometry."""
+    import subprocess
+    import tempfile
+
+    from rdkit import Chem
+
+    dn = sorted({int(a) for g in (donors or []) for a in g})
+    use_bond_check = bool(experiment_flags and _e().EMBED_BOND_CHECK)
+    use_li_cap = bool(experiment_flags and _e().EMBED_LI_CAP)
+    use_haptic_li_cap = bool(experiment_flags and _e().EMBED_HAPTIC_LI_CAP)
+    # the start geometry is part of the key (2026-10-16): keyed on SMILES alone, every embed_seed after the first got
+    # the first seed's GFN2 geometry back, so solve_multi_embed returned one embed n times under the default embed
+    key = (Chem.MolToSmiles(rdmol_h), positions.shape[0], tuple(dn), use_bond_check, use_li_cap, use_haptic_li_cap,
+           (_e().EMBED_GFN2_OPT if experiment_flags else None), bool(experiment_flags and _e().LI_CAP_SPREAD),
+           hash(np.round(np.asarray(positions, dtype=np.float64), 4).tobytes()))
+    if key in _e()._GFN2_CACHE:
+        if use_bond_check:
+            detail = _e()._GFN2_BOND_CHECK_CACHE.get(key, {"triggered": False, "bonds": []})
+            _e()._EMBED_BOND_CHECK_EVENTS.append(dict(smiles=Chem.MolToSmiles(rdmol_h), **detail))
+        return _e()._GFN2_CACHE[key].copy()
+    sy = [a.GetSymbol() for a in rdmol_h.GetAtoms()]
+    n_ligand_atoms = len(sy)
+    q_ligand = Chem.GetFormalCharge(rdmol_h)
+    li_positions = _li_cap_positions(rdmol_h, positions, donors, use_li_cap, use_haptic_li_cap, experiment_flags)
     if li_positions:
         sy.extend(["Li"] * len(li_positions))
     q = q_ligand + len(li_positions)
@@ -738,7 +827,8 @@ def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flag
                     f.write(f"{len(sy)}\n\n" + "".join(
                         f"{s} {x:.6f} {y:.6f} {z:.6f}\n" for s, (x, y, z) in zip(sy, start)))
                 Path(td, "xtbopt.xyz").unlink(missing_ok=True)
-                args = [_e().XTB_BIN, "l.xyz", "--gfn", "2", "--opt", "crude", "--chrg", str(q), "--uhf", str(uhf)]
+                level = (_e().EMBED_GFN2_OPT or "crude") if experiment_flags else "crude"
+                args = [_e().XTB_BIN, "l.xyz", "--gfn", "2", "--opt", level, "--chrg", str(q), "--uhf", str(uhf)]
                 if len(dn) >= 2 or constrained_bonds:
                     with open(f"{td}/c.inp", "w") as f:
                         f.write("$constrain\n force constant=1.0\n")
@@ -796,3 +886,175 @@ def _gfn2_refine(rdmol_h, positions: np.ndarray, donors=None, *, experiment_flag
             _e()._EMBED_BOND_CHECK_EVENTS.append(dict(smiles=Chem.MolToSmiles(rdmol_h), **detail))
     _e()._GFN2_CACHE[key] = out
     return out.copy()
+
+
+# ---------------------------------------------------------------------------
+# Metal-templated ring conformers (macrocycle pool, profile field macro_template)
+# ---------------------------------------------------------------------------
+
+#: donor angle bound for the virtual metal: every donor-substituent direction makes >= this angle with the M-D bond,
+#: so the donor's lone pair (or face) points at the metal
+TEMPLATE_ANGLE_MIN_DEG = 100.0
+#: minimum distance of any non-donor heavy atom / H (two or more bonds from every donor) from the virtual metal (A)
+TEMPLATE_CLEAR_HEAVY, TEMPLATE_CLEAR_H = 2.8, 2.3
+
+
+def _template_fit(P: np.ndarray, donors: Sequence[Sequence[int]], radii: Sequence[float], iters: int = 8):
+    """Least-squares metal point p for donor groups (centroids) at distances ``radii``; returns (p, rms residual)."""
+    D = np.stack([P[list(g)].mean(0) for g in donors])
+    r = np.asarray(radii, float)
+    p = D.mean(0)
+    for _ in range(iters):
+        v = p - D
+        d = np.linalg.norm(v, axis=1).clip(1e-6)
+        res = d - r
+        J = v / d[:, None]
+        step, *_ = np.linalg.lstsq(J, -res, rcond=None)
+        p = p + step
+    res = np.linalg.norm(p - D, axis=1) - r
+    return p, float(np.sqrt((res ** 2).mean()))
+
+
+def templated_conformers(rd, donors: Sequence[Sequence[int]], radii: Sequence[float], n: int, seed: int) -> List[np.ndarray]:
+    """Free-ligand conformers that could wrap one metal: ETKDG with a virtual, unbonded metal atom in the bounds
+    matrix (each donor at its M-D distance, every donor substituent at >= TEMPLATE_ANGLE_MIN_DEG from the M-D bond,
+    every other atom clear of the metal), then MMFF of the ligand alone with its donor-donor distances restrained to
+    the embedded values. A macrocycle embedded without the metal rarely takes the folds it has around one (all
+    ring donors on one face, lone pairs converging), and the solve, which moves torsions with the ring closed,
+    cannot reach them from a free fold. No reference data: the radii are the Q1 means of the donors' keys.
+
+    ``rd``: the ligand (explicit H) whose atom order the result uses; ``donors``: local atom index groups (one atom
+    for kappa, several for a haptic face). Returns up to n (N, 3) arrays, sorted by template residual; [] on failure.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, rdDistGeom
+    from rdkit.DistanceGeometry import DoTriangleSmoothing
+
+    try:
+        n_at = rd.GetNumAtoms()
+        mh = Chem.RWMol(rd)
+        mh.RemoveAllConformers()
+        m_idx = mh.AddAtom(Chem.Atom(0))
+        mol = mh.GetMol()
+        mol.UpdatePropertyCache(strict=False)
+        bm = rdDistGeom.GetMoleculeBoundsMatrix(mol)
+
+        def setb(i, j, lo, hi):
+            a, b = max(i, j), min(i, j)   # upper bound in bm[min, max], lower in bm[max, min]
+            bm[b, a] = hi
+            bm[a, b] = min(lo, hi)
+
+        def blen(i, j):
+            a, b = max(i, j), min(i, j)
+            return 0.5 * (bm[b, a] + bm[a, b])
+
+        cos_min = math.cos(math.radians(TEMPLATE_ANGLE_MIN_DEG))
+        near = set()
+        for g, r in zip(donors, radii):
+            g = [int(a) for a in g]
+            near.update(g)
+            if len(g) == 1:
+                d = g[0]
+                setb(m_idx, d, r - 0.05, r + 0.05)
+                for nb in mol.GetAtomWithIdx(d).GetNeighbors():
+                    x = nb.GetIdx()
+                    if x == m_idx:
+                        continue
+                    b = blen(d, x)
+                    setb(m_idx, x, math.sqrt(r * r + b * b - 2 * r * b * cos_min), r + b)
+                    near.add(x)
+            else:
+                for a in g:
+                    setb(m_idx, a, r - 0.1, r + 0.6)
+                    near.update(nb.GetIdx() for nb in mol.GetAtomWithIdx(a).GetNeighbors())
+        for k in range(n_at):
+            if k in near:
+                continue
+            lo = TEMPLATE_CLEAR_H if mol.GetAtomWithIdx(k).GetAtomicNum() == 1 else TEMPLATE_CLEAR_HEAVY
+            a, b = max(k, m_idx), min(k, m_idx)
+            bm[a, b] = max(bm[a, b], lo)
+        if not DoTriangleSmoothing(bm):
+            log.info("templated ring conformers: bounds not triangle-smoothable")
+            return []
+        ps = AllChem.ETKDGv3()
+        ps.randomSeed = int(seed)
+        ps.SetBoundsMat(bm)
+        ps.useRandomCoords = True
+        ps.numThreads = 0
+        cids = list(AllChem.EmbedMultipleConfs(mol, int(n), ps))
+        if not cids:
+            return []
+        lig = Chem.Mol(rd)
+        lig.RemoveAllConformers()
+        for c in cids:
+            P = mol.GetConformer(c).GetPositions()[:n_at]
+            conf = Chem.Conformer(n_at)
+            for ai in range(n_at):
+                conf.SetAtomPosition(ai, P[ai].tolist())
+            lig.AddConformer(conf, assignId=True)
+        flat = [int(g[0]) for g in donors if len(g) == 1]
+        if AllChem.MMFFHasAllMoleculeParams(lig):
+            props = AllChem.MMFFGetMoleculeProperties(lig)
+            for conf in lig.GetConformers():
+                ff = AllChem.MMFFGetMoleculeForceField(lig, props, confId=conf.GetId())
+                P = conf.GetPositions()
+                for ia in range(len(flat)):
+                    for ib in range(ia + 1, len(flat)):
+                        dd = float(np.linalg.norm(P[flat[ia]] - P[flat[ib]]))
+                        ff.MMFFAddDistanceConstraint(flat[ia], flat[ib], False, dd - 0.1, dd + 0.1, RESTRAINT_K)
+                ff.Minimize(maxIts=500)
+        out = []
+        for conf in lig.GetConformers():
+            P = np.asarray(conf.GetPositions(), float)
+            p, rms = _template_fit(P, donors, radii)
+            clear = np.linalg.norm(P - p, axis=1)
+            mask = np.ones(n_at, bool)
+            mask[list(near)] = False
+            clash = float(np.clip(TEMPLATE_CLEAR_H - clear[mask], 0, None).sum()) if mask.any() else 0.0
+            out.append((rms + clash, P))
+        out.sort(key=lambda t: t[0])
+        return [P for _, P in out]
+    except Exception as exc:  # the generator never fails: the caller keeps its free-ligand pool
+        log.warning("templated ring conformers failed (%s: %s)", type(exc).__name__, exc)
+        return []
+
+
+#: li_cap_spread: minimum Li-Li and Li-(other ligand atom) distances of the GFN2 counter-ion caps, A
+LI_CAP_MIN_LI, LI_CAP_MIN_ATOM = 2.8, 1.7
+
+
+def _fibonacci_dirs(n: int = 96) -> np.ndarray:
+    k = np.arange(n) + 0.5
+    phi = np.arccos(1 - 2 * k / n)
+    th = np.pi * (1 + 5 ** 0.5) * k
+    return np.stack([np.cos(th) * np.sin(phi), np.sin(th) * np.sin(phi), np.cos(phi)], -1)
+
+
+def _spread_li_caps(positions: np.ndarray, donors, caps) -> list:
+    """Profile field li_cap_spread: keep every Li cap (the charge bookkeeping is unchanged) but never two in one
+    place. Each cap sits 1.9 A from its donor along the lone-pair direction; in a macrocycle every donor's direction
+    points into the cavity, so the caps coincide (UYOVUA: two Li 0.55 A apart, GFN2 SCF diverged and the embed fell
+    back to MMFF). Greedy, in donor order: a cap keeps its direction when it is >= LI_CAP_MIN_LI from the caps placed
+    so far and >= LI_CAP_MIN_ATOM from every other ligand atom; otherwise it takes, among directions in its donor's
+    open hemisphere (<= 90 deg from the lone-pair direction), the one with the largest clearance."""
+    dirs = _fibonacci_dirs()
+    placed = []
+    for d, cap in zip(donors, caps):
+        p0 = positions[d]
+        lp = np.asarray(cap) - p0
+        lp = lp / max(np.linalg.norm(lp), 1e-12)
+        others = np.delete(positions, d, axis=0)
+
+        def clearance(c):
+            da = np.linalg.norm(others - c, axis=1).min() / LI_CAP_MIN_ATOM if len(others) else np.inf
+            dl = min((np.linalg.norm(c - q) for q in placed), default=np.inf) / LI_CAP_MIN_LI
+            return min(da, dl)
+
+        best = np.asarray(cap, dtype=np.float64)
+        if clearance(best) < 1.0:
+            cands = [p0 + 1.9 * u for u in dirs if float(u @ lp) >= 0.0]
+            cl = [clearance(c) for c in cands]
+            if cands and max(cl) > clearance(best):
+                best = cands[int(np.argmax(cl))]
+        placed.append(best)
+    return placed

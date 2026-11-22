@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from jacobik.core.env import EPS
+from jacobik.core import symeig as _symeig
 from jacobik.ik.fk import axisangle_to_matrix
 
 if TYPE_CHECKING:
@@ -67,10 +68,12 @@ def kabsch_init(
             R = (V * sign_fix[:, None, :]) @ U.transpose(-1, -2)
 
         # Rank of each row's donor cloud: 0 = one donor, 1 = collinear.
-        rank = (torch.linalg.eigvalsh(Pc.transpose(-1, -2) @ Pc) > 1e-5).sum(dim=-1)  # (B,)
+        # (symeig: LAPACK on the CPU, a Jacobi sweep on CUDA, where cuSOLVER's batched workspace (~0.3 MB per
+        # matrix) ran an 8 GB card out of memory on macrocycle batches)
+        rank = (_symeig.eigvalsh(Pc.transpose(-1, -2) @ Pc) > 1e-5).sum(dim=-1)  # (B,)
 
         # Extra random rotation axis/angle, chosen per row by rank (all masks, no branches).
-        _, Qe = torch.linalg.eigh(Qc.transpose(-1, -2) @ Qc)
+        _, Qe = _symeig.eigh(Qc.transpose(-1, -2) @ Qc)
         ax0 = Qm - metal_pos  # rank 0: about the metal-donor axis
         ax1 = Qe[:, :, -1]  # rank 1: principal axis of the targets
         # random draws are made on the CPU generator and moved, so a seed gives the same starts on every device
@@ -193,7 +196,7 @@ def _optimal_rotation_nocentroid(A: torch.Tensor, B: torch.Tensor) -> torch.Tens
     N[:, 3, 2] = N[:, 2, 3]
     N[:, 3, 3] = -Sxx - Syy + Szz
     # eigh eigenvalues are ascending: the optimal quaternion is the last eigenvector.
-    _, evecs = torch.linalg.eigh(N)
+    _, evecs = _symeig.eigh(N)
     q = evecs[:, :, -1]  # (Batch, 4): (w, x, y, z)
     w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
     R = torch.stack(

@@ -66,6 +66,45 @@ def _lone_pair_convergence(P: torch.Tensor, donors: List[int], nbrs: List[List[i
     return res.pow(2).mean(1).sqrt() + back
 
 
+def _donor_face_convergence(P: torch.Tensor, kappa: List[int], kappa_nbrs: List[List[int]],
+                            faces: List[List[int]], face_nbrs: List[List[int]]) -> torch.Tensor:
+    """
+    (C,) metal-binding score of ring conformers P (C, n, 3) of any macrocycle (profile field
+    macro_pool_rank): every kappa donor gives a ray (donor -> away from its neighbours' centroid, backward length
+    penalised as in _lone_pair_convergence), every haptic face a line through its centroid along the face normal (the
+    pi lobes point both ways: a line, no backward term). The normal is that of the least-squares plane through the
+    face atoms and their substituents (an eta2 C=C alone defines no plane). Score = RMS distance of the rays/lines from
+    their least-squares common point + backward length: exactly _lone_pair_convergence when every donor is kappa
+    (a ring with sp3 nitrogens only is ranked as before), extended to any donor element and to haptic faces. Low = a
+    binding fold.
+    """
+    origins, dirs, directed = [], [], []
+    for d, nb in zip(kappa, kappa_nbrs):
+        o = P[:, d]
+        origins.append(o)
+        dirs.append(F.normalize(o - P[:, nb].mean(1), dim=-1))
+        directed.append(True)
+    for g, nb in zip(faces, face_nbrs):
+        Q = P[:, list(g) + list(nb)]
+        Qc = Q - Q.mean(1, keepdim=True)
+        _, V = torch.linalg.eigh(Qc.transpose(1, 2) @ Qc)
+        origins.append(P[:, list(g)].mean(1))
+        dirs.append(V[..., 0])
+        directed.append(False)
+    N = torch.stack(origins, 1)
+    l = torch.stack(dirs, 1)
+    I3 = torch.eye(3, dtype=P.dtype, device=P.device)
+    Pm = I3 - l[..., :, None] * l[..., None, :]
+    A = Pm.sum(1) + 1e-4 * I3
+    b = torch.einsum("cdij,cdj->ci", Pm, N)
+    pt = torch.linalg.solve(A, b[..., None])[..., 0]
+    diff = pt[:, None] - N
+    res = torch.einsum("cdij,cdj->cdi", Pm, diff).norm(dim=-1)
+    dmask = torch.tensor(directed, dtype=P.dtype, device=P.device)
+    back = (torch.relu(-(l * diff).sum(-1)) * dmask).sum(1)
+    return res.pow(2).mean(1).sqrt() + back
+
+
 
 class _RowsMixin:
     """Seed row preparation, macrocycle pool construction, and joint Scorer creation."""
@@ -211,7 +250,7 @@ class _RowsMixin:
         )
         return torch.tensor(ideal_directions_full, dtype=torch.float32, device=ctx.device)
 
-    def _macro_pool(self, ctx, li, fk, B):
+    def _macro_pool(self, ctx, li, fk, B, template=None):
         """
         Per-row ring conformers for a macrocyclic ligand.
 
@@ -235,10 +274,13 @@ class _RowsMixin:
         lig = ctx.mol.ligands[li]
         first = fk._lig_first
         ref = np.asarray(rd0.GetConformer().GetPositions())
-        key = (Chem.MolToSmiles(rd0), tuple(sorted(lig.donor_atoms)), int(ctx.macro_pool), ref.round(3).tobytes())
+        if not _e().MACRO_TEMPLATE:
+            template = None
+        tkey = None if template is None else (tuple(map(tuple, template[0])), tuple(np.round(template[1], 2)))
+        key = (Chem.MolToSmiles(rd0), tuple(sorted(lig.donor_atoms)), int(ctx.macro_pool), ref.round(3).tobytes(), tkey)
         hit = _e()._MACRO_POOL_CACHE.get(key)
         if hit is None:
-            hit = self._build_macro_pool(ctx, rd0, lig, fk, first, ref)
+            hit = self._build_macro_pool(ctx, rd0, lig, fk, first, ref, template)
             _e()._MACRO_POOL_CACHE[key] = hit
         P = hit.to(ctx.device)
         ang = fk.macro_seed_angles(P)  # (K, n_macro)
@@ -249,10 +291,48 @@ class _RowsMixin:
         return ang[rows], P[rows]
 
     @staticmethod
-    def _build_macro_pool(ctx, rd0, lig, fk, first, ref):
-        """Embed, rank, diversify and MMFF-relax ring conformers -> (K, n, 3) CPU tensor."""
+    def _haptic_site_spread(P, faces, rd0) -> float:
+        """Smallest (over face sides) largest distance between the metal sites of the haptic faces of one fold: a site
+        is _HAPTIC_SITE_R off the face centroid along the face normal (plane of the face atoms and their heavy
+        neighbours)."""
+        import itertools
+
+        sites = []
+        for g in faces:
+            gs = set(g)
+            nb = {n.GetIdx() for a in g for n in rd0.GetAtomWithIdx(a).GetNeighbors()
+                  if n.GetIdx() not in gs and n.GetAtomicNum() > 1}
+            Q = P[list(g) + sorted(nb)]
+            c = P[list(g)].mean(0)
+            nrm = np.linalg.svd(Q - Q.mean(0))[2][2]
+            sites.append((c + _e()._HAPTIC_SITE_R * nrm, c - _e()._HAPTIC_SITE_R * nrm))
+        best = np.inf
+        for pick in itertools.product((0, 1), repeat=len(sites)):
+            S = np.array([s[k] for s, k in zip(sites, pick)])
+            best = min(best, float(np.max(np.linalg.norm(S[:, None] - S[None], axis=-1))))
+        return best
+
+    @staticmethod
+    def _build_macro_pool(ctx, rd0, lig, fk, first, ref, template=None):
+        """Embed, rank, diversify and MMFF-relax ring conformers -> (K, n, 3) CPU tensor.
+
+        With ``template`` = (local donor groups, M-D radii) (profile field macro_template) the conformers are embedded
+        around a virtual metal (embed.templated_conformers) and kept in template order, diversified by ring
+        dihedrals; the free-ligand ETKDG pool is the fallback when that embed yields nothing."""
         from rdkit import Chem
         from rdkit.Chem import AllChem
+
+        if template is not None:
+            from jacobik.builder.embed import templated_conformers
+
+            confs = templated_conformers(rd0, template[0], template[1], max(int(ctx.macro_pool), 1), seed=7)
+            if confs:
+                P = torch.tensor(np.stack([ref] + confs), dtype=torch.float32)
+                order = torch.cat([torch.arange(1, P.shape[0]), torch.zeros(1, dtype=torch.long)])
+                rank = torch.empty(P.shape[0])
+                rank[order] = torch.arange(P.shape[0], dtype=torch.float32)  # template order first, the embed last
+                keep = _e()._diverse_ranked(fk.macro_seed_angles(P), rank, _e()._POOL_TARGET, None)[0]
+                return P[keep]
 
         ring_atoms = {a for ring in lig.macrocycles for a in ring}
         sp3 = [
@@ -265,11 +345,56 @@ class _RowsMixin:
         nbrs = [[n.GetIdx() for n in rd0.GetAtomWithIdx(d).GetNeighbors()] for d in sp3]
         cap = max(int(ctx.macro_pool), 1)
         use_sel = len(sp3) >= 3
+        score_fn = lambda P_: _e()._lone_pair_convergence(P_, sp3, nbrs)  # noqa: E731
+        if _e().MACRO_POOL_RANK:
+            # v1.0b macro_pool_rank: only rings with >= 3 sp3 ring nitrogens were ranked; crown ethers, thiacrowns and
+            # mixed N/O/S rings took the first _POOL_TARGET free-ligand folds unranked. Rank every ring with >= 3 kappa
+            # donors, any element, by its lone-pair convergence. Rings with a haptic segment (COD, CDT, N/olefin
+            # rings) keep the production pool: ranking them by haptic face normals made COD worse (AWONOR, USAPOU,
+            # XOJHIN, 3 seeds, 2026-11-18: AWONOR worse on every seed, XOJHIN on 2 of 3).
+            if not any(set(h.donor_indices) & ring_atoms for h in lig.haptic_groups):
+                kap = [d - first for d in lig.donor_atoms if d in ring_atoms]
+                kap_n = [[n.GetIdx() for n in rd0.GetAtomWithIdx(d).GetNeighbors()] for d in kap]
+                use_sel = len(kap) >= 3
+                score_fn = lambda P_: _donor_face_convergence(P_, kap, kap_n, [], [])  # noqa: E731
         target = _e()._POOL_TARGET
         pool = [ref]
         score = None
         n_emb = 0
         batch_i = 0
+        faces = [[a - first for a in h.donor_indices] for h in lig.haptic_groups
+                 if len(h.donor_indices) >= 2 and set(h.donor_indices) & ring_atoms]
+        if _e().MACRO_HAPTIC_FILTER and len(faces) >= 2 and not use_sel:
+            # macro_haptic_filter: a ring with >= 2 haptic faces keeps only folds whose faces can all reach one metal
+            # (free COD: the chair, 33 of 64 ETKDG folds, has its olefins facing opposite ways; the solve, moving
+            # torsions with the ring closed, rarely inverts it: AWONOR rows 17-52). The input embed stays first.
+            n_drop = 0
+            try:
+                while n_emb < cap and len(pool) - 1 < target:
+                    n_b = min(_e()._POOL_BATCH, cap - n_emb)
+                    ps = AllChem.ETKDGv3()
+                    ps.randomSeed = 7 + batch_i
+                    ps.numThreads = 0
+                    ps.useRandomCoords = _e()._POOL_RANDOM_COORDS
+                    rd = Chem.Mol(rd0)
+                    ids = list(AllChem.EmbedMultipleConfs(rd, n_b, ps))
+                    n_emb += n_b
+                    batch_i += 1
+                    if ids:  # the folds separate after MMFF (free COD 1.1 / 1.6 / 3.5 A), not on raw ETKDG geometry
+                        AllChem.MMFFOptimizeMoleculeConfs(rd, numThreads=0, maxIters=200)
+                    for i in ids:
+                        Pc = np.asarray(rd.GetConformer(i).GetPositions())
+                        if _RowsMixin._haptic_site_spread(Pc, faces, rd0) <= _e()._HAPTIC_SITE_TOL:
+                            if len(pool) - 1 < target:
+                                pool.append(Pc)
+                        else:
+                            n_drop += 1
+                    if not ids:
+                        break
+            except Exception as exc:  # never fail the caller: the input embed alone is a valid pool
+                _e().log.warning("macro_haptic_filter: %s; pool so far kept", exc)
+            _e().log.info("macro_haptic_filter: %d folds kept, %d dropped (%d embedded)", len(pool) - 1, n_drop, n_emb)
+            n_emb = cap                      # skip the unfiltered loop below
         while n_emb < cap:
             n_b = min(_e()._POOL_BATCH, cap - n_emb, target if not use_sel else _e()._POOL_BATCH)
             ps = AllChem.ETKDGv3()
@@ -284,7 +409,7 @@ class _RowsMixin:
             if not use_sel:
                 break
             P = torch.tensor(np.stack(pool), dtype=torch.float32)
-            score = _e()._lone_pair_convergence(P, sp3, nbrs)
+            score = score_fn(P)
             keep = _e()._diverse_ranked(fk.macro_seed_angles(P), score, target, _e()._POOL_GOOD)
             if len(keep[1]) >= target:  # enough distinct good folds
                 break
@@ -301,10 +426,26 @@ class _RowsMixin:
                 conf.SetAtomPosition(ai, tuple(float(x) for x in pool[c][ai]))
             rk.AddConformer(conf, assignId=True)
         AllChem.MMFFOptimizeMoleculeConfs(rk, numThreads=0, maxIters=200)
-        return torch.tensor(
-            np.stack([rk.GetConformer(c.GetId()).GetPositions() for c in rk.GetConformers()]),
-            dtype=torch.float32,
-        )
+        confs = [np.asarray(rk.GetConformer(c.GetId()).GetPositions(), float) for c in rk.GetConformers()]
+        if _e().MACRO_POOL_REFINE == "mace" and confs:
+            from jacobik.builder import mace_embed
+
+            li_ = next(i for i, l in enumerate(ctx.mol.ligands) if l is lig)
+            groups = [[int(a) - first for a in grp] for (l_, _, grp) in ctx.all_donor_groups if l_ == li_]
+            confs = mace_embed.refine_many(rd0, confs, groups)
+        if _e().MACRO_POOL_REFINE == "gfn2" and confs:
+            # The rows' bond lengths and angles are those of their pool conformer. A free-ligand MMFF minimum of a
+            # charged or crowded macrocycle opens its ring angles (DOTA4-: N-C-C 118 deg, GFN2 embed 108), so refine
+            # every conformer as the embed itself is refined (GFN2 crude, donor-donor distances held), in parallel
+            # single-threaded xtb runs. Any failure keeps that conformer's MMFF geometry (_gfn2_refine never raises).
+            import os
+            from concurrent.futures import ThreadPoolExecutor
+
+            li_ = next(i for i, l in enumerate(ctx.mol.ligands) if l is lig)
+            groups = [[int(a) - first for a in grp] for (l_, _, grp) in ctx.all_donor_groups if l_ == li_]
+            with ThreadPoolExecutor(max_workers=max(1, min(8, (os.cpu_count() or 2) - 1, len(confs)))) as ex:
+                confs = list(ex.map(lambda P: _e()._gfn2_refine(rd0, P, groups), confs))
+        return torch.tensor(np.stack(confs), dtype=torch.float32)
 
     def _joint_scorer(self, ctx, ge_joint, assignments):
         """The joint scorer of a solve over `assignments` (row_groups index this list)."""
@@ -562,7 +703,14 @@ class _BeamMixin:
             # (the reference embedding first), so rows start in different folds.
             n_macro = fk.n_macro_joints
             if n_macro > 0:
-                macro_seed, macro_coords = self._macro_pool(ctx, li, fk, B)
+                tmpl = None
+                try:
+                    grp_local = [[int(a) - fk._lig_first for a in ctx.all_donor_groups[di][2]] for di in lig_di]
+                    radii = np.linalg.norm(donor_targets_np, axis=-1).mean(axis=(0, 1))
+                    tmpl = (grp_local, radii)
+                except Exception as exc:
+                    _e().log.warning("macrocycle template radii unavailable (%s); free-ligand pool", exc)
+                macro_seed, macro_coords = self._macro_pool(ctx, li, fk, B, tmpl)
                 beam_torsions_B = torch.cat([beam_torsions_B, macro_seed], dim=-1)
                 if X_rows is None:
                     X_rows = X_full.unsqueeze(0).expand(B, -1, -1).clone()

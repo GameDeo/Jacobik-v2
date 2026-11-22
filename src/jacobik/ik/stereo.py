@@ -36,6 +36,13 @@ STEREO_COST_CEILING: float = profile.get("stereo_cost_ceiling")
 OUT_PER_CLASS: bool = profile.get("out_per_class")
 OUT_PER_CLASS_K: int = profile.get("out_per_class_k")
 OUT_PER_CLASS_WINDOW: float = profile.get("out_per_class_window")
+#: cage diastereomers are part of the stereo candidates (v1.0b fold-in: the former stereo_cage flag)
+STEREO_CAGE: bool = bool(STEREO_CANDIDATES)
+
+#: cage diastereomer perception: free-ligand ETKDG embeds sampled, distinct diastereomers kept (most frequent first)
+_CAGE_EMBEDS = 32
+_CAGE_MAX = 4
+_CAGE_SEED = 0xCA6E
 
 
 class StereoType(str, Enum):
@@ -43,6 +50,8 @@ class StereoType(str, Enum):
     BINDING_CREATED_DONOR = "binding_created_donor"
     DOUBLE_BOND_EZ = "double_bond_ez"
     MCX_ROTAMER = "mcx_rotamer"
+    #: v1.0b stereo_cage: the joint configuration of a rigid polycyclic cage (its bridgeheads cannot invert one by one)
+    CAGE_DIASTEREOMER = "cage_diastereomer"
 
 
 @dataclass
@@ -57,6 +66,11 @@ class StereoElement:
     name: str = ""
     specified: bool = False
     specified_value: Any = None
+    #: CAGE_DIASTEREOMER: per option, ((atom_idx, RDKit chiral tag int), ...) and the signed-volume signs of the cage
+    #: centres (first three heavy neighbours, mol order) of a sampled embed
+    options: Tuple[Any, ...] = ()
+    option_signs: Tuple[Tuple[int, ...], ...] = ()
+    centre_nbrs: Tuple[Tuple[int, ...], ...] = ()
 
 
 @dataclass
@@ -104,7 +118,8 @@ def perceive_ligand_centres(mol_rd: Chem.Mol, ligand_idx: int, donor_atoms: Set[
         # If more than 1 H, cannot be chiral
         if n_hs > 1:
             continue
-        # Polycyclic rigid cage check (e.g. DAMVAQ): bridgehead atoms shared by >= 2 small rings (<= 6) cannot invert independently
+        # Polycyclic rigid cage check (e.g. DAMVAQ): bridgehead atoms shared by >= 2 small rings (<= 6) cannot invert
+        # independently; with stereo_cage their joint configurations are one element (perceive_cage_diastereomers)
         small_rings = [r for r in ring_info.AtomRings() if idx in r and len(r) <= 6]
         if len(small_rings) >= 2:
             continue
@@ -331,9 +346,111 @@ def perceive_mcx_rotamers(mol_rd: Chem.Mol, ligand_idx: int, donor_groups: Seque
     return elements
 
 
+def _cage_centres(m: Chem.Mol, donor_atoms: Set[int]) -> List[int]:
+    """Tetrahedral cage centres: heavy, four substituents (at most one H), in >= 2 rings of size <= 6, not a donor."""
+    ri = m.GetRingInfo()
+    out = []
+    for a in m.GetAtoms():
+        idx = a.GetIdx()
+        if idx in donor_atoms or a.GetAtomicNum() <= 1:
+            continue
+        n_hs = a.GetTotalNumHs(includeNeighbors=False)
+        if a.GetDegree() + n_hs != 4 or n_hs > 1:
+            continue
+        if sum(1 for r in ri.AtomRings() if idx in r and len(r) <= 6) >= 2:
+            out.append(idx)
+    return out
+
+
+def _centre_signs(pos: np.ndarray, centres: Sequence[int], nbrs: Sequence[Sequence[int]]) -> Tuple[int, ...]:
+    out = []
+    for a, nb in zip(centres, nbrs):
+        v = np.array([pos[k] - pos[a] for k in nb[:3]])
+        out.append(1 if float(np.linalg.det(v)) >= 0 else -1)
+    return tuple(out)
+
+
+def perceive_cage_diastereomers(m: Chem.Mol, ligand_idx: int, donor_atoms: Set[int],
+                                merge_mirror: bool = True) -> List[StereoElement]:
+    """v1.0b stereo_cage: the diastereomers of a rigid polycyclic cage as ONE element.
+
+    The bridgeheads of a cage cannot be inverted one by one (perceive_ligand_centres skips them), but a cage with an
+    unsymmetric part has several diastereomers (DAMVAQ: the cyclopropane syn or anti to the donor carbons; ETKDG gives
+    both, 14 and 18 of 32 embeds, and the crystal is the minority one). Free-ligand ETKDG embeds are sampled; their
+    cage configurations (stereo of the cage centres only, mirror images merged unless merge_mirror is off) are the
+    options, most frequent first, at most _CAGE_MAX. One option only: no element."""
+    from rdkit.Chem import AllChem
+    from rdkit.Geometry import Point3D
+
+    centres = _cage_centres(m, donor_atoms)
+    if len(centres) < 2:
+        return []
+    mh = Chem.AddHs(m)
+    ps = AllChem.ETKDGv3()
+    ps.randomSeed = _CAGE_SEED
+    ps.numThreads = 0
+    ids = list(AllChem.EmbedMultipleConfs(mh, _CAGE_EMBEDS, ps))
+    if not ids:
+        return []
+    cset = set(centres)
+    nbrs = [[nb.GetIdx() for nb in m.GetAtomWithIdx(a).GetNeighbors()] for a in centres]  # heavy (m has no H)
+    flip = np.array([-1.0, 1.0, 1.0])
+
+    def _tagged(pos):
+        t = Chem.Mol(mh)
+        t.RemoveAllConformers()
+        c = Chem.Conformer(t.GetNumAtoms())
+        for i in range(t.GetNumAtoms()):
+            c.SetAtomPosition(i, Point3D(*map(float, pos[i])))
+        t.AddConformer(c, assignId=True)
+        Chem.AssignStereochemistryFrom3D(t, confId=0, replaceExistingTags=True)
+        for a in t.GetAtoms():
+            if a.GetIdx() not in cset:
+                a.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+        for b in t.GetBonds():
+            b.SetStereo(Chem.BondStereo.STEREONONE)
+        return t
+
+    def _key(t):
+        return Chem.MolToSmiles(Chem.RemoveHs(t, sanitize=False))
+
+    found: Dict[str, list] = {}
+    for cid in ids:
+        pos = np.asarray(mh.GetConformer(cid).GetPositions())
+        t = _tagged(pos)
+        k = _key(t)
+        if merge_mirror:
+            tm = _tagged(pos * flip)
+            km = _key(tm)
+            if km < k:                       # the mirror image is the canonical representative
+                k, t, pos = km, tm, pos * flip
+        if k not in found:
+            tags = tuple((a, int(t.GetAtomWithIdx(a).GetChiralTag())) for a in centres
+                         if t.GetAtomWithIdx(a).GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED)
+            found[k] = [0, tags, _centre_signs(pos, centres, nbrs)]
+        found[k][0] += 1
+    if len(found) < 2:
+        return []
+    opts = sorted(found.values(), key=lambda x: -x[0])[:_CAGE_MAX]
+    log.info("stereo_cage: ligand %d, %d cage centres, %d diastereomers (%s of %d embeds)", ligand_idx, len(centres),
+             len(opts), [o[0] for o in opts], len(ids))
+    a0 = centres[0]
+    return [StereoElement(
+        element_type=StereoType.CAGE_DIASTEREOMER, ligand_idx=ligand_idx, atom_idx=a0,
+        atom_symbol=m.GetAtomWithIdx(a0).GetSymbol(), neighbors=tuple(centres), name=f"L{ligand_idx}_K{a0}",
+        options=tuple(o[1] for o in opts), option_signs=tuple(o[2] for o in opts),
+        centre_nbrs=tuple(tuple(nb) for nb in nbrs))]
+
+
 def perceive_complex_stereo(builder: Any, scope: str = "B") -> List[StereoElement]:
     """Perceive all stereochemical elements across all ligands of a complex builder."""
     all_elements: List[StereoElement] = []
+    tagged_any = False
+    if STEREO_CAGE:
+        for lig in builder.ligands:
+            mm = Chem.MolFromSmiles(lig.smiles)
+            if mm is not None and any(a.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED for a in mm.GetAtoms()):
+                tagged_any = True
     for li, lig in enumerate(builder.ligands):
         m = Chem.MolFromSmiles(lig.smiles)
         if m is None:
@@ -353,6 +470,12 @@ def perceive_complex_stereo(builder: Any, scope: str = "B") -> List[StereoElemen
         if scope.upper() == "B":
             mcx = perceive_mcx_rotamers(m, li, lig.donors)
             all_elements.extend(mcx)
+        # 5. Cage diastereomers (stereo_cage); mirror images are distinct when a centre is tagged anywhere
+        if STEREO_CAGE:
+            try:
+                all_elements.extend(perceive_cage_diastereomers(m, li, donors_flat, merge_mirror=not tagged_any))
+            except Exception as exc:  # never fail the caller
+                log.warning("stereo_cage: perception failed on ligand %d (%s)", li, exc)
     return all_elements
 
 
@@ -391,6 +514,10 @@ def build_variant_ligand_fixes(
                 flip = -1 if (at and at.GetFormalCharge() < 0 and (at.GetTotalNumHs() > 0 or len(rd_nbrs) == 2)) else 1
                 tag = Chem.ChiralType.CHI_TETRAHEDRAL_CCW if (val * sgn * flip > 0) else Chem.ChiralType.CHI_TETRAHEDRAL_CW
                 lig_fixes[el.ligand_idx]["chiral"].append((el.atom_idx, tag))
+            elif el.element_type == StereoType.CAGE_DIASTEREOMER:
+                # tags were read on AddHs(MolFromSmiles(smiles)); the embed's mol has the same heavy-atom bond order
+                for a, tag in el.options[int(val)]:
+                    lig_fixes[el.ligand_idx]["chiral"].append((int(a), Chem.ChiralType.values[int(tag)]))
     return lig_fixes
 
 
@@ -480,6 +607,9 @@ def enumerate_stereo_variants(
 
     specified_bonds = {e.name: (1 if e.specified_value == 1 else 0) for e in double_bonds if e.specified}
     unspecified_bonds = [e for e in double_bonds if not e.specified]
+    # stereo_cage: one option index per cage element; its options are already mirror-merged, so inverting the other
+    # centres no longer gives the enantiomer and their mirror pairs are not collapsed
+    cages = [e for e in elements if e.element_type == StereoType.CAGE_DIASTEREOMER and not e.specified]
 
     # Enumerate centres combinations (+1, -1)
     n_uc = len(unspecified_centres)
@@ -490,7 +620,7 @@ def enumerate_stereo_variants(
     merged_centre_combos = []
     seen_mirror = set()
     for combo in raw_centre_combos:
-        if achiral_environment and len(combo) > 0:
+        if achiral_environment and len(combo) > 0 and not cages:
             inv_tuple = tuple(-v for v in combo)
             canonical = min(combo, inv_tuple)
             if canonical in seen_mirror:
@@ -509,6 +639,10 @@ def enumerate_stereo_variants(
     for combo in raw_bond_combos:
         b_dict = dict(zip([e.name for e in unspecified_bonds], combo))
         bond_combos.append(b_dict)
+    cage_names = {e.name for e in cages}
+    if cages:  # cage option indices ride with the bond combinations (labelled K<i> below)
+        bond_combos = [{**b, **dict(zip([e.name for e in cages], kc))} for b in bond_combos
+                       for kc in itertools.product(*[range(len(e.options)) for e in cages])]
 
     # Full product of centre configurations and double bond configurations
     raw_variants: List[StereoVariant] = []
@@ -517,6 +651,7 @@ def enumerate_stereo_variants(
             cfg = {**cc, **bc}
             all_cfgs = {**cfg, **specified_centres, **specified_bonds}
             cid_parts = [
+                f"{k}:K{v}" if k in cage_names else
                 f"{k}:{'Z' if v == 1 else 'E'}" if k in (specified_bonds or bc) else f"{k}:{'+' if v > 0 else '-'}"
                 for k, v in sorted(all_cfgs.items())
             ]
@@ -623,6 +758,23 @@ def compute_conformer_stereo_labels(*args, **kwargs) -> Dict[str, str]:
             else:
                 labels[el.name] = "?"
 
+        elif el.element_type == StereoType.CAGE_DIASTEREOMER:
+            cen = list(el.neighbors)
+            if not el.centre_nbrs or max(max(cen), max(max(nb) for nb in el.centre_nbrs)) >= len(lig_map):
+                labels[el.name] = "?"
+                continue
+            nb = [[lig_map[k] for k in nbs] for nbs in el.centre_nbrs]
+            s = _centre_signs(pos, [lig_map[a] for a in cen], nb)
+            lab = "?"
+            for k, ref in enumerate(el.option_signs):
+                if s == tuple(ref):
+                    lab = f"K{k}"
+                    break
+                if s == tuple(-x for x in ref):
+                    lab = f"K{k}*"
+                    break
+            labels[el.name] = lab
+
         elif el.element_type in (StereoType.DOUBLE_BOND_EZ, StereoType.MCX_ROTAMER):
             if el.atom_idx_end is None:
                 continue
@@ -709,7 +861,7 @@ def near_elements(builder: Any, elements: Sequence[StereoElement], extra_el: Seq
         if e.specified:
             near.append(e)                      # fixed in every class; kept so the class ids carry it
             continue
-        if e.element_type == StereoType.BINDING_CREATED_DONOR:
+        if e.element_type in (StereoType.BINDING_CREATED_DONOR, StereoType.CAGE_DIASTEREOMER):
             near.append(e)
             continue
         lig = builder.ligands[e.ligand_idx]

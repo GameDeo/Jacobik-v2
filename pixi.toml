@@ -6,7 +6,7 @@ platforms = [
     { name = "my-win-64", platform = "win-64", cuda = "12" },
     { name = "my-linux-64", platform = "linux-64", cuda = "12" },
 ]
-version = "0.1.0"
+version = "1.0b0"
 
 [tasks]
 

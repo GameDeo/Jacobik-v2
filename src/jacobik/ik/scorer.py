@@ -139,11 +139,16 @@ def _pad_and_stack(
             torch.zeros(0, 1, dtype=dtype, device=device),
             torch.zeros(0, dtype=torch.long, device=device),
         )
-    max_k = max(len(p) for p in param_lists)
-    lengths = torch.tensor([len(p) for p in param_lists], dtype=torch.long, device=device)
-    t = torch.zeros(len(param_lists), max_k, dtype=dtype, device=device)
+    lens = [len(p) for p in param_lists]
+    max_k = max(lens)
+    lengths = torch.tensor(lens, dtype=torch.long, device=device)
+    # packed on the host, one transfer (a per-row device write cost 13 s per FUTSOD solve: 555 calls, ~24 ms each);
+    # float64 -> float32 rounds as torch.tensor(list, dtype) does
+    buf = np.zeros((len(param_lists), max_k), dtype=np.float64)
     for i, p in enumerate(param_lists):
-        t[i, : len(p)] = torch.tensor(p, dtype=dtype)
+        if lens[i]:
+            buf[i, : lens[i]] = np.asarray(p, dtype=np.float64)
+    t = torch.from_numpy(buf).to(dtype=dtype).to(device)
     return t, lengths
 
 
