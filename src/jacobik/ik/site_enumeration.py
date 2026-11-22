@@ -198,6 +198,11 @@ def enumerate_assignments(
 
     cfg = config or SiteEnumerationConfig()
     site_angles = site_angles_deg(ideal_directions)
+    hm: Optional[List[List[Optional[int]]]] = (
+        [[None if (v is None or v < 0) else int(v) for v in row] for row in hop_matrix]
+        if hop_matrix is not None
+        else None
+    )
 
     assignments: List[np.ndarray] = []
     truncated = False
@@ -211,11 +216,13 @@ def enumerate_assignments(
         return False
 
     def consistent(donor: int, site: int, placement: Dict[int, int]) -> bool:
+        if hm is None:
+            return True
+        row = hm[donor]
+        ang_row = site_angles[site]
         for other_donor, other_site in placement.items():
-            h = _hop(hop_matrix, donor, other_donor)
-            if h is None:
-                continue
-            if not is_pair_reachable(h, site_angles[site, other_site]):
+            h = row[other_donor]
+            if h is not None and not is_pair_reachable(h, ang_row[other_site]):
                 return False
         return True
 

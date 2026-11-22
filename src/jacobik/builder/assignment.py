@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from jacobik.builder.result import ConformerResult, EnsembleResult
+from jacobik.core import timing
 
 
 def _e():
@@ -91,6 +92,7 @@ class _AssignmentMixin:
             _e().log.info("Using pre-built StatsLookup (skipping load_db)")
         return stats
 
+    @timing.timed("embed")
     def _build_shell(self, fast_embed, debug, embed_seed=None, chelate_embed=False, embed=None):
         """Build the initial TMComplex shell from the ligand SMILES and classify donors."""
         from jacobik.topology.donor_classifier import classify
@@ -388,6 +390,7 @@ class _AssignmentMixin:
             by_key.setdefault((self.ligands[li].smiles, len(ds)), []).append(ds)
         return [g for g in by_key.values() if len(g) >= 2]
 
+    @timing.timed("assign")
     def _run_symmetry_enumeration(self, ctx, assignment, debug, embed_aware=True):
         """
         Enumerate every symmetry-distinct, reachability-consistent donor-to-site

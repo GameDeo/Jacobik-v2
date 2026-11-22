@@ -79,7 +79,12 @@ from typing import Any, Dict, Optional, Tuple
 #: d -0.083 [-0.128, -0.043]; C-TOP1 0.407 -> 0.413. The new fingerprint equals that arm's. config_remote stays off (no panel parent
 #: has an element it can derive). Supersedes d5e2f4113497 (DS data fold-in); the DB is unchanged. Record: FINAL_PASS.md.
 #: Merged `donor_identity_reconcile` into `donor_assignment` (2026-11-14, fingerprint `2c87e2940af2`, superseding `a47283387172`).
-PRODUCTION_FINGERPRINT = "2c87e2940af2"
+#: v1.0b fold-in (branch foldin/v1.0b, prepared 2026-11-20; merge on the owner's go): macro_open_adj, macro_root, macro_pool_rank,
+#: li_cap_spread, embed_refine="mace", settle_steps=10, dedup_qcp and dedup_capped_fast on; the former stereo_cage flag folded into
+#: stereo_candidates (cage diastereomers are stereo candidates). Evidence: v1.0b reports .claude/REPORT_v1.0b_2026-11-18b.md and
+#: .claude/STATUS_v1.0b_and_NN_2026-11-19.md (FOLD2 arm 87db9ca25d49 = this configuration without dedup_capped_fast, which keeps the
+#: same rows on every captured capped call). Supersedes 2c87e2940af2 (v1.0a); the DB is unchanged. Set a flag back to reach v1.0a.
+PRODUCTION_FINGERPRINT = "1e4cde06304f"
 
 IA_K_FINISH_PHASE = {
     "search": "irprop+", "optimizer": "irprop+", "switch": 100,
@@ -98,6 +103,14 @@ PRODUCTION_CONFIG: Dict[str, Any] = {
     "ring_states_five": True,
     "config_states": True,
     "config_near": True,
+    "macro_open_adj": True,
+    "macro_root": True,
+    "macro_pool_rank": True,
+    "li_cap_spread": True,
+    "embed_refine": "mace",
+    "settle_steps": 10,
+    "dedup_qcp": True,
+    "dedup_capped_fast": True,
     "finish_phase": IA_K_FINISH_PHASE,
     "angle_bends": True,
     "beam_mode_score": "density",
@@ -164,6 +177,16 @@ FIELDS: Dict[str, Tuple[str, str, Any, str]] = {
     "config_near": ("jacobik.builder.engine", "CONFIG_NEAR", True, "Stereo (needs config_states): classes = capped product of the open elements (near: binding-created or within 2 bonds of a donor; remote kept when not derivable), mirror pairs collapsed only with out_mirror and no tag, cap x2 (one batch); an extra that repeats a kept configuration stays (a second embed and search)"),
     "config_remote": ("jacobik.builder.engine", "CONFIG_REMOTE", False, "P2R (needs config_near): remote acyclic stereo elements leave the solved product; each class's best rows are inverted there locally (isometric subtree reflection / 180 deg bond turn, jacobik.builder.configs), repaired by a short joint IK, rescored and added as derived classes"),
     "config_states": ("jacobik.builder.engine", "CONFIG_STATES", True, "Every configuration class (E/Z combinations, stereo classes) solved in ONE joint IK as row blocks (per-class prep, per-block cull, per-class selection, same merge); replaces the sequential class solves"),
+    "embed_gfn2_opt": ("jacobik.builder.engine", "EMBED_GFN2_OPT", "crude", "xtb --opt level of the GFN2 ligand embed refinement: crude (production), sloppy, loose, normal, tight. The frozen bond lengths/angles of every row come from it (XOJHIN carbene N-C-N 129 deg after crude, bound 119)"),
+    "li_cap_spread": ("jacobik.builder.engine", "LI_CAP_SPREAD", True, "GFN2 embed refinement: Li counter-ion caps of anionic donors are spread so no two coincide (macrocycle cavities: UYOVUA's two caps 0.55 A apart made the GFN2 SCF diverge)"),
+    "macro_fused": ("jacobik.topology.decompose", "MACRO_FUSED", False, "Rings of >= 8 atoms with >= 2 donors get macrocycle joints even with non-single or fused bonds (kept rigid; >= 4 free single bonds); FK joints only bonds that split the opened ring, opening on an unshared bond"),
+    "macro_root": ("jacobik.topology.decompose", "MACRO_ROOT", True, "Root the FK tree of a ligand with a jointed macrocycle (>= 8 atoms) at the ring body instead of the farthest donor-free body (a pendant arm's end)"),
+    "macro_pool_refine": ("jacobik.builder.engine", "MACRO_POOL_REFINE", None, "Macrocycle pool conformers after their free-ligand MMFF: None = as is; 'gfn2' = GFN2 crude refinement with the donor-donor distances held, as the ligand embed (parallel single-threaded xtb runs); 'mace' = the embed_refine MACE refinement, all conformers of the pool in one batch"),
+    "macro_template": ("jacobik.builder.engine", "MACRO_TEMPLATE", False, "Macrocycle ring-conformer pool embedded around a virtual metal (each donor at its Q1 mean distance, donor substituents >= 100 deg from the M-D bond, other atoms clear of the metal; MMFF with donor-donor restraints), template-ranked and diversified; free-ligand ETKDG pool as fallback"),
+    "embed_refine": ("jacobik.builder.engine", "EMBED_REFINE", "mace", "Ligand embed refinement on MACE-POLAR instead of GFN2-xTB, every embed of a call in one batched optimisation (builder.mace_embed): None = GFN2 (production); 'mace' = GFN2 semantics (free ligand, Li caps, donor-donor distances held); GFN2 fallback on any failure"),
+    "macro_haptic_filter": ("jacobik.builder.engine", "MACRO_HAPTIC_FILTER", False, "Ring pool of a ring with >= 2 haptic faces (COD, CDT): keep only folds whose faces can all point at one metal site (face sites 2.05 A off each face centroid within 2.5 A); free COD: drops the chair (33 of 64 ETKDG folds), keeps the tubs; the input embed is always kept"),
+    "macro_pool_rank": ("jacobik.builder.engine", "MACRO_POOL_RANK", True, "Rank the conformer pool of every jointed ring with >= 3 kappa donors, any element, by their lone-pair convergence (beam._donor_face_convergence); production ranks only rings with >= 3 sp3 ring nitrogens and takes the first free-ligand folds unranked for crown ethers, thiacrowns and mixed N/O/S rings. Rings with a haptic segment (COD, CDT) keep the production pool (face-normal ranking made COD worse)"),
+    "macro_open_adj": ("jacobik.ik.fk", "MACRO_OPEN_ADJ", True, "Macrocycles (>= 8 all-single rings) also get a torsion joint on the two ring bonds next to the opening, as small donor rings do (ring_open_adj); without them two ring torsions and the frame of any arm on the opening atoms stay at their seeded values (n-8 instead of n-6 ring degrees of freedom)"),
     "ring_states_five": ("jacobik.topology.rings", "FIVE", True, "ring_states also offers saturated five-ring puckers near a donor (envelopes/twists on the pseudorotation circle); needs ring_states"),
     "finish_phase": ("jacobik.ik.ik_solver", "FINISH_PHASE", IA_K_FINISH_PHASE, "Production IA-k; null restores C1. Dictionary: release, sigma, cap, search, optimizer, switch, score_only"),
     "polish": ("jacobik.ik.ik_solver", "POLISH", None, "Delivered-score polish after the solve: irprop (iRprop+) or irprop_minus (iRprop-); None = off"),
@@ -173,6 +196,13 @@ FIELDS: Dict[str, Tuple[str, str, Any, str]] = {
     "embed_bond_check": ("jacobik.builder.engine", "EMBED_BOND_CHECK", False, "Constrain stretched bonds during GFN2 embed refinement"),
     "dedup_factored": ("jacobik.ik.dedup", "DEDUP_FACTORED", True, "Factored symmetry for output deduplication"),
     "dedup_rmsd": ("jacobik.ik.dedup", "DEDUP_RMSD", 0.5, "Heavy-atom symmetric RMSD threshold (Angstroms)"),
+    "settle_steps": ("jacobik.builder.settle", "SETTLE_STEPS", 10, "Settle stage (builder.settle): k batched MACE-POLAR steps on a candidate pool settle_pool x the requested size, metal-donor distances held, then dedup and per-class output by settled energy; 0 = off (production: the solver rows as scored)"),
+    "settle_pool": ("jacobik.builder.settle", "SETTLE_POOL", 2.0, "Candidate pool factor of the settle stage (n_conformers / out_per_class_k times this before settling)"),
+    "settle_dedup": ("jacobik.builder.settle", "SETTLE_DEDUP", False, "Settle stage: deduplicate the settled rows (production deduper) before output (on: -12 % low basins, 2026-11-19)"),
+    "relax_carry": ("jacobik.builder.settle", "SETTLE_CARRY", False, "Carry the settle stage's L-BFGS state (curvature pairs formed with no hold active, trust radius) into the final relaxation of the same row (EnsembleResult.relax); a row whose coordinates changed in between starts cold"),
+    "settle_hold": ("jacobik.builder.settle", "SETTLE_HOLD", 0.25, "Flat-bottom half width (A) on every metal-donor distance during the settle stage; 0 = unrestrained"),
+    "dedup_capped_fast": ("jacobik.ik.dedup", "DEDUP_CAPPED_FAST", True, "Capped automorphism groups (>= MAX_AUTOMORPHISMS): the factored symmetric match decides alone (the scan over the capped automorphism list found no duplicate it missed on 15 capped parents, 2026-11-20), with the core-start scan on the GPU when one is available, starts screened by a nearest-same-class-atom RMSD (<= 2.5 x the threshold) before the first alternating round and only starts within 1.5 x after it refined further; with CUDA, select() decides all (row, kept row) and in-block row pairs at once (core-start scan, start rotations and screen on the GPU, rounds on the CPU for the surviving starts; same rows on all 25 captured capped calls, QEZVEY 268 s -> 5 s on an A100, 2026-11-20)"),
+    "dedup_qcp": ("jacobik.ik.dedup", "DEDUP_QCP", True, "Faster factored symmetric match: closed-form Kabsch (QCP: Horn key-matrix eigenvalue by Newton, rotation from its eigenvector) instead of batched 3x3 SVDs (agrees to 1e-12, SVD fallback where Newton has not converged)"),
     "dedup_max_dev": ("jacobik.ik.dedup", "DEDUP_MAX_DEV", 0.0, "Optional second test: maximum per-atom deviation threshold (0.0=off)"),
     "stereo_candidates": ("jacobik.builder.engine", "STEREO_CANDIDATES", True, "Enumerate unspecified and binding-created stereoisomer candidates"),
     "stereo_scope": ("jacobik.builder.engine", "STEREO_SCOPE", "B", "Scope of stereoisomer enumeration: 'B' (centres + E/Z + binding-created incl. M-C=X)"),
@@ -321,7 +351,7 @@ def fingerprint(live: Optional[Dict[str, Any]] = None) -> str:
     """Identity of a solver configuration.
     
     With no experimental fields registered or modified, returns the production
-    fingerprint: 2c87e2940af2 (superseding a47283387172).
+    fingerprint: 1e4cde06304f (v1.0b, superseding 2c87e2940af2).
     Adding a test flag to FIELDS or setting non-baseline values returns a distinct SHA-1 fingerprint.
     """
     if live is None:

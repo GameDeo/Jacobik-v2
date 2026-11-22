@@ -25,39 +25,42 @@ LOG_2PI = math.log(2.0 * math.pi)
 # Device selection
 # ---------------------------------------------------------------------------
 def resolve_device(device: str | None = "auto") -> str:
-    """Turn ``"auto"`` / ``"cpu"`` / ``"cuda"`` / ``"cuda:N"`` into a device string torch accepts.
+    """Turn ``"auto"`` / ``"cpu"`` / ``"cuda"`` / ``"cuda:N"`` into a device string.
 
-    ``auto`` picks CUDA when this torch build can use it. An explicit CUDA request on a machine
-    where torch cannot see a GPU raises here, with the reason, instead of failing later inside MACE
-    (the usual cause is a CPU-only torch wheel: ``torch.version.cuda`` is then None).
+    ``auto`` picks CUDA when CuPy can see a GPU. An explicit CUDA request on a machine
+    without a visible GPU raises here with the reason.
     """
-    import torch
+    import cupy as cp
 
+    if isinstance(device, cp.cuda.Device):     # an array's .device (callers pass X.device, as torch callers passed a
+        device = f"cuda:{device.id}"           # torch.device); before 2026-11-21 this raised and the bench's batched
+                                               # assembly silently skipped the out_mirror completion
     name = (device or "auto").strip().lower()
     if name == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return "cuda" if cp.cuda.is_available() else "cpu"
     if name.startswith("cuda"):
-        if not torch.cuda.is_available():
+        if not cp.cuda.is_available():
             raise RuntimeError(
-                f"device {device!r} requested but torch cannot use CUDA: torch {torch.__version__}, "
-                f"built for CUDA {torch.version.cuda!r}, {torch.cuda.device_count()} device(s) visible. "
-                "Install a CUDA build of torch in this environment (a '+cpu' wheel has no GPU support) "
-                "or run with device='cpu'."
+                f"device {device!r} requested but CUDA is unavailable (CuPy cannot see a GPU). "
+                "Ensure CUDA drivers and cupy-cuda12x are installed."
             )
-        index = torch.device(name).index
-        if index is not None and index >= torch.cuda.device_count():
-            raise RuntimeError(f"device {device!r} requested but only {torch.cuda.device_count()} CUDA device(s) exist")
+        if ":" in name:
+            idx_s = name.split(":", 1)[1]
+            if not idx_s.isdigit():
+                raise ValueError(f"unknown device {device!r}; use 'auto', 'cpu', 'cuda' or 'cuda:N'")
+            index = int(idx_s)
+            n_dev = cp.cuda.runtime.getDeviceCount()
+            if index >= n_dev:
+                raise RuntimeError(f"device {device!r} requested but only {n_dev} CUDA device(s) exist")
         return name
     if name != "cpu":
         raise ValueError(f"unknown device {device!r}; use 'auto', 'cpu', 'cuda' or 'cuda:N'")
     return "cpu"
 
 
-def torch_device(device: Any = None):
-    """``torch.device`` for a spec (a string, a ``torch.device`` or None); None means the CPU."""
-    import torch
-
-    return torch.device(device) if device is not None else torch.device("cpu")
+def torch_device(device: Any = None) -> str:
+    """Device string for a spec (or ``'cpu'`` when None)."""
+    return str(device) if device is not None else "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -137,15 +140,16 @@ def default_db_path() -> Optional[Path]:
     return None
 
 
-def _default_mace_model() -> Path:
+def _default_mace_model() -> Optional[Path]:
     env = os.environ.get("JACOBIK_MACE_MODEL")
     if env:
         return Path(env)
     base = REPO_ROOT if REPO_ROOT is not None else Path.cwd()
-    return base / "research" / "bench" / "tools" / "jdev" / "MACE-POLAR-1-S.model"
+    local = base / "research" / "bench" / "tools" / "jdev" / "MACE-POLAR-1-S.model"
+    return local if local.is_file() else None   # None: the official release file is downloaded to ~/.cache/mace on first use
 
 
-#: the MACE-POLAR-1-S model file of the energy benchmark (``JACOBIK_MACE_MODEL`` overrides)
+#: a local MACE-POLAR-1-S model file (``JACOBIK_MACE_MODEL`` overrides); None when there is none (the weights are not part of the repository)
 MACE_MODEL_PATH = _default_mace_model()
 
 
@@ -230,7 +234,7 @@ def build_builder_and_inputs(mol: Any) -> Tuple[Optional[Any], Optional[List[Any
 
 
 class JacobikEnvironmentError(RuntimeError):
-    """Raised when required external binaries (`xtb`) or the constraints DB are unavailable."""
+    """Raised when required external binaries (`xtb`), the constraints DB, or Triton (on CUDA) are unavailable."""
 
 
 def check_environment(
@@ -240,10 +244,10 @@ def check_environment(
     constraints_db: str | Path | None = None,
     device: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
-    """Validate runtime dependencies (`xtb`, constraints DB, optional compute device) and return resolved paths.
+    """Validate runtime dependencies (`xtb`, constraints DB, compute device, Triton on CUDA) and return resolved info.
 
     Raises ``JacobikEnvironmentError`` when a required component is missing or invalid instead of letting
-    downstream GFN2 embedding silently degrade to MMFF.
+    downstream GFN2 embedding silently degrade to MMFF or CUDA execution fail on missing Triton.
     """
     xtb_spec = os.environ.get("JACOBIK_XTB", "xtb").strip()
     xtb_resolved: Optional[str] = None
@@ -281,14 +285,30 @@ def check_environment(
         except (RuntimeError, ValueError) as exc:
             raise JacobikEnvironmentError(str(exc)) from exc
     else:
-        import torch
+        dev_str = resolve_device("auto")
 
-        dev_str = "cuda" if torch.cuda.is_available() else "cpu"
+    triton_ver: Optional[str] = None
+    triton_cache_dir: Optional[str] = os.environ.get("TRITON_CACHE_DIR") or None
+    try:
+        import triton
+
+        triton_ver = getattr(triton, "__version__", "unknown")
+    except ImportError as exc:
+        if dev_str and dev_str.startswith("cuda"):
+            raise JacobikEnvironmentError(
+                f"CUDA execution requires triton>=3.7 (import triton failed: {exc}). "
+                "Install triton>=3.7; this GPU build has no CPU path (use the torch release for CPU-only machines)."
+            ) from exc
+
+    if dev_str and dev_str.startswith("cuda") and not triton_cache_dir:
+        triton_cache_dir = str(Path.home() / ".triton" / "cache")
 
     return {
         "xtb": xtb_resolved,
         "db": str(Path(db_path).resolve()) if db_path is not None and Path(db_path).is_file() else None,
         "device": dev_str,
+        "triton": triton_ver,
+        "triton_cache_dir": triton_cache_dir,
     }
 
 

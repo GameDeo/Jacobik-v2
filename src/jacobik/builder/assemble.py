@@ -5,9 +5,11 @@ from dataclasses import replace
 from typing import List
 
 import numpy as np
-import torch
 
 from jacobik.builder.result import ConformerResult
+from jacobik.core import gpu
+
+cp = gpu.cp
 
 
 def _e():
@@ -31,12 +33,11 @@ def _mirror_score_fn(ctx):
     from jacobik.ik.ik_solver import _RANK_FLOOR as _rf
 
     def f(X, cand):
-        Xt = torch.as_tensor(np.asarray(X), dtype=torch.float32, device=ctx.device)
-        rg = torch.as_tensor(np.asarray(cand), dtype=torch.long, device=ctx.device)
-        with torch.no_grad():
-            if ((_scm.RANK_AGG == "sum" and _scm.SCORE_AGG != "sum") or _rf or _scm.Q1_TAIL_SIGMA > 0) and hasattr(sc, "ranking_score"):
-                return sc.ranking_score(Xt, row_groups=rg).double().cpu().numpy()
-            return sc.score(Xt, row_groups=rg)[0].double().cpu().numpy()
+        Xt = gpu.as_gpu(X, cp.float32)
+        rg = gpu.as_gpu(cand, cp.int64)
+        if ((_scm.RANK_AGG == "sum" and _scm.SCORE_AGG != "sum") or _rf or _scm.Q1_TAIL_SIGMA > 0) and hasattr(sc, "ranking_score"):
+            return gpu.to_cpu(sc.ranking_score(Xt, row_groups=rg)).astype(np.float64)
+        return gpu.to_cpu(sc.score(Xt, row_groups=rg)[0]).astype(np.float64)
     return f
 
 
@@ -70,17 +71,10 @@ def mirror_completion(builder, mol, X_sel, score_sel, device, score_fn=None, can
                 _e().log.warning("output mirror rescoring failed (%s); reflections keep their source scores",
                             str(exc).splitlines()[0][:200])
                 s_m = score_sel.copy()
-        dev = _e().torch_device(device)
-        Xo = torch.as_tensor(X_sel, dtype=torch.float32, device=dev)
-        try:
-            dd = _e().deduper_for(mol, dev)
-            dup = dd.mirror_dup(Xo)
-        except RuntimeError as exc:
-            if dev.type != "cuda":
-                raise
-            _e().log.warning("output mirror dedup on %s failed (%s); repeating it on the CPU", dev, str(exc).splitlines()[0][:200])
-            dd = _e().deduper_for(mol)
-            dup = dd.mirror_dup(Xo.cpu())
+        dev = _e().resolve_device(device)
+        Xo = gpu.as_gpu(X_sel, cp.float32)
+        dd = _e().deduper_for(mol, dev)
+        dup = dd.mirror_dup(Xo)
         rows = [i for i in range(n) if not dup[i]]
         _e().log.info("Output mirror: %d reflected rows added to %d", len(rows), n)
         return rows, s_m[rows]
@@ -122,14 +116,10 @@ class _AssembleMixin:
         the total beam width across candidates, so the batch size is
         ``beam_width * n_coord_samples``.
         """
-        from jacobik.ik.ik_solver import IKSolverConfig
-        from jacobik.ik.solver_replay import solver_class
+        from jacobik.ik.ik_solver import IKSolverConfig, JointIKSolver
 
         if _e().OUT_MIRROR:
             ctx._mirror_scorer = scorer_joint     # P2R out_mirror: rescoring of reflected rows (read only)
-        # CUDA: the recorded-and-replayed step loop (ik/solver_replay.py; JACOBIK_GPU_REPLAY=0 turns it off).
-        # CPU: JointIKSolver, unchanged.
-        JointIKSolver = solver_class(ctx.device)
 
         debug = ctx.debug
         B = beam_width * ctx.n_coord_samples
@@ -160,10 +150,9 @@ class _AssembleMixin:
             debug=debug,
             symmetric_groups=symmetric_groups,
             q3_symmetric_groups=q3_symmetric_groups,
-            row_groups=torch.as_tensor(np.asarray(candidate_idx_per_b), dtype=torch.long, device=ctx.device),
+            row_groups=cp.asarray(np.asarray(candidate_idx_per_b), dtype=cp.int64),
         )
         self._last_bend_prior = joint_solver.last_bend_prior  # S2b capture (None unless single-chunk)
-
 
         from jacobik.ik import scorer as _scm
         from jacobik.ik.ik_solver import _RANK_FLOOR as _rf
@@ -171,17 +160,16 @@ class _AssembleMixin:
         if ((_scm.RANK_AGG == "sum" and _scm.SCORE_AGG != "sum") or _rf or _scm.Q1_TAIL_SIGMA > 0) and hasattr(scorer_joint, "ranking_score"):
             # Re-rank every row (single thread, after the solve): replace the fit-floor mean score inside the final
             # score by the ranking score; the bend prior and ring-closure penalty terms are kept as they are.
-            with torch.no_grad():
-                Bn = scores.shape[0]
-                X_all = X_full if X_full.dim() == 3 else X_full.unsqueeze(0).expand(Bn, -1, -1)
-                for li, fk_li in enumerate(fks):
-                    X_all = fk_li.apply(thetas_final[li], X_all)
-                rg = torch.as_tensor(np.asarray(candidate_idx_per_b), dtype=torch.long, device=ctx.device)
-                scorer_joint.set_gmm_floor("fit" if _rf else _scm.GMM_FLOOR_MODE)  # the floor the solver ranked with
-                fit, _ = scorer_joint.score(X_all, row_groups=rg)
-                scorer_joint.set_gmm_floor(_scm.GMM_FLOOR_MODE)
-                rank = scorer_joint.ranking_score(X_all, row_groups=rg)
-                scores = scores + (rank - fit).to(scores.dtype)
+            Bn = scores.shape[0]
+            X_all = X_full if X_full.ndim == 3 else cp.broadcast_to(X_full[None], (Bn, X_full.shape[0], 3))
+            for li, fk_li in enumerate(fks):
+                X_all = fk_li.apply(thetas_final[li], X_all)
+            rg = cp.asarray(np.asarray(candidate_idx_per_b), dtype=cp.int64)
+            scorer_joint.set_gmm_floor("fit" if _rf else _scm.GMM_FLOOR_MODE)  # the floor the solver ranked with
+            fit, _ = scorer_joint.score(X_all, row_groups=rg)
+            scorer_joint.set_gmm_floor(_scm.GMM_FLOOR_MODE)
+            rank = scorer_joint.ranking_score(X_all, row_groups=rg)
+            scores = scores + (rank - fit).astype(scores.dtype)
 
         off = getattr(ctx, "_row_state_E", None) if _e().RING_STATES else None
         if off is not None and len(off) == scores.shape[0]:
@@ -189,12 +177,12 @@ class _AssembleMixin:
             # log-likelihood / Z), so the dedup and the ranking see one score
             from jacobik.core.env import RT_KJ
             z = float(scorer_joint._agg_norm()) if hasattr(scorer_joint, "_agg_norm") else 1.0
-            scores = scores - torch.as_tensor(np.asarray(off) / (RT_KJ * z), dtype=scores.dtype, device=scores.device)
+            scores = scores - cp.asarray(np.asarray(off) / (RT_KJ * z), dtype=scores.dtype)
 
         if debug:
             print(
-                f"\n[DEBUG] Joint IK done: {int(converged.sum().item())}/{B} converged"
-                f"  score min={scores.min().item():.4f}  max={scores.max().item():.4f}"
+                f"\n[DEBUG] Joint IK done: {int(converged.sum())}/{B} converged"
+                f"  score min={float(scores.min()):.4f}  max={float(scores.max()):.4f}"
             )
 
         return thetas_final, converged, scores, solve_trace
@@ -216,7 +204,14 @@ class _AssembleMixin:
         """
         mol = ctx.mol
         from jacobik.ik import stereo
-        elements = stereo.perceive_complex_stereo(self, scope=_e().STEREO_SCOPE)
+        scope = _e().STEREO_SCOPE
+        st_key = (scope, tuple((l.smiles, tuple(map(tuple, l.donors))) for l in self.ligands))
+        cached_st = getattr(self, "_cached_stereo_elements", None)
+        if cached_st is not None and cached_st[0] == st_key:
+            elements = cached_st[1]
+        else:
+            elements = stereo.perceive_complex_stereo(self, scope=scope)
+            self._cached_stereo_elements = (st_key, elements)
         do_out_per_class = getattr(self, "out_per_class", None)
         if do_out_per_class is None:
             do_out_per_class = _e().OUT_PER_CLASS
@@ -226,7 +221,8 @@ class _AssembleMixin:
         )
         conformers: List[ConformerResult] = []
 
-        score_np = scores.cpu().numpy()
+        score_np = gpu.to_cpu(scores)
+        converged_np = gpu.to_cpu(converged)
         sorted_b = np.argsort(-score_np)
         in_window = _e().output_window(score_np, float(getattr(ctx, "score_norm", 0.0) or 0.0))
         n_out = int((~in_window).sum())
@@ -235,41 +231,31 @@ class _AssembleMixin:
         selected = [b for b in sorted_b if in_window[b]]
         if n_keep is not None:
             selected = selected[:n_keep]
-        # Coordinates are assembled via ONE batched kinematics pass on CUDA, when BATCHED_ASSEMBLY is set, or whenever
-        # output mirror completion may append reflected rows (so CPU and CUDA produce identical mirror completion).
-        # The per-conformer assembly fallback is kept only when mirror completion is disabled or blocked by tags.
-        mirror_possible = bool(_e().OUT_MIRROR) and not _e()._has_tetrahedral_tags(self)
-        batched = ctx.device.type == "cuda" or _e().BATCHED_ASSEMBLY or mirror_possible
         X_all = None
         if _e().OUT_DEDUP:
             # distinct structures (symmetry-aware heavy-atom RMSD), best-scored representative of each
             B_all = scores.shape[0]
-            with torch.no_grad():
-                X_all = X_full.expand(B_all, -1, -1) if X_full.dim() == 3 and X_full.shape[0] == 1 else (
-                    X_full if X_full.dim() == 3 else X_full.unsqueeze(0).expand(B_all, -1, -1))
-                for li, fk_li in enumerate(fks):
-                    X_all = fk_li.apply(thetas_final[li], X_all)
-            if ctx.device.type == "cuda":
-                selected = np.asarray(_e().select_distinct(mol, X_all, scores, n_keep, ctx.device, th=ctx.dedup_rmsd, max_dev_th=ctx.dedup_max_dev), dtype=int)
-            else:
-                selected = np.asarray(_e().deduper_for(mol).select(X_all, scores, n_keep, th=ctx.dedup_rmsd, max_dev_th=ctx.dedup_max_dev), dtype=int)
+            X_all = cp.broadcast_to(X_full, (B_all, X_full.shape[1], 3)) if X_full.ndim == 3 and X_full.shape[0] == 1 else (
+                X_full if X_full.ndim == 3 else cp.broadcast_to(X_full[None], (B_all, X_full.shape[0], 3)))
+            for li, fk_li in enumerate(fks):
+                X_all = fk_li.apply(thetas_final[li], X_all)
+            selected = np.asarray(_e().select_distinct(mol, X_all, scores, n_keep, ctx.device, th=ctx.dedup_rmsd, max_dev_th=ctx.dedup_max_dev), dtype=int)
             # rows outside the window are worse than every row inside it, so the best-first dedup only reaches them
             # once the rows inside are exhausted: dropping them afterwards is the same as never offering them
             selected = selected[in_window[selected]]
             _e().log.info("Output dedup: %d distinct of %d rows kept", len(selected), B_all)
         X_sel = None
-        if batched and len(selected):
-            sel_t = torch.as_tensor(np.asarray(selected), dtype=torch.long, device=scores.device)
-            with torch.no_grad():
-                if X_all is None:
-                    Xs = X_full.index_select(0, sel_t) if X_full.dim() == 3 and X_full.shape[0] > 1 else (
-                        X_full.expand(len(selected), -1, -1) if X_full.dim() == 3
-                        else X_full.unsqueeze(0).expand(len(selected), -1, -1))
-                    for li, fk_li in enumerate(fks):
-                        Xs = fk_li.apply(thetas_final[li].index_select(0, sel_t), Xs)
-                else:
-                    Xs = X_all.index_select(0, sel_t)
-            X_sel = Xs.cpu().numpy()  # one device-to-host copy
+        if len(selected):
+            sel_t = cp.asarray(np.asarray(selected), dtype=cp.int64)
+            if X_all is None:
+                Xs = X_full[sel_t] if X_full.ndim == 3 and X_full.shape[0] > 1 else (
+                    cp.broadcast_to(X_full, (len(selected), X_full.shape[1], 3)) if X_full.ndim == 3
+                    else cp.broadcast_to(X_full[None], (len(selected), X_full.shape[0], 3)))
+                for li, fk_li in enumerate(fks):
+                    Xs = fk_li.apply(thetas_final[li][sel_t], Xs)
+            else:
+                Xs = X_all[sel_t]
+            X_sel = gpu.to_cpu(Xs)  # one device-to-host copy
 
         # P2R mirror completion (flag out_mirror): the reflection of a row is the enantiomer at the same energy. Only
         # without tetrahedral tags (a tagged centre must keep its configuration; E/Z survives a reflection). Reflected
@@ -285,15 +271,15 @@ class _AssembleMixin:
             if X_sel is not None:
                 X_np = X_sel[ci] * _e().MIRROR if is_mirror else X_sel[ci]
             else:
-                X_assembled = X_full[b : b + 1] if X_full.dim() == 3 else X_full.unsqueeze(0)
+                X_assembled = X_full[b : b + 1] if X_full.ndim == 3 else X_full[None]
                 for li, fk_li in enumerate(fks):
                     theta_b = thetas_final[li][b : b + 1]  # (1, 6+Ji)
-                    with torch.no_grad():
-                        X_assembled = fk_li.apply(theta_b, X_assembled)  # (1, N, 3)
+                    X_assembled = fk_li.apply(theta_b, X_assembled)  # (1, N, 3)
 
-                X_np = X_assembled[0].cpu().numpy()
-            for atom_pos_idx, atom in enumerate(mol_copy.atoms):
-                atom.position = X_np[atom_pos_idx].copy()
+                X_np = gpu.to_cpu(X_assembled[0])
+            X_row = np.array(X_np, copy=True)
+            for atom, pos_row in zip(mol_copy.atoms, X_row):
+                atom.position = pos_row
 
             _e()._refresh_coord_geometry(mol_copy)
 
@@ -302,7 +288,7 @@ class _AssembleMixin:
             c_temp = ConformerResult(
                 complex=mol_copy,
                 score=row_score,
-                converged=bool(converged[b].item()),
+                converged=bool(converged_np[b]),
                 rank=ci + 1,
                 trial_idx=int(b),
                 assignment_idx=assign_idx,

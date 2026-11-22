@@ -11,12 +11,27 @@ import math
 from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import networkx as nx
-import torch
-
-from jacobik.ik.kernels import _safe_normalize, gather_atoms
-from jacobik.ik.kernels import dihedral as _kernel_dihedral
 
 from jacobik.core import profile as _profile
+from jacobik.core.gpu import cp
+from jacobik.ik.fk import _dihedral
+
+
+def _safe_normalize(v, axis: int = -1, eps: float = 1e-8):
+    return v / cp.maximum(cp.linalg.norm(v, axis=axis, keepdims=True), eps)
+
+
+def _pad_index_matrix(lists, n_rows: int):
+    max_w = max((len(s) for s in lists), default=0)
+    if n_rows == 0 or max_w == 0:
+        return cp.zeros((n_rows, 0), dtype=cp.int64), cp.zeros((n_rows, 0), dtype=cp.bool_)
+    pos = cp.zeros((n_rows, max_w), dtype=cp.int64)
+    mask = cp.zeros((n_rows, max_w), dtype=cp.bool_)
+    for i, row in enumerate(lists):
+        for j, p in enumerate(row):
+            pos[i, j] = p
+            mask[i, j] = True
+    return pos, mask
 
 if TYPE_CHECKING:
     from jacobik.core.types import TMComplex
@@ -70,7 +85,7 @@ def _build_type_map(mol: "TMComplex") -> Dict[int, str]:
     return _shared(mol)
 
 
-def _q4_valid_pairs(mask: torch.Tensor):
+def _q4_valid_pairs(mask):
     """Static list of (a, b, pair_valid_float[1, n_q4]) for q4's pair loop, skipping empty pairs."""
     out = []
     max_n = mask.shape[1]
@@ -78,7 +93,7 @@ def _q4_valid_pairs(mask: torch.Tensor):
         for b_i in range(a_i + 1, max_n):
             pv = mask[:, a_i] & mask[:, b_i]
             if bool(pv.any()):
-                out.append((a_i, b_i, pv.float()[None, :]))  # (1, n_q4)
+                out.append((a_i, b_i, pv.astype(cp.float32)[None, :]))
     return out
 
 
@@ -129,11 +144,9 @@ def _q6_donor_pair_scales(mol: "TMComplex", all_nb: Dict[int, List[int]], scale)
     return out
 
 
-def _acos_exact_with_safe_grad(cosine: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """Return the exact acos value while differentiating through an interior clamp."""
-    exact = torch.acos(cosine.clamp(-1.0, 1.0))
-    safe = torch.acos(cosine.clamp(-1.0 + eps, 1.0 - eps))
-    return safe + (exact - safe).detach()
+def _acos_exact_with_safe_grad(cosine, eps: float = 1e-7):
+    """Return the exact acos value clamped to [-1, 1]."""
+    return cp.arccos(cp.clip(cosine, -1.0, 1.0))
 
 
 class _GeometryEvalMixin:
@@ -212,275 +225,225 @@ class _GeometryEvalMixin:
     # Public differentiable methods
     # ------------------------------------------------------------------
 
-    def donor_positions(self, X: torch.Tensor) -> torch.Tensor:
-        """
-        Effective donor position for each coordination site.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-
-        Returns
-        -------
-        (B, n_donors, 3) — in coord_sites order
-        """
+    def donor_positions(self, X):
+        """Effective donor position for each coordination site: (B, n_donors, 3)."""
+        if self.n_donors == 0:
+            return cp.zeros((X.shape[0], 0, 3), dtype=X.dtype)
+        if self._donor_all_kappa:
+            return X[:, self._donor_flat_idx]
         B = X.shape[0]
-        parts: List[torch.Tensor] = []
+        gathered = X[:, self._donor_flat_idx].reshape(B, self.n_donors, self._donor_max_f, 3)
+        return (gathered * self._donor_atom_w.astype(X.dtype)).sum(axis=2)
 
-        kappa_ptr = 0
-        haptic_ptr = 0
+    def q1_distances(self, X, donor_pos=None):
+        """Metal-donor distances for all coordination sites: (B, n_donors)."""
+        metal = X[:, self.metal_pos_idx, :]
+        donor = donor_pos if donor_pos is not None else self.donor_positions(X)
+        diff = donor - metal[:, None, :]
+        return cp.linalg.norm(diff, axis=-1)
 
-        for s_i in range(self.n_donors):
-            if not self._donor_is_haptic[s_i]:
-                pos_idx = self._kappa_pos_indices[kappa_ptr]
-                pos = X[:, pos_idx, :]  # (B, 3)
-                kappa_ptr += 1
-            else:
-                face_pos = X.index_select(1, self._haptic_idx(haptic_ptr))  # (B, n_face, 3)
-                pos = face_pos.mean(dim=1)  # (B, 3)
-                haptic_ptr += 1
-            parts.append(pos.unsqueeze(1))  # (B, 1, 3)
-
-        if parts:
-            return torch.cat(parts, dim=1)  # (B, n_donors, 3)
-        return X.new_zeros(B, 0, 3)
-
-    def q1_distances(
-        self, X: torch.Tensor, donor_pos: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """
-        Metal–donor distances for all coordination sites.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-        donor_pos : optional precomputed self.donor_positions(X)
-
-        Returns
-        -------
-        (B, n_donors)  — Euclidean distances in Å
-        """
-        metal = X[:, self.metal_pos_idx, :]  # (B, 3)
-        donor = donor_pos if donor_pos is not None else self.donor_positions(X)  # (B, n_donors, 3)
-        diff = donor - metal[:, None, :]  # (B, n_donors, 3)
-        return torch.linalg.norm(diff, dim=-1)  # (B, n_donors)
-
-    def q2_dmd_angles(
-        self, X: torch.Tensor, donor_pos: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """
-        All pairwise D–M–D angles in radians.
-
-        Batched: one bmm gives the (n_d x n_d) cosine matrix; the i<j upper
-        triangle is extracted with the precomputed _q2_pair_idx.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-        donor_pos : optional precomputed self.donor_positions(X)
-
-        Returns
-        -------
-        (B, n_pairs)  where n_pairs = n_donors*(n_donors-1)//2, in i<j order
-        """
+    def q2_dmd_angles(self, X, donor_pos=None):
+        """All pairwise D-M-D angles in radians: (B, n_pairs) in i<j order."""
         n_d = self.n_donors
         if n_d < 2:
-            return X.new_zeros(X.shape[0], 0)
+            return cp.zeros((X.shape[0], 0), dtype=X.dtype)
 
-        metal = X[:, self.metal_pos_idx, :]  # (B, 3)
-        donors = donor_pos if donor_pos is not None else self.donor_positions(X)  # (B, n_d, 3)
-        vecs = donors - metal[:, None, :]  # (B, n_d, 3)
-        vecs = _safe_normalize(vecs, dim=-1)  # (B, n_d, 3)
+        metal = X[:, self.metal_pos_idx, :]
+        donors = donor_pos if donor_pos is not None else self.donor_positions(X)
+        vecs = _safe_normalize(donors - metal[:, None, :], axis=-1)
+        cos_all = cp.clip(cp.matmul(vecs, vecs.swapaxes(1, 2)), -1.0 + 1e-7, 1.0 - 1e-7)
+        angles = cp.arccos(cos_all)
+        return angles.reshape(angles.shape[0], n_d * n_d)[:, self._q2_pair_idx]
 
-        # Full pairwise cosine matrix in one matmul: (B, n_d, n_d)
-        cos_all = torch.bmm(vecs, vecs.transpose(1, 2)).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-        angles = torch.acos(cos_all)  # (B, n_d, n_d)
-
-        # Extract upper triangle (i < j) using the precomputed boolean mask
-        return angles.reshape(angles.shape[0], n_d * n_d).index_select(1, self._q2_pair_idx)  # (B, n_pairs)
-
-    def q3_approach_angles(self, X: torch.Tensor, haptic: bool = True) -> torch.Tensor:
-        """
-        Donor approach angles for eligible kappa and haptic donors.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-        haptic : bool
-            When False, skip the haptic face-normal SVD (used when caller only
-            consumes kappa Q3 columns, e.g. inside CUDA-graph capture).
-
-        Returns
-        -------
-        (B, n_q3_eligible)  in radians
-        """
+    def q3_approach_angles(self, X, haptic: bool = True):
+        """Donor approach angles for eligible kappa and haptic donors: (B, n_q3_eligible)."""
         B = X.shape[0]
         n_out = sum(self._q3_eligible)
-        out = X.new_zeros(B, n_out)
+        out = cp.zeros((B, n_out), dtype=X.dtype)
         if n_out == 0:
             return out
 
-        metal = X[:, self.metal_pos_idx, :]  # (B, 3)
+        metal = X[:, self.metal_pos_idx, :]
 
         # --- Kappa Q3 ---
         n_k = self._q3_sub_pos.shape[0]
         if n_k > 0 and self._q3_sub_pos.shape[1] > 0:
-            kappa = gather_atoms(X, self._q3_kappa_pos_t)  # (B, n_k, 3)
-            sub_pos = gather_atoms(X, self._q3_sub_pos)  # (B, n_k, max_k, 3)
-            mask = self._q3_sub_mask.float()  # (n_k, max_k)
-
-            mask_exp = mask[None, :, :, None]  # (1, n_k, max_k, 1)
-            count = mask.sum(dim=-1).clamp(min=1.0)  # (n_k,)
-            centroid = (sub_pos * mask_exp).sum(dim=2) / count[None, :, None]  # (B, n_k, 3)
-
-            v_M = metal[:, None, :] - kappa  # (B, n_k, 3)
-            v_C = centroid - kappa  # (B, n_k, 3)
-
-            v_M = _safe_normalize(v_M, dim=-1)
-            v_C = _safe_normalize(v_C, dim=-1)
-            cos_t = (v_M * v_C).sum(dim=-1)
-            out.scatter_(
-                1,
-                self._q3_kappa_out_idx.unsqueeze(0).expand(B, -1),
-                _acos_exact_with_safe_grad(cos_t),
-            )
+            kappa = X[:, self._q3_kappa_pos_t]
+            sub_pos = X[:, self._q3_sub_pos]
+            mask = self._q3_sub_mask.astype(X.dtype)
+            mask_exp = mask[None, :, :, None]
+            count = cp.maximum(mask.sum(axis=-1), 1.0)
+            centroid = (sub_pos * mask_exp).sum(axis=2) / count[None, :, None]
+            v_M = _safe_normalize(metal[:, None, :] - kappa, axis=-1)
+            v_C = _safe_normalize(centroid - kappa, axis=-1)
+            cos_t = cp.sum(v_M * v_C, axis=-1)
+            out[:, self._q3_kappa_out_idx] = _acos_exact_with_safe_grad(cos_t)
 
         # --- Haptic Q3 (Tilt) ---
         n_h = self._q3_haptic_pos.shape[0]
         if haptic and n_h > 0 and self._q3_haptic_pos.shape[1] > 0:
-            face_pos = gather_atoms(X, self._q3_haptic_pos)  # (B, n_h, max_f, 3)
-            mask = self._q3_haptic_mask.float()  # (n_h, max_f)
+            face_pos = X[:, self._q3_haptic_pos]
+            mask = self._q3_haptic_mask.astype(X.dtype)
+            mask_exp = mask[None, :, :, None]
+            count = cp.maximum(mask.sum(axis=-1), 1.0)
+            centroid = (face_pos * mask_exp).sum(axis=2) / count[None, :, None]
+            centered = face_pos - centroid[:, :, None, :]
+            _, _, Vh = cp.linalg.svd(centered, full_matrices=False)
+            normal = Vh[:, :, -1, :]
+            mc_norm = _safe_normalize(centroid - metal[:, None, :], axis=-1)
+            dot_nm = cp.sum(normal * mc_norm, axis=-1, keepdims=True)
+            normal = cp.where(dot_nm < 0, -normal, normal)
+            cos_t = cp.sum(normal * mc_norm, axis=-1)
+            out[:, self._q3_haptic_out_idx] = _acos_exact_with_safe_grad(cos_t)
 
-            mask_exp = mask[None, :, :, None]  # (1, n_h, max_f, 1)
-            count = mask.sum(dim=-1).clamp(min=1.0)  # (n_h,)
-            centroid = (face_pos * mask_exp).sum(dim=2) / count[None, :, None]  # (B, n_h, 3)
+        return out
 
-            centered = face_pos - centroid.unsqueeze(2)  # (B, n_h, max_f, 3)
+    def q3_approach_angles_vjp(self, X, grad_angles, haptic: bool = True):
+        """Analytical VJP of ``q3_approach_angles(X, haptic=haptic)``: returns ``grad_X`` (B, N, 3)."""
+        B = X.shape[0]
+        gX = cp.zeros_like(X)
+        if sum(self._q3_eligible) == 0:
+            return gX
 
-            # Face normal = right-singular vector of the smallest singular value.
-            _, _, Vh = torch.linalg.svd(centered, full_matrices=False)
-            normal = Vh[:, :, -1, :]  # (B, n_h, 3)
+        metal = X[:, self.metal_pos_idx, :]
+        g_metal = cp.zeros_like(metal)
 
-            mc = centroid - metal[:, None, :]  # (B, n_h, 3)
-            mc_norm = _safe_normalize(mc, dim=-1)  # (B, n_h, 3)
+        # --- Kappa Q3 VJP ---
+        n_k = self._q3_sub_pos.shape[0]
+        if n_k > 0 and self._q3_sub_pos.shape[1] > 0:
+            kappa = X[:, self._q3_kappa_pos_t]
+            sub_pos = X[:, self._q3_sub_pos]
+            mask = self._q3_sub_mask.astype(X.dtype)
+            mask_exp = mask[None, :, :, None]
+            count = cp.maximum(mask.sum(axis=-1), 1.0)
+            centroid = (sub_pos * mask_exp).sum(axis=2) / count[None, :, None]
 
-            # Orient normal toward metal
-            dot_nm = (normal * mc_norm).sum(dim=-1, keepdim=True)  # (B, n_h, 1)
-            normal = torch.where(dot_nm < 0, -normal, normal)
+            v_M_raw = metal[:, None, :] - kappa
+            v_M_len = cp.maximum(cp.linalg.norm(v_M_raw, axis=-1, keepdims=True), 1e-8)
+            v_M = v_M_raw / v_M_len
 
-            # Tilt angle
-            cos_t = (normal * mc_norm).sum(dim=-1)
-            out.scatter_(
-                1,
-                self._q3_haptic_out_idx.unsqueeze(0).expand(B, -1),
-                _acos_exact_with_safe_grad(cos_t),
-            )
+            v_C_raw = centroid - kappa
+            v_C_len = cp.maximum(cp.linalg.norm(v_C_raw, axis=-1, keepdims=True), 1e-8)
+            v_C = v_C_raw / v_C_len
 
-        return out  # (B, n_q3_eligible)
+            cos_t = cp.clip(cp.sum(v_M * v_C, axis=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+            g_ang = grad_angles[:, self._q3_kappa_out_idx]
+            g_cos = -g_ang / cp.sqrt(1.0 - cos_t * cos_t)
 
-    def q4_pyramidalization(self, X: torch.Tensor) -> torch.Tensor:
-        """
-        Mean angle over all pairs in S={M, X₁, ..., Xₖ} at donor D for
-        eligible donors (k≥2 heavy substituents).
+            g_vM = g_cos[..., None] * v_C
+            g_vC = g_cos[..., None] * v_M
+            g_vM_raw = (g_vM - cp.sum(g_vM * v_M, axis=-1, keepdims=True) * v_M) / v_M_len
+            g_vC_raw = (g_vC - cp.sum(g_vC * v_C, axis=-1, keepdims=True) * v_C) / v_C_len
 
-        Parameters
-        ----------
-        X : (B, N, 3)
+            g_metal = g_metal + g_vM_raw.sum(axis=1)
+            cp.add.at(gX, (slice(None), self._q3_kappa_pos_t), -(g_vM_raw + g_vC_raw))
+            g_centroid = g_vC_raw / count[None, :, None]
+            cp.add.at(gX, (slice(None), self._q3_sub_pos), g_centroid[:, :, None, :] * mask_exp)
 
-        Returns
-        -------
-        (B, n_q4)  in degrees
-        """
+        # --- Haptic Q3 VJP ---
+        n_h = self._q3_haptic_pos.shape[0]
+        if haptic and n_h > 0 and self._q3_haptic_pos.shape[1] > 0:
+            face_pos = X[:, self._q3_haptic_pos]
+            mask = self._q3_haptic_mask.astype(X.dtype)
+            mask_exp = mask[None, :, :, None]
+            count = cp.maximum(mask.sum(axis=-1), 1.0)
+            centroid = (face_pos * mask_exp).sum(axis=2) / count[None, :, None]
+            centered = face_pos - centroid[:, :, None, :]
+
+            _, S, Vh = cp.linalg.svd(centered, full_matrices=False)
+            v0, v1, v2 = Vh[:, :, 0, :], Vh[:, :, 1, :], Vh[:, :, -1, :]
+            mc_raw = centroid - metal[:, None, :]
+            mc_len = cp.maximum(cp.linalg.norm(mc_raw, axis=-1, keepdims=True), 1e-8)
+            mc_norm = mc_raw / mc_len
+
+            dot_nm = cp.sum(v2 * mc_norm, axis=-1, keepdims=True)
+            sgn = cp.where(dot_nm < 0, -1.0, 1.0)
+            normal = v2 * sgn
+
+            cos_t = cp.clip(cp.sum(normal * mc_norm, axis=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+            g_ang = grad_angles[:, self._q3_haptic_out_idx]
+            g_cos = -g_ang / cp.sqrt(1.0 - cos_t * cos_t)
+
+            g_normal = g_cos[..., None] * mc_norm
+            g_mc_norm = g_cos[..., None] * normal
+            g_mc_raw = (g_mc_norm - cp.sum(g_mc_norm * mc_norm, axis=-1, keepdims=True) * mc_norm) / mc_len
+
+            g_v2 = g_normal * sgn
+            lam = S * S
+            lam0, lam1, lam2 = lam[:, :, 0], lam[:, :, 1], lam[:, :, -1]
+            a0 = cp.sum(g_v2 * v0, axis=-1) / cp.minimum(lam2 - lam0, -1e-12)
+            a1 = cp.sum(g_v2 * v1, axis=-1) / cp.minimum(lam2 - lam1, -1e-12)
+            w = a0[..., None] * v0 + a1[..., None] * v1
+
+            cw = cp.einsum("bhfi,bhi->bhf", centered, w)
+            cv2 = cp.einsum("bhfi,bhi->bhf", centered, v2)
+            g_centered = cw[..., None] * v2[:, :, None, :] + cv2[..., None] * w[:, :, None, :]
+
+            g_centroid = g_mc_raw - g_centered.sum(axis=2)
+            g_metal = g_metal - g_mc_raw.sum(axis=1)
+            g_face_pos = g_centered + (g_centroid / count[None, :, None])[:, :, None, :] * mask_exp
+            cp.add.at(gX, (slice(None), self._q3_haptic_pos), g_face_pos)
+
+        gX[:, self.metal_pos_idx, :] += g_metal
+        return gX
+
+    def q4_pyramidalization(self, X):
+        """Mean angle over all pairs in S={M, X_1, ..., X_k} at donor D: (B, n_q4) in degrees."""
         B = X.shape[0]
         if self.n_q4 == 0:
-            return X.new_zeros(B, 0)
+            return cp.zeros((B, 0), dtype=X.dtype)
 
-        # S member positions: (B, n_q4, max_n, 3)
-        s_pos = gather_atoms(X, self._q4_s_pos)  # (B, n_q4, max_n, 3)
-        donor = gather_atoms(X, self._q4_donor_pos)  # (B, n_q4, 3)
+        s_pos = X[:, self._q4_s_pos]
+        donor = X[:, self._q4_donor_pos]
         n_q4 = self.n_q4
-
-        # Vectors from donor to each S member: (B, n_q4, max_n, 3)
         vecs = s_pos - donor[:, :, None, :]
+        norms = cp.maximum(cp.linalg.norm(vecs, axis=-1, keepdims=True), 1e-8)
+        unit = vecs / norms
 
-        # Normalise (zero-vectors left as-is; mask handles them)
-        norms = torch.linalg.norm(vecs, dim=-1, keepdim=True).clamp(min=1e-8)
-        unit = vecs / norms  # (B, n_q4, max_n, 3)
-
-        # Sum all C(max_n, 2) pair angles, masking invalid entries
-        sigma_theta = X.new_zeros(B, n_q4)
-        # Valid (a_i, b_i) pairs are precomputed (static mask): no host sync per step.
+        sigma_theta = cp.zeros((B, n_q4), dtype=X.dtype)
         for a_i, b_i, pair_valid_f in self._q4_pair_valid:
-            cos_t = (unit[:, :, a_i, :] * unit[:, :, b_i, :]).sum(dim=-1)
-            cos_t = cos_t.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-            angle_deg = torch.acos(cos_t) * (180.0 / math.pi)  # (B, n_q4)
-            # Zero out invalid pairs
+            cos_t = cp.clip(cp.sum(unit[:, :, a_i, :] * unit[:, :, b_i, :], axis=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+            angle_deg = cp.arccos(cos_t) * (180.0 / math.pi)
             sigma_theta = sigma_theta + angle_deg * pair_valid_f
 
-        # Mean angle over the C(n,2) pairs.
-        n_valid = self._q4_s_mask.float().sum(dim=-1)  # (n_q4,) = n per donor
-        n_pairs_ = (n_valid * (n_valid - 1) / 2.0).clamp(min=1.0)  # C(n,2)
-        return sigma_theta / n_pairs_[None, :]  # (B, n_q4)
+        n_valid = self._q4_s_mask.astype(X.dtype).sum(axis=-1)
+        n_pairs_ = cp.maximum(n_valid * (n_valid - 1.0) / 2.0, 1.0)
+        return sigma_theta / n_pairs_[None, :]
 
-    def q5_torsions(self, X: torch.Tensor) -> torch.Tensor:
-        """
-        Rotatable bond dihedral angles in radians.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-
-        Returns
-        -------
-        (B, n_q5)  in radians
-        """
+    def q5_torsions(self, X):
+        """Rotatable bond dihedral angles in radians: (B, n_q5)."""
         if self.n_q5 == 0:
-            return X.new_zeros(X.shape[0], 0)
+            return cp.zeros((X.shape[0], 0), dtype=X.dtype)
 
-        p_i = gather_atoms(X, self._q5_i)  # (B, n_q5, 3)
-        p_j = gather_atoms(X, self._q5_j)
-        p_k = gather_atoms(X, self._q5_k)
-        p_l = gather_atoms(X, self._q5_l)
-
-        # kernels.dihedral expects (B, 3) per call; reshape to process all joints
-        # simultaneously by treating (B * n_q5) as the effective batch.
+        p_i = X[:, self._q5_i]
+        p_j = X[:, self._q5_j]
+        p_k = X[:, self._q5_k]
+        p_l = X[:, self._q5_l]
         B, n_q5 = p_i.shape[0], p_i.shape[1]
-        p_i_flat = p_i.reshape(B * n_q5, 3)
-        p_j_flat = p_j.reshape(B * n_q5, 3)
-        p_k_flat = p_k.reshape(B * n_q5, 3)
-        p_l_flat = p_l.reshape(B * n_q5, 3)
-
-        phi_flat = _kernel_dihedral(p_i_flat, p_j_flat, p_k_flat, p_l_flat)
+        phi_flat = _dihedral(
+            p_i.reshape(B * n_q5, 3),
+            p_j.reshape(B * n_q5, 3),
+            p_k.reshape(B * n_q5, 3),
+            p_l.reshape(B * n_q5, 3),
+        )
         return phi_flat.reshape(B, n_q5)
 
-    def _haptic_idx(self, i: int) -> torch.Tensor:
-        """Face atom indices of haptic site i as a tensor on the solver device (built once; indexing with the
-        Python list rebuilt and uploaded an index tensor on every step)."""
+    def _haptic_idx(self, i: int):
+        """Face atom indices of haptic site i as a CuPy array."""
         cache = self.__dict__.setdefault("_haptic_pos_t", {})
         t = cache.get(i)
         if t is None:
-            t = cache[i] = torch.tensor(self._haptic_pos_lists[i], dtype=torch.long, device=self.device)
+            t = cache[i] = cp.asarray(self._haptic_pos_lists[i], dtype=cp.int64)
         return t
 
-    def q6_contacts(self, X: torch.Tensor) -> torch.Tensor:
-        """
-        Non-bonded contact distances for all precomputed 1,4+ pairs.
-
-        Parameters
-        ----------
-        X : (B, N, 3)
-
-        Returns
-        -------
-        (B, n_q6)  distances in Å
-        """
+    def q6_contacts(self, X):
+        """Non-bonded contact distances for all precomputed 1,4+ pairs: (B, n_q6)."""
         if self.n_q6 == 0:
-            return X.new_zeros(X.shape[0], 0)
+            return cp.zeros((X.shape[0], 0), dtype=X.dtype)
 
-        pos_a = gather_atoms(X, self._q6_a)  # (B, n_q6, 3)
-        pos_b = gather_atoms(X, self._q6_b)  # (B, n_q6, 3)
-        diff = pos_a - pos_b  # (B, n_q6, 3)
-        return torch.linalg.norm(diff, dim=-1)  # (B, n_q6)
+        pos_a = X[:, self._q6_a]
+        pos_b = X[:, self._q6_b]
+        return cp.linalg.norm(pos_a - pos_b, axis=-1)
 
 
 class GeometryExtractor(_GeometryEvalMixin):
@@ -502,7 +465,7 @@ class GeometryExtractor(_GeometryEvalMixin):
     n_donors         : int — number of coordination sites (kappa + haptic)
     """
 
-    def __init__(self, mol: "TMComplex", device: torch.device) -> None:
+    def __init__(self, mol: "TMComplex", device=None) -> None:
         self.device = device
 
         atom_map = {a.idx: a for a in mol.atoms}
@@ -533,6 +496,37 @@ class GeometryExtractor(_GeometryEvalMixin):
                 k_i = len(self._kappa_pos_indices)
                 self._kappa_pos_indices.append(idx_to_pos[d_idx])
                 self._site_to_kappa[s_i] = k_i
+
+        self._donor_all_kappa = n_sites > 0 and not any(self._donor_is_haptic)
+        if self._donor_all_kappa:
+            self._donor_flat_idx = cp.asarray(self._kappa_pos_indices, dtype=cp.int64)
+            self._donor_max_f = 1
+            self._donor_atom_w = None
+        elif n_sites > 0:
+            kp, hp = 0, 0
+            site_lists = []
+            for is_h in self._donor_is_haptic:
+                if is_h:
+                    site_lists.append(self._haptic_pos_lists[hp])
+                    hp += 1
+                else:
+                    site_lists.append([self._kappa_pos_indices[kp]])
+                    kp += 1
+            max_f = max((len(s) for s in site_lists), default=1)
+            self._donor_max_f = max_f
+            idx_mat = cp.zeros((n_sites, max_f), dtype=cp.int64)
+            w_mat = cp.zeros((1, n_sites, max_f, 1), dtype=cp.float32)
+            for s_i, sl in enumerate(site_lists):
+                nf = len(sl)
+                if nf > 0:
+                    idx_mat[s_i, :nf] = cp.asarray(sl, dtype=cp.int64)
+                    w_mat[0, s_i, :nf, 0] = 1.0 / nf
+            self._donor_flat_idx = idx_mat.reshape(-1)
+            self._donor_atom_w = w_mat
+        else:
+            self._donor_flat_idx = cp.zeros(0, dtype=cp.int64)
+            self._donor_max_f = 1
+            self._donor_atom_w = None
 
         from jacobik.topology.graph import get_heavy_ligand_neighbors, get_ligand_neighbors
 
@@ -580,53 +574,24 @@ class GeometryExtractor(_GeometryEvalMixin):
                 else:
                     self._q3_eligible.append(False)
 
-        # -- Build Kappa Tensors --
-        n_kappa_q3 = len(q3_kappa_sub_lists)
-        max_k_q3 = max((len(s) for s in q3_kappa_sub_lists), default=0)
-        if n_kappa_q3 > 0 and max_k_q3 > 0:
-            q3_pos = torch.zeros(n_kappa_q3, max_k_q3, dtype=torch.long)
-            q3_mask = torch.zeros(n_kappa_q3, max_k_q3, dtype=torch.bool)
-            for i, subs in enumerate(q3_kappa_sub_lists):
-                for j, p in enumerate(subs):
-                    q3_pos[i, j] = p
-                    q3_mask[i, j] = True
-            self._q3_sub_pos = q3_pos.to(device)
-            self._q3_sub_mask = q3_mask.to(device)
-            self._q3_kappa_pos_t = torch.tensor(
-                self._q3_kappa_donor_pos, dtype=torch.long, device=device
-            )
-            self._q3_kappa_out_idx = torch.tensor(
-                [self._q3_eligible[:si].count(True) for si in self._q3_kappa_site_indices],
-                dtype=torch.long,
-                device=device,
+        # -- Build Kappa & Haptic Tensors --
+        self._q3_sub_pos, self._q3_sub_mask = _pad_index_matrix(q3_kappa_sub_lists, len(q3_kappa_sub_lists))
+        if self._q3_sub_pos.shape[1] > 0:
+            self._q3_kappa_pos_t = cp.asarray(self._q3_kappa_donor_pos, dtype=cp.int64)
+            self._q3_kappa_out_idx = cp.asarray(
+                [self._q3_eligible[:si].count(True) for si in self._q3_kappa_site_indices], dtype=cp.int64,
             )
         else:
-            self._q3_sub_pos = torch.zeros(n_kappa_q3, 0, dtype=torch.long, device=device)
-            self._q3_sub_mask = torch.zeros(n_kappa_q3, 0, dtype=torch.bool, device=device)
-            self._q3_kappa_pos_t = torch.zeros(0, dtype=torch.long, device=device)
-            self._q3_kappa_out_idx = torch.zeros(0, dtype=torch.long, device=device)
+            self._q3_kappa_pos_t = cp.zeros(0, dtype=cp.int64)
+            self._q3_kappa_out_idx = cp.zeros(0, dtype=cp.int64)
 
-        # -- Build Haptic Tensors --
-        n_haptic_q3 = len(q3_haptic_face_lists)
-        max_f_q3 = max((len(f) for f in q3_haptic_face_lists), default=0)
-        if n_haptic_q3 > 0 and max_f_q3 > 0:
-            q3_h_pos = torch.zeros(n_haptic_q3, max_f_q3, dtype=torch.long)
-            q3_h_mask = torch.zeros(n_haptic_q3, max_f_q3, dtype=torch.bool)
-            for i, face in enumerate(q3_haptic_face_lists):
-                for j, p in enumerate(face):
-                    q3_h_pos[i, j] = p
-                    q3_h_mask[i, j] = True
-            self._q3_haptic_pos = q3_h_pos.to(device)
-            self._q3_haptic_mask = q3_h_mask.to(device)
-            self._q3_haptic_out_idx = torch.tensor(
-                [self._q3_eligible[:si].count(True) for si in self._q3_haptic_site_indices],
-                dtype=torch.long,
-                device=device,
+        self._q3_haptic_pos, self._q3_haptic_mask = _pad_index_matrix(q3_haptic_face_lists, len(q3_haptic_face_lists))
+        if self._q3_haptic_pos.shape[1] > 0:
+            self._q3_haptic_out_idx = cp.asarray(
+                [self._q3_eligible[:si].count(True) for si in self._q3_haptic_site_indices], dtype=cp.int64,
             )
         else:
-            self._q3_haptic_pos = torch.zeros(n_haptic_q3, 0, dtype=torch.long, device=device)
-            self._q3_haptic_mask = torch.zeros(n_haptic_q3, 0, dtype=torch.bool, device=device)
-            self._q3_haptic_out_idx = torch.zeros(0, dtype=torch.long, device=device)
+            self._q3_haptic_out_idx = cp.zeros(0, dtype=cp.int64)
 
         q4_donor_pos: List[int] = []
         q4_s_lists: List[List[int]] = []
@@ -638,31 +603,18 @@ class GeometryExtractor(_GeometryEvalMixin):
             nbs = all_nb.get(d_idx, [])
             if len(nbs) < 2:
                 continue
-            # S = metal + substituents
             s_pos = [idx_to_pos[mol.metal_idx]] + [idx_to_pos[n] for n in nbs if n in idx_to_pos]
             q4_donor_pos.append(idx_to_pos[d_idx])
             q4_s_lists.append(s_pos)
 
         self.n_q4 = len(q4_s_lists)
-        max_n_q4 = max((len(s) for s in q4_s_lists), default=0)
-
-        if self.n_q4 > 0 and max_n_q4 > 0:
-            q4_s = torch.zeros(self.n_q4, max_n_q4, dtype=torch.long)
-            q4_m = torch.zeros(self.n_q4, max_n_q4, dtype=torch.bool)
-            q4_d = torch.tensor(q4_donor_pos, dtype=torch.long)
-            for i, slist in enumerate(q4_s_lists):
-                for j, p in enumerate(slist):
-                    q4_s[i, j] = p
-                    q4_m[i, j] = True
-            self._q4_s_pos = q4_s.to(device)
-            self._q4_s_mask = q4_m.to(device)
+        self._q4_s_pos, self._q4_s_mask = _pad_index_matrix(q4_s_lists, self.n_q4)
+        if self._q4_s_pos.shape[1] > 0:
             self._q4_pair_valid = _q4_valid_pairs(self._q4_s_mask)
-            self._q4_donor_pos = q4_d.to(device)
+            self._q4_donor_pos = cp.asarray(q4_donor_pos, dtype=cp.int64)
         else:
-            self._q4_s_pos = torch.zeros(0, 0, dtype=torch.long, device=device)
-            self._q4_s_mask = torch.zeros(0, 0, dtype=torch.bool, device=device)
             self._q4_pair_valid = []
-            self._q4_donor_pos = torch.zeros(0, dtype=torch.long, device=device)
+            self._q4_donor_pos = cp.zeros(0, dtype=cp.int64)
 
         type_map = _build_type_map(mol)
         seen_bonds: Set[Tuple[int, int]] = set()
@@ -725,13 +677,13 @@ class GeometryExtractor(_GeometryEvalMixin):
 
         self.n_q5 = len(q5_quads)
         if self.n_q5 > 0:
-            q5_t = torch.tensor(q5_quads, dtype=torch.long, device=device)
+            q5_t = cp.asarray(q5_quads, dtype=cp.int64)
             self._q5_i = q5_t[:, 0]
             self._q5_j = q5_t[:, 1]
             self._q5_k = q5_t[:, 2]
             self._q5_l = q5_t[:, 3]
         else:
-            empty = torch.zeros(0, dtype=torch.long, device=device)
+            empty = cp.zeros(0, dtype=cp.int64)
             self._q5_i = self._q5_j = self._q5_k = self._q5_l = empty
 
         # Shared with stats extraction: pairs within Q6_EXCLUDE_MAX_BONDS bonds on
@@ -784,15 +736,15 @@ class GeometryExtractor(_GeometryEvalMixin):
         self.n_q6_donor = sum(1 for s_ in q6_scale if s_ is not None)
         #: positions of the Q6 pairs that are NOT donor-extension pairs (the beam's partial Q6 walls use these)
         self._q6_wall_idx = (None if self.n_q6_donor == 0 else
-                             torch.tensor([p for p, s_ in enumerate(q6_scale) if s_ is None], dtype=torch.long, device=device))
+                             cp.asarray([p for p, s_ in enumerate(q6_scale) if s_ is None], dtype=cp.int64))
         self.n_q6 = len(q6_pairs)
         if self.n_q6 > 0:
-            q6_t = torch.tensor(q6_pairs, dtype=torch.long, device=device)
+            q6_t = cp.asarray(q6_pairs, dtype=cp.int64)
             self._q6_a = q6_t[:, 0]
             self._q6_b = q6_t[:, 1]
         else:
-            self._q6_a = torch.zeros(0, dtype=torch.long, device=device)
-            self._q6_b = torch.zeros(0, dtype=torch.long, device=device)
+            self._q6_a = cp.zeros(0, dtype=cp.int64)
+            self._q6_b = cp.zeros(0, dtype=cp.int64)
 
         # Element pair keys for each Q6 pair (for scorer.py lookup)
         # (polar H facing an acceptor -> "Hp"; key_builder.q6_pair_key, shared with the extractor)
@@ -818,7 +770,5 @@ class GeometryExtractor(_GeometryEvalMixin):
 
         # Static i<j mask for the (n_donors, n_donors) D-M-D angle matrix.
         n_d = self.n_donors
-        self._q2_pair_mask = torch.ones(n_d, n_d, dtype=torch.bool, device=device).triu(diagonal=1)
-        # The same pairs as flat indices into the (n_d * n_d) matrix, in the mask's row-major order: indexing with
-        # the boolean mask runs a data-dependent `nonzero` on every call (a host sync on CUDA, and not recordable).
-        self._q2_pair_idx = self._q2_pair_mask.reshape(-1).nonzero().flatten()
+        self._q2_pair_mask = cp.triu(cp.ones((n_d, n_d), dtype=cp.bool_), k=1)
+        self._q2_pair_idx = cp.nonzero(self._q2_pair_mask.reshape(-1))[0]

@@ -1,4 +1,4 @@
-"""Batched gradient-descent inverse-kinematics solver for the conformer engine.
+"""GPU-only zero-autograd Triton CUDA-graph inverse-kinematics solver.
 
 All ligands' degrees of freedom are optimised jointly against the Scorer's
 statistical score plus two augmented-Lagrangian constraint families:
@@ -9,64 +9,67 @@ statistical score plus two augmented-Lagrangian constraint families:
   M-D distance and Q3 approach angle.
 
 Each constraint has its own dual variable that escalates on its violation and
-freezes once the violation stalls (safeguarded dual ascent). Rows may be culled
-mid-solve (successive halving with a basin-niche penalty), and on CPU the batch
-is split into chunks solved concurrently by threads or a process pool.
+freezes once the violation stalls (safeguarded dual ascent). Execution runs
+exclusively on CUDA via fused Triton kernels, ComplexFK, and CuPy CUDA graphs.
 """
 
 from __future__ import annotations
 
-import copy as _copy
 import logging
 import math
 import os
+import traceback
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-#: Rank the final rows with the fit-time GMM floors (true fitted widths) while optimising with the scorer's floors
-#: (B2.7, profile field rank_floor_fit). Score-energy baseline
-#: 2026-09-27 (12 cases x 3 seeds, MACE on the top of each pool): picked dE median/mean/worst 147/152/393 -> 138/147/360,
-#: pool Spearman 0.1 -> 0.3. Optimising with true widths (C) or with tempered Q5 (D) made the pools worse.
+import triton as _triton
+import triton.language as _tl
+
+from jacobik.core import gpu, profile, timing
+from jacobik.core.env import EPS
+
+cp = gpu.cp
+_HAS_TRITON = True
+
 # Production resolved configuration (hardcoded values)
 _RANK_FLOOR: bool = False
 _BEND_PER_Z: bool = True
 _SC_MODE: str = "thermal"
 BEND_RELEASE = [0.1, 100]
 
-from jacobik.core import profile
-from jacobik.core.env import EPS
 DOF_STEP_SCALE = profile.get("dof_step_scale")
 FINISH_PHASE = profile.get("finish_phase")
 POLISH = profile.get("polish")
 OPTIMIZER = profile.get("optimizer")
 for _name, _value in (("polish", POLISH), ("optimizer", OPTIMIZER)):
     if _value not in (None, "irprop", "irprop_minus"):
-        raise ValueError(f"profile flag {_name!r} must be None, 'irprop' or 'irprop_minus', got {_value!r} "
-                         "(the fire, adam_small and adam_score values were removed in the 2026-11 cleanup)")
+        raise ValueError(
+            f"profile flag {_name!r} must be None, 'irprop' or 'irprop_minus', got {_value!r} "
+            "(the fire, adam_small and adam_score values were removed in the 2026-11 cleanup)"
+        )
 _IRPROP = ("irprop", "irprop_minus")
-
-
-import pickle
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
-
-import torch
-import torch.nn.functional as F
 
 from jacobik.ik.ik_setup import (  # noqa: F401
     S2B_STATE_SCHEMA,
-    _get_pool,
     _row_group_weights,
-    _shutdown_pool,
-    _solve_chunk_worker,
     bend_state_constants,
     merge_chunk_traces,
 )
+from jacobik.ik.kabsch import (  # noqa: F401
+    _matrix_to_axisangle_batched,
+    _optimal_rotation_nocentroid,
+    _ref_rows,
+    _renorm_axisangle,
+    kabsch_init,
+)
+from jacobik.ik.kernels import wrap_angle  # noqa: F401
 
 if TYPE_CHECKING:
     from jacobik.ik.geometry import GeometryExtractor
     from jacobik.ik.scorer import Scorer
 
 log = logging.getLogger(__name__)
+LAST: Dict[str, object] = {}
 
 _EPS = EPS
 
@@ -79,9 +82,8 @@ _ADAM_EPS = 1e-8
 _PLATEAU_WINDOW = 8
 _PLATEAU_ATOL = 0.02
 
-# Shape constraint (dual variable mu_shape). The constrained statistic is the
+# Shape constraint (dual variable mu_shape).
 _CLOSURE_W = 1000.0  # penalty weight (per Å²) on macrocycle ring-closure distances
-# power-mean (temperature _LSE_TEMP) of per-donor squared unit-vector deviations.
 _LAMBDA_INIT = 10.0
 _LSE_TEMP = 2.0
 _SHAPE_RHO = 8.0
@@ -96,622 +98,334 @@ _SYM_TOL = 0.0
 _SYM_STALL_WINDOW = 20
 _SYM_STALL_ATOL = 0.01
 
-# Chunked CPU execution: never split below this many rows per chunk.
-_MIN_CHUNK = 128
+if _HAS_TRITON:
 
-# Row culling: only when the total batch has >= _CULL_MIN_BATCH rows, and never
-# below _CULL_MIN_ROWS survivors. _CULL_NICHE scales the per-basin rank penalty
-# (0 = plain top-k by score; large = round-robin over basins).
-_CULL_MIN_ROWS = 16
-_CULL_NICHE = 30.0
-_CULL_MIN_BATCH = 256
+    @_triton.jit
+    def _ring_dual_step(t, val, ring_ptr, frozen_ptr, mu_ptr, row, mask, B, W: _tl.constexpr, rho, stall_atol):
+        slot = t % W
+        _tl.store(ring_ptr + slot * B + row, val, mask=mask)
+        v_min = val
+        v_max = val
+        for w in range(W):
+            v = _tl.load(ring_ptr + w * B + row, mask=mask, other=0.0)
+            v_min = _tl.minimum(v_min, v)
+            v_max = _tl.maximum(v_max, v)
+        frz = _tl.load(frozen_ptr + row, mask=mask, other=False)
+        frz_new = frz | (((v_max - v_min) < stall_atol) & (slot == (W - 1)))
+        _tl.store(frozen_ptr + row, frz_new, mask=mask)
+        mu = _tl.load(mu_ptr + row, mask=mask, other=0.0)
+        inc = _tl.where(frz_new, 0.0, rho * val)
+        _tl.store(mu_ptr + row, _tl.maximum(mu + inc, 0.0), mask=mask)
 
-
-from jacobik.ik.kernels import wrap_angle  # noqa: F401
-from jacobik.ik.kabsch import (  # noqa: F401
-    _matrix_to_axisangle_batched,
-    _optimal_rotation_nocentroid,
-    _ref_rows,
-    _renorm_axisangle,
-    kabsch_init,
-)
-
-
-# ---------------------------------------------------------------------------
-# JointIKSolver
-
-
-class _EagerSolveMixin:
-    """Mixin implementing row-culling plan construction and the eager gradient-descent loop."""
-
-    def _build_niche_plan(self, donor_pos_idxs: list) -> list:
-        """
-        Backbone torsion joints (bonds separating two donors of the same
-        ligand, which set chelate-ring puckers / bridge conformations) and the
-        Q5 mode rows they map to. Returns (ligand_index, theta_columns,
-        q5_rows, hash_multipliers) tuples; built once per solver.
-        """
-        plan: list = []
-        q5_means = getattr(self.scorer, "_q5_means", None)
-        if q5_means is None or q5_means.shape[0] == 0:
-            return plan
-        ge = self.ge
-        site_atoms: List[set] = []
-        kp = hp = 0
-        for s_i in range(ge.n_donors):
-            if not ge._donor_is_haptic[s_i]:
-                site_atoms.append({int(ge._kappa_pos_indices[kp])})
-                kp += 1
-            else:
-                site_atoms.append({int(i) for i in ge._haptic_pos_lists[hp]})
-                hp += 1
-        gen = torch.Generator().manual_seed(12345)
-        q5_off = 0
-        for li, fk in enumerate(self.fks):
-            Jb = getattr(fk, "n_joints_base", fk.n_joints)
-            if Jb > 0:
-                lig_atoms = set(fk._lig_pos_t.tolist())
-                donor_atoms: set = set()
-                for g in donor_pos_idxs[li].tolist():
-                    donor_atoms |= site_atoms[g]
-                cols, rows, offs = [], [], []
-                al_rows = getattr(fk, "_q5_rows", None)
-                al_offs = getattr(fk, "_q5_offsets", None)
-                for k in range(Jb):
-                    down = set(fk._downstream[k].tolist())
-                    up = lig_atoms - down
-                    if (donor_atoms & down) and (donor_atoms & up):
-                        if al_rows is not None:  # the joint's own Q5 row, in the joint's dihedral convention
-                            if int(al_rows[k]) < 0:
-                                continue
-                            rows.append(int(al_rows[k]))
-                            offs.append(float(al_offs[k]))
-                        else:
-                            rows.append(q5_off + k)
-                            offs.append(0.0)
-                        cols.append(6 + k)
-                if cols:
-                    mult = torch.randint(1, 2**31 - 1, (len(cols),), generator=gen)
-                    plan.append(
-                        (
-                            li,
-                            torch.tensor(cols, dtype=torch.long, device=self.device),
-                            torch.tensor(rows, dtype=torch.long, device=self.device),
-                            mult.to(self.device),
-                            torch.tensor(offs, dtype=torch.float32, device=self.device),
-                        )
-                    )
-            q5_off += Jb
-        return plan
-
-    def _block_cull_keep(self, frac, score, thetas, groups, blocks, blocks_n0) -> torch.Tensor:
-        """Rows kept by a cull at fraction `frac` applied inside each block on its own (config_states): a block of
-        fewer than _CULL_MIN_BATCH original rows is never culled, as a solve of that size alone would not be."""
-        keeps = []
-        for g in torch.unique(blocks).tolist():
-            idx = (blocks == g).nonzero().flatten()
-            n = int(idx.numel())
-            if blocks_n0[g] < _CULL_MIN_BATCH:
-                keeps.append(idx)
-                continue
-            kg = max(int(math.ceil(frac * n)), min(_CULL_MIN_ROWS, n))
-            if kg >= n:
-                keeps.append(idx)
-                continue
-            key = self._cull_key(score[idx], [th[idx] for th in thetas], None if groups is None else groups[idx], kg)
-            keeps.append(idx[torch.topk(key, kg).indices])
-        return torch.cat(keeps).sort().values
-
-    def _cull_key(
-        self,
-        score: torch.Tensor,  # (Bc,) best-seen score
-        thetas: list,
-        groups: Optional[torch.Tensor],  # (Bc,) or None
-        k: int,
-    ) -> torch.Tensor:
-        """
-        Selection key for the cull: score minus a niche penalty that grows
-        with a row's rank inside its (group, backbone-mode-signature) basin.
-        The penalty step is a fraction of the score gap between the best and
-        k-th row; with a single basin the ordering is unchanged. Static shapes,
-        no host synchronisation.
-        """
-        Bc = score.shape[0]
-        dev = score.device
-        score = torch.nan_to_num(score, nan=-1e30, posinf=-1e30, neginf=-1e30)
-        sig = torch.zeros(Bc, dtype=torch.long, device=dev)
-        has_sig = False
-        if self._niche_plan:
-            q5_m = self.scorer._q5_means
-            q5_w = self.scorer._q5_weights
-            for li, cols, rows, mult, offs in self._niche_plan:
-                tors = thetas[li].detach()[:, cols]  # (Bc, n)
-                d = wrap_angle(tors.unsqueeze(-1) - (q5_m[rows] + offs[:, None]).unsqueeze(0)).abs()
-                d = d.masked_fill((q5_w[rows] <= _EPS).unsqueeze(0), float("inf"))
-                sig = sig + (d.argmin(dim=-1) * mult.unsqueeze(0)).sum(dim=-1)
-            has_sig = True
-        if groups is not None:
-            sig = sig + groups.long() * 1000003
-            has_sig = True
-        if not has_sig:
-            return score
-        o1 = torch.argsort(score, descending=True)
-        o2 = torch.sort(sig[o1], stable=True).indices
-        order = o1[o2]  # by signature, then score descending
-        sig_s = sig[order]
-        ar = torch.arange(Bc, device=dev)
-        start = torch.ones(Bc, dtype=torch.bool, device=dev)
-        start[1:] = sig_s[1:] != sig_s[:-1]
-        first = torch.cummax(torch.where(start, ar, torch.zeros_like(ar)), dim=0).values
-        rank = torch.empty_like(ar)
-        rank[order] = ar - first
-        top = torch.topk(score, k).values
-        gap = (top[0] - top[-1]).clamp(min=1e-6, max=1e4)
-        return score - (_CULL_NICHE * gap / k) * rank.to(score.dtype)
-
-    def _run_eager_loop(
-        self,
-        st,
-        row_groups: Optional[torch.Tensor],
-        cull_enabled: bool,
-        symmetric_groups: Optional[List[List[int]]],
-        q3_symmetric_groups: Optional[List[List[int]]],
+    @_triton.jit
+    def _al_ring_dual_update_kernel(
+        tl_ptr, stat_score_ptr, snap_score_ptr, r_ptr, grad_norm_ptr, shape_dev_ptr,
+        violation_ptr, sym_violation_ptr, sym_angle_violation_ptr,
+        score_ring_ptr, ever_plateaued_ptr, best_score_ever_ptr, improved_ptr,
+        hist_res_ptr, hist_score_ptr, hist_gn_ptr, hist_shape_ptr,
+        violation_ring_ptr, mu_shape_frozen_ptr, mu_shape_ptr,
+        sym_violation_ring_ptr, sym_angle_violation_ring_ptr,
+        mu_sym_frozen_ptr, mu_sym_angle_frozen_ptr, mu_sym_ptr, mu_sym_angle_ptr,
+        B, W: _tl.constexpr, MW: _tl.constexpr, SW: _tl.constexpr,
+        plateau_atol, shape_rho, mu_shape_stall_atol, sym_rho, sym_stall_atol, BLOCK_SIZE: _tl.constexpr,
     ):
-        """Run the eager augmented-Lagrangian IK step loop with optional mid-solve row culling."""
-        device = st.device
-        B, B_full, T, L = st.B, st.B_full, st.T, st.L
-        X_ref = st.X_ref
-        cl_d0 = st.cl_d0
-        donor_pos_idxs = st.donor_pos_idxs
-        ideal_directions_dev = st.ideal_directions_dev
-        thetas = st.thetas
-        has_closure, _cl_a, _cl_b, _cl_d0 = st.has_closure, st._cl_a, st._cl_b, st._cl_d0
-        handoff_delta = st.handoff_delta
-        adam_m, adam_v = st.adam_m, st.adam_v
-        endpoint_m, endpoint_v, endpoint_t = st.endpoint_m, st.endpoint_v, st.endpoint_t
-        best_score_ever, best_score_thetas = st.best_score_ever, st.best_score_thetas
-        W, score_ring, ever_plateaued = st.W, st.score_ring, st.ever_plateaued
-        MW, violation_ring, mu_shape_frozen = st.MW, st.violation_ring, st.mu_shape_frozen
-        SW, sym_violation_ring, sym_angle_violation_ring = st.SW, st.sym_violation_ring, st.sym_angle_violation_ring
-        mu_sym_frozen, mu_sym_angle_frozen = st.mu_sym_frozen, st.mu_sym_angle_frozen
-        history_residuals, history_scores = st.history_residuals, st.history_scores
-        history_grad_norms, history_shape = st.history_grad_norms, st.history_shape
-        mu_shape, mu_sym, mu_sym_angle = st.mu_shape, st.mu_sym, st.mu_sym_angle
-        q3_site_to_idx, q3_mode_override = st.q3_site_to_idx, st.q3_mode_override
-        _sym_group_idx_tensors, _n_sym_groups, _sym_w = st._sym_group_idx_tensors, st._n_sym_groups, st._sym_w
-        _q3_sym_group_idx_tensors, _q3_sym_haptic = st._q3_sym_group_idx_tensors, st._q3_sym_haptic
-        _n_q3_sym_groups, _q3_sym_w = st._n_q3_sym_groups, st._q3_sym_w
-        _step_scale_tabs, phase = st._step_scale_tabs, st.phase
+        pid = _tl.program_id(0)
+        row = pid * BLOCK_SIZE + _tl.arange(0, BLOCK_SIZE)
+        mask = row < B
 
-        cull_plan: Dict[int, float] = {}
-        for _f, _kp in zip(self.cull_at if cull_enabled and not (phase is not None and phase.whole) else (), self.cull_keep):
-            _st = int(round(_f * T))
-            if 0 < _st < T:
-                cull_plan[_st] = float(_kp)
-        alive: Optional[torch.Tensor] = None  # None = every original row still alive
-        arch_thetas: Optional[list] = None
-        arch_plateau: Optional[torch.Tensor] = None
-        groups_c = row_groups.to(device) if row_groups is not None else None
-        blocks_c = self.cull_blocks.to(device) if self.cull_blocks is not None else None
-        blocks_n0 = torch.bincount(blocks_c).tolist() if blocks_c is not None else None
-        q3_mode_override_full = q3_mode_override
+        t = _tl.load(tl_ptr)
+        stat_s = _tl.load(stat_score_ptr + row, mask=mask, other=0.0)
+        snap_s = _tl.load(snap_score_ptr + row, mask=mask, other=0.0)
+        r_val = _tl.load(r_ptr + row, mask=mask, other=0.0)
+        gn_val = _tl.load(grad_norm_ptr + row, mask=mask, other=0.0)
+        sh_val = _tl.load(shape_dev_ptr + row, mask=mask, other=0.0)
+        viol = _tl.load(violation_ptr + row, mask=mask, other=0.0)
+        sviol = _tl.load(sym_violation_ptr + row, mask=mask, other=0.0)
+        saviol = _tl.load(sym_angle_violation_ptr + row, mask=mask, other=0.0)
 
-        def _hist(x: torch.Tensor) -> torch.Tensor:
-            """Per-step trace row at full original batch size (NaN for culled rows)."""
-            if alive is None:
-                return x
-            out = x.new_full((B_full,), float("nan"))
-            out[alive] = x
-            return out
+        slot = t % W
+        _tl.store(score_ring_ptr + slot * B + row, stat_s, mask=mask)
+        s_min = stat_s
+        s_max = stat_s
+        for w in range(W):
+            v = _tl.load(score_ring_ptr + w * B + row, mask=mask, other=0.0)
+            s_min = _tl.minimum(s_min, v)
+            s_max = _tl.maximum(s_max, v)
+        ep = _tl.load(ever_plateaued_ptr + row, mask=mask, other=False)
+        ep_new = ep | (((s_max - s_min) < plateau_atol) & (slot == (W - 1)))
+        _tl.store(ever_plateaued_ptr + row, ep_new, mask=mask)
 
-        for t in range(0 if OPTIMIZER in _IRPROP else T):
-            X_current = _ref_rows(X_ref, B)  # (B, N, 3)
-            for li, (fk_li, theta_li) in enumerate(zip(self.fks, thetas)):
-                X_current = fk_li.apply(theta_li, X_current)
+        bse = _tl.load(best_score_ever_ptr + row, mask=mask, other=float("-inf"))
+        imp = snap_s > bse
+        bse_new = _tl.where(imp, snap_s, bse)
+        _tl.store(best_score_ever_ptr + row, bse_new, mask=mask)
+        _tl.store(improved_ptr + row, imp, mask=mask)
 
-            # Computed once and shared with the scorer.
-            all_donor_pos_grad = self.ge.donor_positions(X_current)  # (B, n_donors, 3)
+        t_off = t * B + row
+        _tl.store(hist_res_ptr + t_off, r_val, mask=mask)
+        _tl.store(hist_score_ptr + t_off, stat_s, mask=mask)
+        _tl.store(hist_gn_ptr + t_off, gn_val, mask=mask)
+        _tl.store(hist_shape_ptr + t_off, sh_val, mask=mask)
 
-            stat_score, _comps = self.scorer.score(
-                X_current, q3_mode_override=q3_mode_override, donor_pos=all_donor_pos_grad, row_groups=groups_c,
-            )  # (B,)
-            _bp = self._bend_prior(thetas)
-            stat_score = stat_score + _bp
+        _ring_dual_step(t, viol, violation_ring_ptr, mu_shape_frozen_ptr, mu_shape_ptr, row, mask, B, MW, shape_rho, mu_shape_stall_atol)
+        _ring_dual_step(t, sviol, sym_violation_ring_ptr, mu_sym_frozen_ptr, mu_sym_ptr, row, mask, B, SW, sym_rho, sym_stall_atol)
+        _ring_dual_step(t, saviol, sym_angle_violation_ring_ptr, mu_sym_angle_frozen_ptr, mu_sym_angle_ptr, row, mask, B, SW, sym_rho, sym_stall_atol)
 
-            # Best-fit rotation detached via envelope theorem to avoid SVD/eigh backward instability.
-            all_donor_pos_det = all_donor_pos_grad.detach()
-            sym_penalty = X_ref.new_zeros(B)
-            sym_angle_penalty = X_ref.new_zeros(B)
+    @_triton.jit
+    def _adam_lig_kernel(
+        g_ptr,
+        m_ptr,
+        v_ptr,
+        step_ptr,
+        handoff_ptr,
+        scale_tab_ptr,
+        tl_ptr,
+        bc1_ptr,
+        bc2_ptr,
+        B,
+        D,
+        lr_t,
+        b1,
+        b2,
+        eps_a,
+        HAS_HANDOFF: _tl.constexpr,
+        HAS_SCALE: _tl.constexpr,
+        BLOCK_SIZE: _tl.constexpr,
+    ):
+        pid = _tl.program_id(0)
+        offs = pid * BLOCK_SIZE + _tl.arange(0, BLOCK_SIZE)
+        total = B * D
+        mask = offs < total
+        col = offs % D
 
-            donor_unit_vecs = F.normalize(all_donor_pos_grad, dim=-1)  # (B, n_donors, 3)
+        t = _tl.load(tl_ptr)
+        c1 = _tl.load(bc1_ptr + t)
+        c2 = _tl.load(bc2_ptr + t)
 
-            with torch.no_grad():
-                R_opt = _optimal_rotation_nocentroid(
-                    ideal_directions_dev, donor_unit_vecs.detach()
-                )  # (B, 3, 3): R_opt @ ideal_i ~= donor_unit_i
+        g = _tl.load(g_ptr + offs, mask=mask, other=0.0)
+        m = _tl.load(m_ptr + offs, mask=mask, other=0.0)
+        v = _tl.load(v_ptr + offs, mask=mask, other=0.0)
 
-            aligned_ideal = torch.einsum("bij,bnj->bni", R_opt, ideal_directions_dev)  # (B, n_donors, 3)
-            per_donor_sq = ((aligned_ideal - donor_unit_vecs) ** 2).sum(-1)  # (B, n_donors)
+        m_new = b1 * m + (1.0 - b1) * g
+        v_new = b2 * v + (1.0 - b2) * (g * g)
+        _tl.store(m_ptr + offs, m_new, mask=mask)
+        _tl.store(v_ptr + offs, v_new, mask=mask)
 
-            n_sh = per_donor_sq.shape[-1]
-            if n_sh > 1:
-                tau = _LSE_TEMP
-                shape_dev = (torch.logsumexp(tau * per_donor_sq, dim=-1) - math.log(n_sh)) / tau  # (B,)
+        m_hat = m_new / c1
+        v_hat = v_new / c2
+        step = lr_t * m_hat / (_tl.sqrt(v_hat) + eps_a)
+        if HAS_HANDOFF:
+            _tl.store(handoff_ptr + offs, _tl.abs(step), mask=mask)
+        if HAS_SCALE:
+            sc = _tl.load(scale_tab_ptr + t * D + col, mask=mask, other=1.0)
+            step = step * sc
+        _tl.store(step_ptr + offs, step, mask=mask)
+
+    @_triton.jit
+    def _best_snapshot_copy_kernel(imp_ptr, theta_ptr, best_theta_ptr, B, D, BLOCK_SIZE: _tl.constexpr):
+        pid = _tl.program_id(0)
+        offs = pid * BLOCK_SIZE + _tl.arange(0, BLOCK_SIZE)
+        total = B * D
+        mask = offs < total
+        row = offs // D
+        imp = _tl.load(imp_ptr + row, mask=mask, other=False)
+        m_imp = mask & imp
+        th = _tl.load(theta_ptr + offs, mask=m_imp, other=0.0)
+        _tl.store(best_theta_ptr + offs, th, mask=m_imp)
+
+    @_triton.jit
+    def _theta_post_update_kernel(
+        theta_ptr,
+        step_ptr,
+        done_ptr,
+        B,
+        D,
+        HAS_DONE: _tl.constexpr,
+        BLOCK_B: _tl.constexpr,
+    ):
+        pid = _tl.program_id(0)
+        b = pid * BLOCK_B + _tl.arange(0, BLOCK_B)
+        mask_b = b < B
+        done = _tl.load(done_ptr + b, mask=mask_b, other=False) if HAS_DONE else False
+
+        base = b * D
+        for c in range(3):
+            th = _tl.load(theta_ptr + base + c, mask=mask_b, other=0.0)
+            st = _tl.load(step_ptr + base + c, mask=mask_b, other=0.0)
+            if HAS_DONE:
+                st = _tl.where(done, 0.0, st)
+            _tl.store(theta_ptr + base + c, th - st, mask=mask_b)
+
+        s3 = _tl.load(step_ptr + base + 3, mask=mask_b, other=0.0)
+        s4 = _tl.load(step_ptr + base + 4, mask=mask_b, other=0.0)
+        s5 = _tl.load(step_ptr + base + 5, mask=mask_b, other=0.0)
+        if HAS_DONE:
+            s3 = _tl.where(done, 0.0, s3)
+            s4 = _tl.where(done, 0.0, s4)
+            s5 = _tl.where(done, 0.0, s5)
+        w0 = _tl.load(theta_ptr + base + 3, mask=mask_b, other=0.0) - s3
+        w1 = _tl.load(theta_ptr + base + 4, mask=mask_b, other=0.0) - s4
+        w2 = _tl.load(theta_ptr + base + 5, mask=mask_b, other=0.0) - s5
+        norm = _tl.sqrt(w0 * w0 + w1 * w1 + w2 * w2)
+        pi = 3.141592653589793
+        eps = 1e-8
+        scale = _tl.where(norm > pi, pi / _tl.maximum(norm, eps), 1.0)
+        _tl.store(theta_ptr + base + 3, w0 * scale, mask=mask_b)
+        _tl.store(theta_ptr + base + 4, w1 * scale, mask=mask_b)
+        _tl.store(theta_ptr + base + 5, w2 * scale, mask=mask_b)
+
+        two_pi = 6.283185307179586
+        for c in range(6, D):
+            th = _tl.load(theta_ptr + base + c, mask=mask_b, other=0.0)
+            st = _tl.load(step_ptr + base + c, mask=mask_b, other=0.0)
+            if HAS_DONE:
+                st = _tl.where(done, 0.0, st)
+            x = th - st + pi
+            q = _tl.floor(x / two_pi)
+            w = (x - q * two_pi) - pi
+            _tl.store(theta_ptr + base + c, w, mask=mask_b)
+
+    @_triton.jit
+    def _bidentate_proj_kernel(
+        d_pos0_ptr,
+        d_pos1_ptr,
+        g_ptr,
+        active_ptr,
+        B,
+        D,
+        RELEASE_PROJ: _tl.constexpr,
+        BLOCK_B: _tl.constexpr,
+    ):
+        pid = _tl.program_id(0)
+        b = pid * BLOCK_B + _tl.arange(0, BLOCK_B)
+        mask = b < B
+        # d_pos0, d_pos1 are (B, 3) contiguous
+        dx = _tl.load(d_pos0_ptr + b * 3 + 0, mask=mask, other=0.0) - _tl.load(d_pos1_ptr + b * 3 + 0, mask=mask, other=0.0)
+        dy = _tl.load(d_pos0_ptr + b * 3 + 1, mask=mask, other=0.0) - _tl.load(d_pos1_ptr + b * 3 + 1, mask=mask, other=0.0)
+        dz = _tl.load(d_pos0_ptr + b * 3 + 2, mask=mask, other=0.0) - _tl.load(d_pos1_ptr + b * 3 + 2, mask=mask, other=0.0)
+        nrm = _tl.maximum(_tl.sqrt(dx * dx + dy * dy + dz * dz), 1e-8)
+        nx = dx / nrm
+        ny = dy / nrm
+        nz = dz / nrm
+
+        base = b * D + 3
+        gx = _tl.load(g_ptr + base + 0, mask=mask, other=0.0)
+        gy = _tl.load(g_ptr + base + 1, mask=mask, other=0.0)
+        gz = _tl.load(g_ptr + base + 2, mask=mask, other=0.0)
+        dot = nx * gx + ny * gy + nz * gz
+        px = gx - dot * nx
+        py = gy - dot * ny
+        pz = gz - dot * nz
+        if RELEASE_PROJ:
+            act = _tl.load(active_ptr + b, mask=mask, other=False)
+            px = _tl.where(act, gx, px)
+            py = _tl.where(act, gy, py)
+            pz = _tl.where(act, gz, pz)
+        _tl.store(g_ptr + base + 0, px, mask=mask)
+        _tl.store(g_ptr + base + 1, py, mask=mask)
+        _tl.store(g_ptr + base + 2, pz, mask=mask)
+
+    @_triton.jit
+    def _donor_err(ideal_ptr, dpos_ptr, off, mask, r00, r01, r02, r10, r11, r12, r20, r21, r22):
+        ix = _tl.load(ideal_ptr + off + 0, mask=mask, other=0.0)
+        iy = _tl.load(ideal_ptr + off + 1, mask=mask, other=0.0)
+        iz = _tl.load(ideal_ptr + off + 2, mask=mask, other=0.0)
+        dx = _tl.load(dpos_ptr + off + 0, mask=mask, other=0.0)
+        dy = _tl.load(dpos_ptr + off + 1, mask=mask, other=0.0)
+        dz = _tl.load(dpos_ptr + off + 2, mask=mask, other=0.0)
+        dnorm = _tl.maximum(_tl.sqrt(dx * dx + dy * dy + dz * dz), 1e-12)
+        ux, uy, uz = dx / dnorm, dy / dnorm, dz / dnorm
+        ex = (r00 * ix + r01 * iy + r02 * iz) - ux
+        ey = (r10 * ix + r11 * iy + r12 * iz) - uy
+        ez = (r20 * ix + r21 * iy + r22 * iz) - uz
+        return ux, uy, uz, dnorm, ex, ey, ez, ex * ex + ey * ey + ez * ez
+
+    @_triton.jit
+    def _shape_constraint_R_fwd_bwd_kernel(
+        R_ptr,
+        ideal_ptr,
+        dpos_ptr,
+        mu_ptr,
+        active_ptr,
+        shape_dev_ptr,
+        viol_ptr,
+        loss_ptr,
+        grad_dpos_ptr,
+        B,
+        N_SH,
+        shape_tol,
+        tau,
+        log_n_sh,
+        rho,
+        RELEASE_SHAPE: _tl.constexpr,
+        BLOCK_B: _tl.constexpr,
+    ):
+        pid = _tl.program_id(0)
+        b = pid * BLOCK_B + _tl.arange(0, BLOCK_B)
+        mask = b < B
+
+        rbase = b * 9
+        r00 = _tl.load(R_ptr + rbase + 0, mask=mask, other=1.0)
+        r01 = _tl.load(R_ptr + rbase + 1, mask=mask, other=0.0)
+        r02 = _tl.load(R_ptr + rbase + 2, mask=mask, other=0.0)
+        r10 = _tl.load(R_ptr + rbase + 3, mask=mask, other=0.0)
+        r11 = _tl.load(R_ptr + rbase + 4, mask=mask, other=1.0)
+        r12 = _tl.load(R_ptr + rbase + 5, mask=mask, other=0.0)
+        r20 = _tl.load(R_ptr + rbase + 6, mask=mask, other=0.0)
+        r21 = _tl.load(R_ptr + rbase + 7, mask=mask, other=0.0)
+        r22 = _tl.load(R_ptr + rbase + 8, mask=mask, other=1.0)
+
+        max_val = _tl.full([BLOCK_B], -1e30, dtype=_tl.float32)
+        sum_sq = _tl.zeros([BLOCK_B], dtype=_tl.float32)
+        for n in range(N_SH):
+            _, _, _, _, _, _, _, sq = _donor_err(ideal_ptr, dpos_ptr, (b * N_SH + n) * 3, mask, r00, r01, r02, r10, r11, r12, r20, r21, r22)
+            sum_sq += sq
+            max_val = _tl.maximum(max_val, tau * sq)
+
+        if N_SH > 1:
+            sum_exp = _tl.zeros([BLOCK_B], dtype=_tl.float32)
+            for n in range(N_SH):
+                _, _, _, _, _, _, _, sq = _donor_err(ideal_ptr, dpos_ptr, (b * N_SH + n) * 3, mask, r00, r01, r02, r10, r11, r12, r20, r21, r22)
+                sum_exp += _tl.exp(tau * sq - max_val)
+            lse = max_val + _tl.log(sum_exp)
+            shape_dev = (lse - log_n_sh) / tau
+        else:
+            lse = max_val
+            shape_dev = sum_sq
+
+        viol = _tl.maximum(shape_dev - shape_tol, 0.0)
+        mu = _tl.load(mu_ptr + b, mask=mask, other=0.0)
+        loss = mu * viol + 0.5 * rho * viol * viol
+        if RELEASE_SHAPE:
+            act = _tl.load(active_ptr + b, mask=mask, other=False)
+            loss_out = _tl.where(act, 0.0, loss)
+            dloss_dshape = _tl.where((shape_dev > shape_tol) & (~act), mu + rho * viol, 0.0)
+        else:
+            loss_out = loss
+            dloss_dshape = _tl.where(shape_dev > shape_tol, mu + rho * viol, 0.0)
+
+        _tl.store(shape_dev_ptr + b, shape_dev, mask=mask)
+        _tl.store(viol_ptr + b, viol, mask=mask)
+        _tl.store(loss_ptr + b, loss_out, mask=mask)
+
+        for n in range(N_SH):
+            off = (b * N_SH + n) * 3
+            ux, uy, uz, dnorm, ex, ey, ez, sq = _donor_err(ideal_ptr, dpos_ptr, off, mask, r00, r01, r02, r10, r11, r12, r20, r21, r22)
+            if N_SH > 1:
+                wn = _tl.exp(tau * sq - lse)
             else:
-                shape_dev = per_donor_sq.mean(dim=-1)
-
-            violation = (shape_dev - self.shape_tol).clamp(min=0.0)  # (B,)
-            constraint_loss = mu_shape.detach() * violation + 0.5 * _SHAPE_RHO * violation**2
-
-            if symmetric_groups:
-                all_donor_norms = all_donor_pos_grad.norm(dim=-1)  # (B, n_donors)
-                for _gi, idx_t in enumerate(_sym_group_idx_tensors):
-                    d_g = all_donor_norms[:, idx_t]  # (B, len(group))
-                    dev_g = d_g - d_g.mean(dim=-1, keepdim=True)
-                    if _sym_w is None:
-                        sym_penalty = sym_penalty + (dev_g**2).mean(dim=-1)
-                    else:
-                        sym_penalty = sym_penalty + _sym_w[_gi] * (dev_g**2).mean(dim=-1)
-                if _n_sym_groups > 0 and _sym_w is None:
-                    sym_penalty = sym_penalty / _n_sym_groups
-
-                # Q3 approach-angle tie, same form as the distance tie.
-                if q3_site_to_idx and _q3_sym_group_idx_tensors:
-                    q3_angles_now = self.ge.q3_approach_angles(X_current, haptic=_q3_sym_haptic)  # (B, n_q3) rad
-                    for _gi, idx_t2 in enumerate(_q3_sym_group_idx_tensors):
-                        a_g = q3_angles_now[:, idx_t2]  # (B, len(q3_idxs))
-                        dev_a = a_g - a_g.mean(dim=-1, keepdim=True)
-                        if _q3_sym_w is None:
-                            sym_angle_penalty = sym_angle_penalty + (dev_a**2).mean(dim=-1)
-                        else:
-                            sym_angle_penalty = sym_angle_penalty + _q3_sym_w[_gi] * (dev_a**2).mean(dim=-1)
-                    if _q3_sym_w is None:
-                        sym_angle_penalty = sym_angle_penalty / _n_q3_sym_groups
-
-            sym_violation = (sym_penalty - _SYM_TOL).clamp(min=0.0)
-            sym_angle_violation = (sym_angle_penalty - _SYM_TOL).clamp(min=0.0)
-
-            if phase is not None:
-                phase.observe(
-                    torch.tensor([t], device=device),
-                    -stat_score.detach()
-                    + constraint_loss.detach()
-                    + mu_sym.detach() * sym_violation.detach()
-                    + 0.5 * _SYM_RHO * sym_violation.detach() ** 2
-                    + mu_sym_angle.detach() * sym_angle_violation.detach()
-                    + 0.5 * _SYM_RHO * sym_angle_violation.detach() ** 2,
-                )
-                constraint_loss = phase.aid("shape", constraint_loss)
-                sym_violation = phase.aid("symmetry", sym_violation)
-                sym_angle_violation = phase.aid("symmetry", sym_angle_violation)
-
-            constraint_loss = (
-                constraint_loss
-                + mu_sym.detach() * sym_violation
-                + 0.5 * _SYM_RHO * sym_violation**2
-                + mu_sym_angle.detach() * sym_angle_violation
-                + 0.5 * _SYM_RHO * sym_angle_violation**2
-            )
-
-            snap_score = stat_score.detach()
-            if has_closure:
-                clos = (((X_current[:, _cl_a] - X_current[:, _cl_b]).norm(dim=-1) - _cl_d0) ** 2).sum(dim=-1)  # (B,)
-                snap_score = snap_score - 1000.0 * clos.detach()
-
-            # Plateau check, only every W steps to avoid (W, B) reductions each step.
-            score_ring[t % W] = stat_score.detach()
-            if t >= W - 1 and t % W == W - 1:
-                score_range = score_ring.max(dim=0).values - score_ring.min(dim=0).values
-                ever_plateaued = ever_plateaued | (score_range < _PLATEAU_ATOL)
-
-            # Best-score snapshot.
-            with torch.no_grad():
-                improved = snap_score > best_score_ever
-                best_score_ever = torch.where(improved, snap_score, best_score_ever)
-                sel = improved.view(-1, *([1] * (thetas[0].dim() - 1)))
-                for li, theta_li in enumerate(thetas):
-                    best_score_thetas[li] = torch.where(
-                        sel.expand_as(theta_li),
-                        theta_li.detach(),
-                        best_score_thetas[li],
-                    )
-
-            if JointIKSolver.diagnostic_hook is not None:
-                _sv_pos = (sym_penalty - _SYM_TOL).clamp(min=0.0)
-                _sav_pos = (sym_angle_penalty - _SYM_TOL).clamp(min=0.0)
-                JointIKSolver.diagnostic_hook(
-                    self,
-                    t,
-                    dict(
-                        thetas=thetas,
-                        X=X_current,
-                        X_ref=X_ref,
-                        alive=alive,
-                        score_loss=-stat_score,
-                        shape_loss=mu_shape.detach() * violation + 0.5 * _SHAPE_RHO * violation.square(),
-                        symmetry_loss=(
-                            mu_sym.detach() * _sv_pos
-                            + 0.5 * _SYM_RHO * _sv_pos.square()
-                            + mu_sym_angle.detach() * _sav_pos
-                            + 0.5 * _SYM_RHO * _sav_pos.square()
-                        ),
-                        mu_shape=mu_shape,
-                        mu_sym=mu_sym,
-                        mu_sym_angle=mu_sym_angle,
-                        ideal=ideal_directions_dev,
-                        donor_pos_idxs=donor_pos_idxs,
-                        symmetric_groups=symmetric_groups,
-                        q3_symmetric_groups=q3_symmetric_groups,
-                        q3_mode_override=q3_mode_override,
-                        row_groups=groups_c,
-                    ),
-                )
-
-            _hook = self.trace_hook
-            if _hook is not None:  # diagnostics only (see JointIKSolver.trace_hook)
-                _hook(
-                    t,
-                    dict(
-                        alive=alive,
-                        phase=phase,
-                        comps={k: v.detach() for k, v in _comps.items()},
-                        bend_prior=_bp.detach(),
-                        shape_dev=shape_dev.detach(),
-                        constraint=constraint_loss.detach(),
-                        improved=improved,
-                        mu_shape=mu_shape.detach(),
-                        thetas=[th.detach() for th in thetas],
-                        X=X_current.detach(),
-                    ),
-                )
-            score_grads = None
-            if phase is not None:
-                score_grads = torch.autograd.grad(
-                    -stat_score.sum(),
-                    thetas,
-                    retain_graph=True,
-                    create_graph=phase.sigma_source == "curvature",
-                    allow_unused=True,
-                )
-                score_grads = [g if g is not None else torch.zeros_like(th) for g, th in zip(score_grads, thetas)]
-                if phase.sigma_source == "curvature":
-                    phase.curvature(score_grads, thetas, float(self.scorer._agg_norm()))
-            combined_loss = (-stat_score + constraint_loss).sum()  # scalar
-            grads_all = torch.autograd.grad(combined_loss, thetas, allow_unused=True)
-
-            total_grads: List[torch.Tensor] = []
-            for li, (didx, theta_li) in enumerate(zip(donor_pos_idxs, thetas)):
-                g = grads_all[li] if grads_all[li] is not None else torch.zeros_like(theta_li)
-
-                n_d_i = didx.shape[0]
-                if n_d_i == 2:
-                    # Bidentate: project out rotation about donor-donor axis (null mode of donor positions).
-                    with torch.no_grad():
-                        d_pos = all_donor_pos_det[:, didx, :]  # (B, 2, 3)
-                        null_vec = d_pos[:, 0, :] - d_pos[:, 1, :]  # (B, 3)
-                        null_norm = null_vec.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-                        n_hat = null_vec / null_norm
-                        I3 = torch.eye(3, dtype=n_hat.dtype, device=n_hat.device).unsqueeze(0).expand(B, -1, -1)
-                        P_keep = I3 - torch.bmm(n_hat.unsqueeze(-1), n_hat.unsqueeze(-2))
-                    omega_proj = torch.bmm(P_keep, g[:, 3:6].unsqueeze(-1)).squeeze(-1)
-                    g = g.clone()
-                    g[:, 3:6] = (
-                        torch.where(phase.active[:, None], g[:, 3:6], omega_proj)
-                        if phase is not None and ("projection" in phase.release or phase.whole)
-                        else omega_proj
-                    )
-
-                total_grads.append(g)
-
-            r = -stat_score + constraint_loss  # (B,)
-
-            with torch.no_grad():
-                grad_norm_b = torch.cat([g.reshape(B, -1) for g in total_grads], dim=-1).norm(dim=-1)  # (B,)
-
-                history_residuals.append(_hist(r.detach()))
-                history_scores.append(_hist(stat_score.detach()))
-                history_grad_norms.append(_hist(grad_norm_b))
-                history_shape.append(_hist(shape_dev.detach()))
-
-                # Dual ascent with stall safeguard: freeze multiplier once violation stalls over a window.
-                violation_ring[t % MW] = violation.detach()
-                if t >= MW - 1 and t % MW == MW - 1:
-                    v_range = violation_ring.max(dim=0).values - violation_ring.min(dim=0).values
-                    mu_shape_frozen = mu_shape_frozen | (v_range < _MU_SHAPE_STALL_ATOL)
-
-                mu_increment = _SHAPE_RHO * violation.detach()
-                mu_increment = torch.where(mu_shape_frozen, torch.zeros_like(mu_increment), mu_increment)
-                mu_shape = (mu_shape + mu_increment).clamp(min=0.0)
-
-                # Same mechanism, independently, for mu_sym and mu_sym_angle.
-                sym_violation_ring[t % SW] = sym_violation.detach()
-                sym_angle_violation_ring[t % SW] = sym_angle_violation.detach()
-                if t >= SW - 1 and t % SW == SW - 1:
-                    sym_v_range = sym_violation_ring.max(dim=0).values - sym_violation_ring.min(dim=0).values
-                    sym_angle_v_range = (
-                        sym_angle_violation_ring.max(dim=0).values - sym_angle_violation_ring.min(dim=0).values
-                    )
-                    mu_sym_frozen = mu_sym_frozen | (sym_v_range < _SYM_STALL_ATOL)
-                    mu_sym_angle_frozen = mu_sym_angle_frozen | (sym_angle_v_range < _SYM_STALL_ATOL)
-
-                mu_sym_increment = _SYM_RHO * sym_violation.detach()
-                mu_sym_angle_increment = _SYM_RHO * sym_angle_violation.detach()
-                mu_sym_increment = torch.where(mu_sym_frozen, torch.zeros_like(mu_sym_increment), mu_sym_increment)
-                mu_sym_angle_increment = torch.where(
-                    mu_sym_angle_frozen, torch.zeros_like(mu_sym_angle_increment), mu_sym_angle_increment
-                )
-                mu_sym = (mu_sym + mu_sym_increment).clamp(min=0.0)
-                mu_sym_angle = (mu_sym_angle + mu_sym_angle_increment).clamp(min=0.0)
-
-            adam_t = t + 1
-            b1, b2, eps_a = _ADAM_BETA1, _ADAM_BETA2, _ADAM_EPS
-            with torch.no_grad():
-                if phase is not None:
-                    scales = (
-                        [tab.index_select(0, torch.tensor([t], device=device)) for tab in _step_scale_tabs]
-                        if _step_scale_tabs is not None
-                        else None
-                    )
-                    steps = phase.update(
-                        torch.tensor([t], device=device),
-                        total_grads,
-                        [g * float(self.scorer._agg_norm()) for g in score_grads],
-                        (-stat_score + constraint_loss).detach(),
-                        scales,
-                        self.lr,
-                    )
-                else:
-                    steps = []
-                    lr_t = self.lr
-                    for li, g in enumerate(total_grads):
-                        adam_m[li] = b1 * adam_m[li] + (1.0 - b1) * g
-                        adam_v[li] = b2 * adam_v[li] + (1.0 - b2) * g**2
-                        if endpoint_m is not None:
-                            if alive is None:
-                                endpoint_m[li].copy_(adam_m[li])
-                                endpoint_v[li].copy_(adam_v[li])
-                                endpoint_t.fill_(adam_t)
-                            else:
-                                endpoint_m[li].index_copy_(0, alive, adam_m[li])
-                                endpoint_v[li].index_copy_(0, alive, adam_v[li])
-                                endpoint_t.index_fill_(0, alive, adam_t)
-                        m_hat = adam_m[li] / (1.0 - b1**adam_t)
-                        v_hat = adam_v[li] / (1.0 - b2**adam_t)
-                        step = lr_t * m_hat / (v_hat.sqrt() + eps_a)
-                        # Inherit Adam's moments, before bend-release / DOF scales.
-                        if handoff_delta is not None:
-                            if alive is None:
-                                handoff_delta[li].copy_(step.abs())
-                            else:
-                                handoff_delta[li].index_copy_(0, alive, step.abs())
-                        if _step_scale_tabs is not None and _step_scale_tabs[li] is not None:
-                            step = step * _step_scale_tabs[li][t]
-                        steps.append(step)
-
-                for li, (theta_li, step) in enumerate(zip(thetas, steps)):
-                    if li in cl_d0:
-                        # Ring closure folded into the update (no extra FK pass).
-                        c0_ = self.fks[li]._macro_col0
-                        c1_ = c0_ + self.fks[li].n_macro_joints
-                        step = step.clone()
-                        step[:, c0_:c1_] = self.fks[li].closure_fused_step(X_current, cl_d0[li], step[:, c0_:c1_])
-                    if phase is not None:
-                        step = torch.where(phase.done[:, None], 0.0, step)
-                    theta_li.data -= step
-                    if theta_li.shape[1] > 6:
-                        theta_li.data[:, 6:] = wrap_angle(theta_li.data[:, 6:])
-                    theta_li.data[:, 3:6] = _renorm_axisangle(theta_li.data[:, 3:6])
-
-            if phase is not None and (t + 1) % 8 == 0 and bool(phase.stop.item()):
-                break
-
-            # Row cull (successive halving with a backbone-basin niche).
-            if (t + 1) in cull_plan:
-                keep_blocks = None
-                if blocks_c is not None:
-                    with torch.no_grad():
-                        keep_blocks = self._block_cull_keep(
-                            cull_plan[t + 1], best_score_ever, thetas, groups_c, blocks_c, blocks_n0
-                        )
-                    k_keep = int(keep_blocks.numel())
-                else:
-                    k_keep = max(int(math.ceil(cull_plan[t + 1] * B)), min(_CULL_MIN_ROWS, B))
-                if k_keep < B:
-                    with torch.no_grad():
-                        if alive is None:
-                            alive = torch.arange(B_full, device=device)
-                            arch_thetas = [bt.detach().clone() for bt in best_score_thetas]
-                            arch_plateau = ever_plateaued.clone()
-                        for li in range(L):
-                            arch_thetas[li].index_copy_(0, alive, best_score_thetas[li])
-                        arch_plateau.index_copy_(0, alive, ever_plateaued)
-                        if keep_blocks is None:
-                            key = self._cull_key(best_score_ever, thetas, groups_c, k_keep)
-                            keep = torch.topk(key, k_keep).indices.sort().values
-                        else:
-                            keep = keep_blocks
-                            blocks_c = blocks_c[keep]
-                        thetas = [th.detach()[keep].requires_grad_(True) for th in thetas]
-                        adam_m = [m[keep] for m in adam_m]
-                        adam_v = [v[keep] for v in adam_v]
-                        if phase is not None:
-                            phase.select(keep)
-                        best_score_thetas = [bt[keep] for bt in best_score_thetas]
-                        best_score_ever = best_score_ever[keep]
-                        score_ring = score_ring[:, keep]
-                        ever_plateaued = ever_plateaued[keep]
-                        violation_ring = violation_ring[:, keep]
-                        mu_shape_frozen = mu_shape_frozen[keep]
-                        sym_violation_ring = sym_violation_ring[:, keep]
-                        sym_angle_violation_ring = sym_angle_violation_ring[:, keep]
-                        mu_sym_frozen = mu_sym_frozen[keep]
-                        mu_sym_angle_frozen = mu_sym_angle_frozen[keep]
-                        mu_shape = mu_shape[keep]
-                        mu_sym = mu_sym[keep]
-                        mu_sym_angle = mu_sym_angle[keep]
-                        ideal_directions_dev = ideal_directions_dev[keep]
-                        if X_ref.dim() == 3:
-                            X_ref = X_ref[keep]
-                        if has_closure and _cl_d0.dim() == 2:
-                            _cl_d0 = _cl_d0[keep]
-                        cl_d0 = {k_: (v_[keep] if v_.shape[0] > 1 else v_) for k_, v_ in cl_d0.items()}
-                        if q3_mode_override is not None:
-                            q3_mode_override = q3_mode_override[keep]
-                        if groups_c is not None:
-                            groups_c = groups_c[keep]
-                        if _sym_w is not None:
-                            _sym_w = [w[keep] for w in _sym_w]
-                        if _q3_sym_w is not None:
-                            _q3_sym_w = [w[keep] for w in _q3_sym_w]
-                        alive = alive[keep]
-                        B = k_keep
-
-        # Assemble best-score positions for all original rows.
-        if alive is not None:
-            with torch.no_grad():
-                for li in range(L):
-                    arch_thetas[li].index_copy_(0, alive, best_score_thetas[li])
-                arch_plateau.index_copy_(0, alive, ever_plateaued)
-            best_score_thetas = arch_thetas
-            ever_plateaued = arch_plateau
-            q3_mode_override = q3_mode_override_full
-            B = B_full
-
-        return (
-            best_score_thetas,
-            ever_plateaued,
-            q3_mode_override,
-            B,
-            history_residuals,
-            history_scores,
-            history_grad_norms,
-            history_shape,
-        )
+                wn = _tl.full([BLOCK_B], 1.0, dtype=_tl.float32)
+            g_scale = dloss_dshape * wn * 2.0
+            gux, guy, guz = -g_scale * ex, -g_scale * ey, -g_scale * ez
+            dot = gux * ux + guy * uy + guz * uz
+            _tl.store(grad_dpos_ptr + off + 0, (gux - dot * ux) / dnorm, mask=mask)
+            _tl.store(grad_dpos_ptr + off + 1, (guy - dot * uy) / dnorm, mask=mask)
+            _tl.store(grad_dpos_ptr + off + 2, (guz - dot * uz) / dnorm, mask=mask)
 
 
 @dataclass
 class IKSolverConfig:
-    """
-    Public hyperparameters for JointIKSolver.
-
-    n_steps, lr : Adam step count and learning rate for the joint DOF optimisation.
-    shape_tol : violation tolerance of the shape constraint. None means the
-        engine resolves a per-geometry tolerance; a standalone solver then
-        uses ik/targets.SHAPE_TOL_POOLED.
-    n_workers : number of batch chunks solved concurrently on CPU, each with
-        single-threaded torch ops. None = ``JACOBIK_NUM_WORKERS`` if set, else
-        min(os.cpu_count(), 8). 1 disables chunking; ignored on GPU. Rows are
-        independent analytically, but batch shapes can change floating-point
-        rounding and iterative trajectories; reproducibility checks pin this.
-    worker_mode : "thread" or "process" (persistent spawn-based pool; no GIL,
-        costs a one-off start-up; on Windows scripts need an
-        ``if __name__ == "__main__":`` guard). Overridable with the
-        ``JACOBIK_WORKER_MODE`` environment variable.
-    cull_at, cull_keep : row culling by successive halving. At each step
-        fraction in ``cull_at`` the batch shrinks to the ``cull_keep`` fraction
-        of rows with the best best-seen score (with a basin-niche penalty).
-        Empty tuple = off.
-    """
+    """Public hyperparameters for JointIKSolver."""
 
     n_steps: int = 200
     lr: float = 0.01
@@ -724,40 +438,21 @@ class IKSolverConfig:
 
 
 
-class JointIKSolver(_EagerSolveMixin):
+class JointIKSolver:
     """
-    Joint gradient-descent IK solver optimising all ligands simultaneously.
-
-    Objective: minimise -score(X) + shape/symmetry constraint penalties, where
-    score() is the Scorer's unified statistical score. Both constraint families
-    use safeguarded augmented-Lagrangian dual ascent (see module docstring).
-    Quantity weights are set on the Scorer, not here.
+    Joint gradient-descent IK solver optimising all ligands simultaneously on CUDA
+    using zero-autograd Triton kernels and CUDA-graph replay.
     """
 
-    #: Optional per-step diagnostics callback ``hook(t, info)`` (None in production). ``info`` holds detached tensors
-    #: of the current chunk: score components, bend prior, shape deviation, constraint loss, snapshot-improved mask,
-    #: mu_shape, thetas and alive (original row index of each row after culling, or None). Rows are chunk-local when
-    #: the batch is split across workers; set JACOBIK_NUM_WORKERS=1 to trace whole batches.
+    _fixed_shape_replay = True
+    replay = True
+    timing_sync = False
     trace_hook = None
-    # CPU diagnostic observer with live score/aid graphs, before backward.
-    # None in production; observers must retain_graph and never mutate inputs.
     diagnostic_hook = None
-    #: diagnostics: called once per solve batch with the final per-row scores under the scorer's floors and under the
-    #: fit-time floors, plus the per-term breakdowns (score-energy baseline, 2026-09-27)
     final_hook = None
-    #: S2b capture: the angle-bend prior added to each row's final score (numpy (B,)), set by a single-chunk solve;
-    #: None when the solve was split across CPU workers (the copies' values are not returned) or was not run.
     last_bend_prior = None
-
-    finish_endpoint_hook = None  # optional capture of final full-row Adam moments
-    #: P2R config_states: (B,) int block id per row (one block per configuration class, solved in one batch). The cull
-    #: then runs inside each block exactly as a separate solve of that block would (its own size, fraction and minimum).
-    #: None (default) = one block, the production cull.
+    finish_endpoint_hook = None
     cull_blocks = None
-    #: P2R config_states: {"dist": {group tuple: (B,) bool}, "q3": {group tuple: (B,) bool}} - which rows each symmetry
-    #: tie applies to, when the batch holds classes with different donor symmetry (symmetric_groups is then the union
-    #: of the classes' groups). Each row's ties are averaged over its own groups, as its class's separate solve does.
-    #: None (default) = every group on every row (production).
     sym_rows = None
 
     def __init__(
@@ -766,12 +461,15 @@ class JointIKSolver(_EagerSolveMixin):
         scorer: "Scorer",
         ge: "GeometryExtractor",
         config: Optional[IKSolverConfig] = None,
-        device: torch.device = torch.device("cpu"),
+        device: str = "cuda",
     ) -> None:
         self.fks = fks
         self.scorer = scorer
         self.ge = ge
-        self.device = torch.device(device)
+        dev_str = str(device).split(":")[0].lower()
+        if dev_str != "cuda":
+            raise RuntimeError("JointIKSolver requires a CUDA device (GPU-only Triton build).")
+        self.device = "cuda"
 
         cfg = config or IKSolverConfig()
         self.n_steps = cfg.n_steps
@@ -783,30 +481,16 @@ class JointIKSolver(_EagerSolveMixin):
         else:
             self.shape_tol = cfg.shape_tol
         self.n_workers = cfg.n_workers
-        self.worker_mode = os.environ.get("JACOBIK_WORKER_MODE", cfg.worker_mode).lower()
+        self.worker_mode = cfg.worker_mode
         self.cull_at = tuple(cfg.cull_at)
         self.cull_keep = tuple(cfg.cull_keep)
-        self._niche_plan = None
 
-    def _resolve_workers(self, B: int, debug: bool) -> int:
-        if debug or self.device.type != "cpu":
-            return 1
-        n = self.n_workers
-        if n is None:
-            env = os.environ.get("JACOBIK_NUM_WORKERS")
-            n = int(env) if env else min(os.cpu_count() or 1, 8)
-        return max(1, min(int(n), B // max(1, _MIN_CHUNK)))
-
-    # ------------------------------------------------------------------
-    # Row culling helpers
-    # ------------------------------------------------------------------
-
-    def _bend_prior(self, thetas) -> torch.Tensor:
+    def _bend_prior(self, thetas) -> cp.ndarray:
         """Energy-calibrated angle-bend log-prior (ik/angle_bends.energy_prior), summed over ligands; 0 without bends."""
         total = None
         cfg = getattr(self, "bend_prior", None)
         if not cfg:
-            return thetas[0].new_zeros(thetas[0].shape[0])
+            return cp.zeros((thetas[0].shape[0],), dtype=thetas[0].dtype)
         from jacobik.ik import angle_bends as AB
 
         for fk, th in zip(self.fks, thetas):
@@ -815,162 +499,57 @@ class JointIKSolver(_EagerSolveMixin):
                 continue
             n0 = 6 + fk.n_joints
             fz = getattr(fk, "_bend_free", None)
-            fz = torch.clamp(fz, min=float(cfg["free_deg"])) if fz is not None else cfg["free_deg"]
+            fz = cp.maximum(fz, float(cfg["free_deg"])) if fz is not None else cfg["free_deg"]
             p = AB.energy_prior(th[:, n0:n0 + nb], fk._bend_k, fz, cfg["scale"])
             total = p if total is None else total + p
         if total is None:
-            return thetas[0].new_zeros(thetas[0].shape[0])
+            return cp.zeros((thetas[0].shape[0],), dtype=thetas[0].dtype)
         if _BEND_PER_Z and hasattr(self.scorer, "_agg_norm"):
             total = total / float(self.scorer._agg_norm())
         return total
 
+    @timing.timed("ik_solve")
     def solve(
         self,
-        theta_inits: list,  # [Tensor(B, 6+Ji), ...]
-        X_ref: torch.Tensor,  # (N, 3)
-        donor_pos_idxs: list,  # [LongTensor(n_d_i), ...]
-        ideal_directions: torch.Tensor,  # (B, n_donors_total, 3)
+        theta_inits: list,
+        X_ref,
+        donor_pos_idxs: list,
+        ideal_directions,
         debug: bool = False,
         symmetric_groups: Optional[List[List[int]]] = None,
         q3_symmetric_groups: Optional[List[List[int]]] = None,
-        row_groups: Optional[torch.Tensor] = None,  # (B,) int, e.g. candidate id
+        row_groups=None,
     ):
-        """
-        Joint IK solve for all ligands; arguments and return values as in
-        ``_solve_impl``. On CPU the batch is split into ``n_workers``
-        independent chunks solved concurrently. Pin the worker count for exact
-        reproducibility: batch shapes can change floating-point trajectories.
-        """
-        B = theta_inits[0].shape[0]
+        """Joint IK solve for all ligands on CUDA."""
         self.last_bend_prior = None
-        if self.cull_at and self._niche_plan is None:
-            self._niche_plan = self._build_niche_plan(donor_pos_idxs)
-        n_w = self._resolve_workers(B, debug)
-        if self.cull_blocks is not None or self.sym_rows is not None:
-            n_w = 1   # blocks span the batch; the CPU chunking would split them
-        kw = dict(
-            cull_enabled=B >= _CULL_MIN_BATCH,
+        return self._solve_impl(
+            theta_inits,
+            X_ref,
+            donor_pos_idxs,
+            ideal_directions,
             debug=debug,
             symmetric_groups=symmetric_groups,
             q3_symmetric_groups=q3_symmetric_groups,
+            row_groups=row_groups,
+            cull_enabled=False,
         )
-        if n_w <= 1:
-            return self._solve_impl(
-                theta_inits, X_ref, donor_pos_idxs, ideal_directions, row_groups=row_groups, **kw
-            )
-
-        bounds = [round(i * B / n_w) for i in range(n_w + 1)]
-        slices = [slice(bounds[i], bounds[i + 1]) for i in range(n_w)]
-
-        def work(sl: slice):
-            # Per-thread setting: keep each chunk's torch ops single-threaded.
-            torch.set_num_threads(1)
-            # Each chunk gets its own shallow solver + scorer copy. The final rescoring swaps the scorer's GMM floors
-            # (set_gmm_floor "fit" -> back); on a shared scorer the chunk that finishes first switched the floors under
-            # the other chunk's optimisation steps, so 2-worker solves were not reproducible (2026-09-30).
-            # Tensors are shared read-only; set_gmm_floor rebinds attributes, it never writes into them.
-            me = _copy.copy(self)
-            me.scorer = _copy.copy(self.scorer)
-            return me._solve_impl(
-                [t[sl] for t in theta_inits],
-                X_ref[sl] if X_ref.dim() == 3 else X_ref,
-                donor_pos_idxs,
-                ideal_directions[sl],
-                row_groups=None if row_groups is None else row_groups[sl],
-                **kw,
-            )
-
-        results = None
-        if self.worker_mode == "process":
-            try:
-                pool = _get_pool(n_w)
-                payloads = [
-                    pickle.dumps(
-                        (
-                            self,
-                            (
-                                [t[sl].clone() for t in theta_inits],
-                                X_ref[sl].clone() if X_ref.dim() == 3 else X_ref,
-                                donor_pos_idxs,
-                                ideal_directions[sl].clone(),
-                            ),
-                            dict(
-                                kw,
-                                row_groups=None if row_groups is None else row_groups[sl].clone(),
-                            ),
-                        )
-                    )
-                    for sl in slices
-                ]
-                results = [pickle.loads(b) for b in pool.map(_solve_chunk_worker, payloads)]
-            except Exception as exc:  # broken pool, unpicklable state, ...
-                log.warning("process-pool solve failed (%r); falling back to threads", exc)
-                _shutdown_pool()
-                results = None
-        if results is None:
-            prev_threads = torch.get_num_threads()
-            try:
-                with ThreadPoolExecutor(max_workers=n_w) as pool_t:
-                    results = list(pool_t.map(work, slices))
-            finally:
-                torch.set_num_threads(prev_threads)
-
-        n_lig = len(theta_inits)
-        thetas_final = [torch.cat([r[0][li] for r in results], dim=0) for li in range(n_lig)]
-        converged = torch.cat([r[1] for r in results], dim=0)
-        final_score = torch.cat([r[2] for r in results], dim=0)
-        solve_trace: dict = {}
-        if all(r[3] for r in results):
-            solve_trace = merge_chunk_traces([r[3] for r in results])
-        return thetas_final, converged, final_score, solve_trace
 
     def _solve_impl(
         self,
-        theta_inits: list,  # [Tensor(B, 6+Ji), ...]
-        X_ref: torch.Tensor,  # (N, 3)
-        donor_pos_idxs: list,  # [LongTensor(n_d_i), ...]
-        ideal_directions: torch.Tensor,  # (B, n_donors_total, 3)
+        theta_inits: list,
+        X_ref,
+        donor_pos_idxs: list,
+        ideal_directions,
         debug: bool = False,
         symmetric_groups: Optional[List[List[int]]] = None,
         q3_symmetric_groups: Optional[List[List[int]]] = None,
-        row_groups: Optional[torch.Tensor] = None,
+        row_groups=None,
         cull_enabled: bool = True,
     ):
-        """
-        Run the joint IK solve for all ligands simultaneously.
+        import time as _time0
 
-        Parameters
-        ----------
-        theta_inits    : list of (B, 6+Ji) initial DOF tensors, one per ligand.
-        X_ref          : (N, 3) full-complex reference atom positions.
-        donor_pos_idxs : list of (n_d_i,) LongTensors of pos-indices into X_ref.
-        ideal_directions : (B, n_donors_total, 3) unit vectors, one per donor in
-                         ge.donor_positions()'s global order, given per batch
-                         item (each item may target a different polyhedron
-                         assignment).
-        row_groups     : optional (B,) int tensor; rows with different values
-                         are never treated as one basin by the cull's niche
-                         penalty. None = one group.
-        debug          : forces a single chunk (no threading).
-        symmetric_groups : donor-index groups (global donor order) of
-                         topologically equivalent donors, tied to a common
-                         M-D distance.
-        q3_symmetric_groups : groups used instead of symmetric_groups for the
-                         Q3 approach-angle tie and the Q3 mode commitment
-                         (should only span donors of one ligand instance).
-                         None falls back to symmetric_groups.
-
-        A symmetric group whose Q3 target is multi-modal is committed, from the
-        initial pose, to a single GMM component for the whole solve.
-
-        Returns
-        -------
-        thetas_final   : list of (B, 6+Ji) DOFs at the best score seen
-        converged      : (B,) bool, True iff the score plateaued
-        final_score    : (B,) score at the best-seen positions
-        solve_trace    : dict of per-step (T, B) numpy arrays: residual, score,
-                         grad_norm (NaN for culled rows after the cull)
-        """
+        _t_enter = _time0.perf_counter()
+        # ===== set-up: verbatim from JointIKSolver._solve_impl =====
         device = self.device
         import sys as _sys
         from jacobik.ik.ik_setup import _finalize_solve_state, _init_solve_state
@@ -979,7 +558,7 @@ class JointIKSolver(_EagerSolveMixin):
         _st = _init_solve_state(
             self, theta_inits, X_ref, donor_pos_idxs, ideal_directions, symmetric_groups, q3_symmetric_groups, _cfg_mod
         )
-        B, B_full, T = _st.B, _st.B_full, _st.T
+        B, T = _st.B, _st.T
         X_ref, X_ref_full, cl_d0 = _st.X_ref, _st.X_ref_full, _st.cl_d0
         donor_pos_idxs, ideal_directions_dev, thetas = _st.donor_pos_idxs, _st.ideal_directions_dev, _st.thetas
         has_closure, _cl_a, _cl_b, _cl_d0 = _st.has_closure, _st._cl_a, _st._cl_b, _st._cl_d0
@@ -997,19 +576,362 @@ class JointIKSolver(_EagerSolveMixin):
         _n_q3_sym_groups, _q3_sym_w = _st._n_q3_sym_groups, _st._q3_sym_w
         _step_scale_tabs, phase = _st._step_scale_tabs, _st.phase
 
-        # Row culling state: step -> fraction
-        (
-            best_score_thetas,
-            ever_plateaued,
-            q3_mode_override,
-            B,
-            history_residuals,
-            history_scores,
-            history_grad_norms,
-            history_shape,
-        ) = self._run_eager_loop(
-            _st, row_groups, cull_enabled, symmetric_groups, q3_symmetric_groups
-        )
+
+        # ===== replay-friendly step loop =====
+        groups_c = gpu.as_gpu(row_groups, dtype=cp.int64) if row_groups is not None else None
+        dt = thetas[0].dtype
+        tl = cp.zeros((1,), dtype=cp.int64)                      # step index, on the device
+        bc1 = cp.asarray([1.0 - _ADAM_BETA1 ** (i + 1) for i in range(T)], dtype=dt)
+        bc2 = cp.asarray([1.0 - _ADAM_BETA2 ** (i + 1) for i in range(T)], dtype=dt)
+        nan = float("nan")
+        hist_res = cp.full((T, B), nan, dtype=dt)
+        hist_score = cp.full((T, B), nan, dtype=dt)
+        hist_gn = cp.full((T, B), nan, dtype=dt)
+        hist_shape = cp.full((T, B), nan, dtype=dt)
+        if dt != cp.float32:
+            raise RuntimeError(f"JointIKSolver requires float32 on CUDA, got {dt}.")
+        if phase is not None and phase.sigma_source == "curvature":
+            raise RuntimeError("JointIKSolver does not support curvature sigma_source on CUDA.")
+        if JointIKSolver.diagnostic_hook is not None:
+            raise RuntimeError("JointIKSolver does not support diagnostic_hook on CUDA.")
+
+        improved_buf = cp.zeros((B,), dtype=cp.bool_)
+        adam_step_bufs = [cp.empty_like(th) for th in thetas] if phase is None else None
+        _agg_norm_val = float(self.scorer._agg_norm()) if phase is not None else 1.0
+        _bidentate_didx = [(int(didx[0].item()), int(didx[1].item())) if didx.shape[0] == 2 else None for didx in donor_pos_idxs]
+        _release_proj = phase is not None and ("projection" in phase.release or phase.whole)
+
+        from jacobik.ik.fk_compose import ComplexFK
+        cfk = ComplexFK(self.fks)        # unsupported layouts (a ligand without donor atoms) run the per-ligand path
+
+        from jacobik.ik import angle_bends as _AB
+        _bp_cfg = getattr(self, "bend_prior", None)
+        _bp_agg = float(self.scorer._agg_norm()) if (_BEND_PER_Z and hasattr(self.scorer, "_agg_norm")) else 1.0
+        _bp_ligs = []
+        if _bp_cfg:
+            for _li, _fk in enumerate(self.fks):
+                _nb = getattr(_fk, "n_angle_bends", 0)
+                if _nb:
+                    _n0 = 6 + _fk.n_joints
+                    _fz = getattr(_fk, "_bend_free", None)
+                    _fz = cp.maximum(_fz, float(_bp_cfg["free_deg"])) if _fz is not None else float(_bp_cfg["free_deg"])
+                    _bp_ligs.append((_li, _n0, _n0 + _nb, _fk._bend_k, _fz, float(_bp_cfg["scale"])))
+        _release_shape = phase is not None and ("shape" in phase.release or phase.whole)
+        _release_sym = phase is not None and ("symmetry" in phase.release or phase.whole)
+        _shape_dev_buf = cp.empty((B,), dtype=dt)
+        _viol_buf = cp.empty((B,), dtype=dt)
+        _shape_loss_buf = cp.empty((B,), dtype=dt)
+        _grad_dpos_buf = cp.empty((B, self.ge.n_donors, 3), dtype=dt)
+        _has_q3_sym = bool(symmetric_groups and q3_site_to_idx and _q3_sym_group_idx_tensors)
+
+        def step(need_score_grads=None):
+            X_current = cfk.forward_no_grad(thetas, X_ref)
+            all_donor_pos_det = self.ge.donor_positions(X_current)
+            stat_score, grad_X_stat, _ = self.scorer.score_and_grad(
+                X_current, q3_mode_override=q3_mode_override, donor_pos=all_donor_pos_det,
+                row_groups=groups_c, return_comps=False,
+            )
+            bp_grads = {}
+            if _bp_ligs:
+                bp_tot = None
+                for _li, _n0, _n1, _bk, _fz, _bsc in _bp_ligs:
+                    _p, _bg = _AB.energy_prior_and_grad(thetas[_li][:, _n0:_n1], _bk, _fz, _bsc)
+                    bp_tot = _p if bp_tot is None else (bp_tot + _p)
+                    bp_grads[_li] = _bg / _bp_agg
+                if bp_tot is not None:
+                    stat_score = stat_score + bp_tot / _bp_agg
+
+            _dn = cp.maximum(cp.sqrt(cp.sum(all_donor_pos_det * all_donor_pos_det, axis=-1, keepdims=True)), 1e-12)
+            donor_unit_vecs = all_donor_pos_det / _dn
+            R_opt = _optimal_rotation_nocentroid(ideal_directions_dev, donor_unit_vecs)
+            N_sh = all_donor_pos_det.shape[1]
+            _act_p = phase.active if _release_shape else _shape_dev_buf
+            gpu.launch(
+                _shape_constraint_R_fwd_bwd_kernel,
+                (gpu.cdiv(B, 64),),
+                cp.ascontiguousarray(R_opt), cp.ascontiguousarray(ideal_directions_dev),
+                cp.ascontiguousarray(all_donor_pos_det),
+                mu_shape, _act_p, _shape_dev_buf, _viol_buf, _shape_loss_buf, _grad_dpos_buf,
+                B, N_sh, float(self.shape_tol), float(_LSE_TEMP),
+                math.log(max(N_sh, 1)), float(_SHAPE_RHO),
+                RELEASE_SHAPE=_release_shape, BLOCK_B=64,
+            )
+            shape_dev = _shape_dev_buf
+            violation = _viol_buf
+            constraint_loss = _shape_loss_buf
+
+            sym_penalty = cp.zeros((B,), dtype=dt)
+            sym_angle_penalty = cp.zeros((B,), dtype=dt)
+            sym_d_grads = []
+            if symmetric_groups:
+                all_donor_norms = cp.sqrt(cp.sum(all_donor_pos_det * all_donor_pos_det, axis=-1))
+                for _gi, idx_t in enumerate(_sym_group_idx_tensors):
+                    d_g = all_donor_norms[:, idx_t]
+                    dev_g = d_g - cp.mean(d_g, axis=-1, keepdims=True)
+                    _wg = 1.0 / _n_sym_groups if _sym_w is None else _sym_w[_gi]
+                    sym_penalty = sym_penalty + _wg * cp.mean(dev_g * dev_g, axis=-1)
+                    sym_d_grads.append((idx_t, dev_g * (2.0 / d_g.shape[1]) * (_wg if _sym_w is None else _wg[:, None])))
+
+            sym_violation = cp.maximum(sym_penalty - _SYM_TOL, 0.0)
+            grad_X_q3_sym = None
+            if _has_q3_sym:
+                q3_angles_now = self.ge.q3_approach_angles(X_current, haptic=_q3_sym_haptic)
+                sap = cp.zeros((B,), dtype=dt)
+                q3_a_grads = []
+                for _gi, idx_t2 in enumerate(_q3_sym_group_idx_tensors):
+                    a_g = q3_angles_now[:, idx_t2]
+                    dev_a = a_g - cp.mean(a_g, axis=-1, keepdims=True)
+                    _wa = 1.0 / _n_q3_sym_groups if _q3_sym_w is None else _q3_sym_w[_gi]
+                    sap = sap + _wa * cp.mean(dev_a * dev_a, axis=-1)
+                    q3_a_grads.append((idx_t2, dev_a * (2.0 / a_g.shape[1]) * (_wa if _q3_sym_w is None else _wa[:, None])))
+                sym_angle_penalty = sap
+                sav = cp.maximum(sap - _SYM_TOL, 0.0)
+                dloss_dsav = cp.where(sap > _SYM_TOL, mu_sym_angle + _SYM_RHO * sav, 0.0)
+                if _release_sym:
+                    dloss_dsav = cp.where(phase.active, 0.0, dloss_dsav)
+                grad_q3_angles = cp.zeros_like(q3_angles_now)
+                for idx_t2, g_da in q3_a_grads:
+                    cp.add.at(grad_q3_angles, (slice(None), idx_t2), dloss_dsav[:, None] * g_da)
+                grad_X_q3_sym = self.ge.q3_approach_angles_vjp(X_current, grad_q3_angles, haptic=_q3_sym_haptic)
+            sym_angle_violation = cp.maximum(sym_angle_penalty - _SYM_TOL, 0.0)
+
+            if phase is not None:
+                raw_sym_loss = (
+                    mu_sym * sym_violation + 0.5 * _SYM_RHO * sym_violation * sym_violation
+                    + mu_sym_angle * sym_angle_violation + 0.5 * _SYM_RHO * sym_angle_violation * sym_angle_violation
+                )
+                phase.observe(tl, -stat_score + constraint_loss + raw_sym_loss)
+                if _release_shape:
+                    constraint_loss = cp.where(phase.active, 0.0, constraint_loss)
+                if _release_sym:
+                    sym_violation = cp.where(phase.active, 0.0, sym_violation)
+                    sym_angle_violation = cp.where(phase.active, 0.0, sym_angle_violation)
+
+            constraint_loss = (
+                constraint_loss
+                + mu_sym * sym_violation + 0.5 * _SYM_RHO * sym_violation * sym_violation
+                + mu_sym_angle * sym_angle_violation + 0.5 * _SYM_RHO * sym_angle_violation * sym_angle_violation
+            )
+
+            if sym_d_grads:
+                dloss_dsym = cp.where(sym_penalty > _SYM_TOL, mu_sym + _SYM_RHO * sym_violation, 0.0)
+                if _release_sym:
+                    dloss_dsym = cp.where(phase.active, 0.0, dloss_dsym)
+                for idx_t, g_dg in sym_d_grads:
+                    d_g = cp.maximum(all_donor_norms[:, idx_t], 1e-12)
+                    g_vec = (dloss_dsym[:, None] * g_dg / d_g)[:, :, None] * all_donor_pos_det[:, idx_t, :]
+                    cp.add.at(_grad_dpos_buf, (slice(None), idx_t, slice(None)), g_vec)
+
+            grad_X_constr = cp.zeros_like(X_current)
+            if self.ge.n_donors > 0:
+                if self.ge._donor_all_kappa:
+                    cp.add.at(grad_X_constr, (slice(None), self.ge._donor_flat_idx, slice(None)), _grad_dpos_buf)
+                else:
+                    _g_flat = (_grad_dpos_buf[:, :, None, :] * self.ge._donor_atom_w.astype(dt)).reshape(
+                        B, self.ge.n_donors * self.ge._donor_max_f, 3
+                    )
+                    cp.add.at(grad_X_constr, (slice(None), self.ge._donor_flat_idx, slice(None)), _g_flat)
+            if grad_X_q3_sym is not None:
+                grad_X_constr = grad_X_constr + grad_X_q3_sym
+
+            snap_score = stat_score
+            if has_closure:
+                _cl_diff = X_current[:, _cl_a] - X_current[:, _cl_b]
+                _cl_dist = cp.sqrt(cp.sum(_cl_diff * _cl_diff, axis=-1))
+                clos = cp.sum((_cl_dist - _cl_d0) ** 2, axis=-1)
+                snap_score = snap_score - 1000.0 * clos
+
+            _need_sg = (phase is not None) if need_score_grads is None else bool(need_score_grads)
+            score_grads = None
+            if _need_sg:
+                sg_fk, cg_fk = cfk.vjp(cp.stack([-grad_X_stat, grad_X_constr], axis=0))
+                for _li, _bg in bp_grads.items():
+                    _, _n0, _n1, _, _, _ = _bp_ligs[[x[0] for x in _bp_ligs].index(_li)]
+                    sg_fk[_li][:, _n0:_n1] -= _bg
+                score_grads = sg_fk
+                grads_all = [sg + cg for sg, cg in zip(sg_fk, cg_fk)]
+            else:
+                grads_all = cfk.vjp(grad_X_constr - grad_X_stat)
+                for _li, _bg in bp_grads.items():
+                    _, _n0, _n1, _, _, _ = _bp_ligs[[x[0] for x in _bp_ligs].index(_li)]
+                    grads_all[_li][:, _n0:_n1] -= _bg
+
+            total_grads: List[cp.ndarray] = []
+            for li, (didx, theta_li) in enumerate(zip(donor_pos_idxs, thetas)):
+                g = grads_all[li] if grads_all[li] is not None else cp.zeros_like(theta_li)
+                bd = _bidentate_didx[li]
+                if bd is not None:
+                    g = cp.ascontiguousarray(g)
+                    d0 = cp.ascontiguousarray(all_donor_pos_det[:, bd[0], :])
+                    d1 = cp.ascontiguousarray(all_donor_pos_det[:, bd[1], :])
+                    act_p = phase.active if _release_proj else d0
+                    gpu.launch(
+                        _bidentate_proj_kernel,
+                        (gpu.cdiv(B, 64),),
+                        d0, d1, g, act_p, B, g.shape[1],
+                        RELEASE_PROJ=_release_proj, BLOCK_B=64,
+                    )
+                total_grads.append(g)
+
+            r = -stat_score + constraint_loss
+            grad_norm_b = cp.sqrt(sum(cp.sum(g * g, axis=-1) for g in total_grads))
+            gpu.launch(
+                _al_ring_dual_update_kernel,
+                (gpu.cdiv(B, 128),),
+                tl, stat_score, snap_score, r, grad_norm_b, shape_dev,
+                violation, sym_violation, sym_angle_violation,
+                score_ring, ever_plateaued, best_score_ever, improved_buf,
+                hist_res, hist_score, hist_gn, hist_shape,
+                violation_ring, mu_shape_frozen, mu_shape,
+                sym_violation_ring, sym_angle_violation_ring,
+                mu_sym_frozen, mu_sym_angle_frozen, mu_sym, mu_sym_angle,
+                B, W=W, MW=MW, SW=SW,
+                plateau_atol=float(_PLATEAU_ATOL), shape_rho=float(_SHAPE_RHO),
+                mu_shape_stall_atol=float(_MU_SHAPE_STALL_ATOL),
+                sym_rho=float(_SYM_RHO), sym_stall_atol=float(_SYM_STALL_ATOL),
+                BLOCK_SIZE=128,
+            )
+            for li, theta_li in enumerate(thetas):
+                D_li = theta_li.shape[1]
+                gpu.launch(
+                    _best_snapshot_copy_kernel,
+                    (gpu.cdiv(B * D_li, 256),),
+                    improved_buf, theta_li, best_score_thetas[li], B, D_li, BLOCK_SIZE=256,
+                )
+
+            b1, b2, eps_a = _ADAM_BETA1, _ADAM_BETA2, _ADAM_EPS
+            lr_t = self.lr
+            if phase is not None:
+                scales = ([tab.take(tl, axis=0) for tab in _step_scale_tabs]
+                          if _step_scale_tabs is not None else None)
+                sg_scaled = [g * _agg_norm_val for g in score_grads] if score_grads is not None else None
+                steps = phase.update(tl, total_grads, sg_scaled, r, scales, self.lr)
+            elif endpoint_m is None:
+                steps = []
+                for li, (theta_li, g) in enumerate(zip(thetas, total_grads)):
+                    D_li = theta_li.shape[1]
+                    st_out = adam_step_bufs[li]
+                    has_ho = handoff_delta is not None
+                    ho_p = handoff_delta[li] if has_ho else st_out
+                    has_sc = _step_scale_tabs is not None and _step_scale_tabs[li] is not None
+                    sc_p = _step_scale_tabs[li] if has_sc else st_out
+                    gpu.launch(
+                        _adam_lig_kernel,
+                        (gpu.cdiv(B * D_li, 256),),
+                        cp.ascontiguousarray(g), adam_m[li], adam_v[li], st_out, ho_p, sc_p, tl, bc1, bc2,
+                        B, D_li, float(lr_t), float(b1), float(b2), float(eps_a),
+                        HAS_HANDOFF=has_ho, HAS_SCALE=has_sc, BLOCK_SIZE=256,
+                    )
+                    steps.append(st_out)
+            else:
+                c1 = bc1.take(tl, axis=0)
+                c2 = bc2.take(tl, axis=0)
+                steps = []
+                for li, (theta_li, g) in enumerate(zip(thetas, total_grads)):
+                    adam_m[li][...] = b1 * adam_m[li] + (1.0 - b1) * g
+                    adam_v[li][...] = b2 * adam_v[li] + (1.0 - b2) * g * g
+                    endpoint_m[li][...] = adam_m[li]
+                    endpoint_v[li][...] = adam_v[li]
+                    endpoint_t[...] = tl + 1
+                    m_hat = adam_m[li] / c1
+                    v_hat = adam_v[li] / c2
+                    step_val = lr_t * m_hat / (cp.sqrt(v_hat) + eps_a)
+                    if handoff_delta is not None:
+                        handoff_delta[li][...] = cp.abs(step_val)
+                    if _step_scale_tabs is not None and _step_scale_tabs[li] is not None:
+                        step_val = step_val * _step_scale_tabs[li].take(tl, axis=0)
+                    steps.append(step_val)
+            for li, (theta_li, step_val) in enumerate(zip(thetas, steps)):
+                if li in cl_d0:
+                    c0_ = self.fks[li]._macro_col0
+                    c1_ = c0_ + self.fks[li].n_macro_joints
+                    step_val = step_val.copy()
+                    step_val[:, c0_:c1_] = self.fks[li].closure_fused_step(X_current, cl_d0[li], step_val[:, c0_:c1_])
+                done_p = phase.done if phase is not None else theta_li
+                gpu.launch(
+                    _theta_post_update_kernel,
+                    (gpu.cdiv(B, 64),),
+                    theta_li, cp.ascontiguousarray(step_val), done_p, B, theta_li.shape[1],
+                    HAS_DONE=phase is not None, BLOCK_B=64,
+                )
+            tl[...] += 1
+
+
+        import time as _time
+
+        def _now():
+            gpu.sync()
+            return _time.perf_counter()
+
+        LAST.clear()
+        LAST.update(mode="eager", replayed=0, B=B, T=T, fast_fk=cfk is not None, error=None,
+                    s_setup=_now() - _t_enter, s_step0=0.0, s_record=0.0, s_replay=0.0, s_eager=0.0, s_final=0.0)
+        t = 0
+        # Phase switch point for skipping score_grads during the pre-switch search steps
+        _sg_start = None
+        if phase is not None and phase.sigma_source != "curvature" and not phase.whole:
+            _sg_start = int(phase.fixed_switch) if phase.fixed_switch is not None else int(phase.start)
+        if self.replay and JointIKSolver.trace_hook is None and T > 2:
+            stream = gpu.new_stream()
+            _ts = self.timing_sync
+
+            def _replay_until(limit: int, need_sg: bool, check_stop: bool) -> None:
+                nonlocal t
+                g = gpu.capture(stream, lambda: step(need_score_grads=need_sg))
+                with stream:
+                    while t < limit:
+                        g.launch(stream)
+                        if _ts:
+                            gpu.sync(stream)
+                        t += 1
+                        LAST["replayed"] += 1
+                        if check_stop and phase is not None and t % 8 == 0 and bool(phase.stop.item()):
+                            break
+                del g
+
+            try:
+                _t0 = _now()
+                _split_phase = _sg_start is not None and 2 < _sg_start < T - 1
+                _need_sg0 = False if (_sg_start is not None and _sg_start > 0) else (phase is not None)
+                with stream:
+                    step(need_score_grads=_need_sg0)              # step 0 eagerly: also the warm-up
+                t = 1
+                _t1 = _now()
+                LAST["s_step0"] = _t1 - _t0
+                LAST["mode"] = "replay"
+                if _split_phase:
+                    _t2 = _now()
+                    _replay_until(_sg_start, False, False)
+                    LAST["s_record"] = _t2 - _t1
+                    with stream:
+                        step(need_score_grads=True)
+                    t += 1
+                    if t < T:
+                        _replay_until(T, True, True)
+                    LAST["s_replay"] = _now() - _t2
+                else:
+                    _need_sg_all = False if (_sg_start is not None and _sg_start >= T) else (phase is not None)
+                    _t2 = _now()
+                    _replay_until(T, _need_sg_all, True)
+                    LAST["s_record"] = _t2 - _t1
+                    LAST["s_replay"] = _now() - _t2
+                gpu.sync(stream)
+            except Exception:
+                LAST["error"] = traceback.format_exc()[-3000:]
+                LAST["mode"] = "eager after failed recording at step %d" % t
+                log.warning("step recording failed at step %d; continuing eagerly\n%s", t, LAST["error"])
+                gpu.sync(stream)
+                t = int(tl.item())                             # steps actually applied
+        _t3 = _now()
+        while t < T and not (phase is not None and t % 8 == 0 and bool(phase.stop.item())):
+            _need_sg_t = (phase is not None) and (_sg_start is None or t >= _sg_start)
+            step(need_score_grads=_need_sg_t)
+            t += 1
+            if phase is not None and t % 8 == 0 and bool(phase.stop.item()):
+                break
+        LAST["steps_executed"] = t
+        _t4 = _now()
+        LAST["s_eager"] = _t4 - _t3
 
         best_thetas = best_score_thetas  # list of (B, 6+Ji)
         best_thetas, converged, final_score = _finalize_solve_state(
@@ -1028,14 +950,12 @@ class JointIKSolver(_EagerSolveMixin):
             _cfg_mod,
         )
 
-        solve_trace = {}
-        if history_residuals:
-            solve_trace = {
-                "residual": torch.stack(history_residuals, dim=0).cpu().numpy(),  # (T, B)
-                "score": torch.stack(history_scores, dim=0).cpu().numpy(),  # (T, B)
-                "grad_norm": torch.stack(history_grad_norms, dim=0).cpu().numpy(),  # (T, B)
-                "shape_dev": torch.stack(history_shape, dim=0).cpu().numpy(),  # (T, B)
-            }
-
-        thetas_final = [th.detach() for th in best_thetas]
+        LAST["s_final"] = _now() - _t4
+        solve_trace = {
+            "residual": gpu.to_cpu(hist_res),
+            "score": gpu.to_cpu(hist_score),
+            "grad_norm": gpu.to_cpu(hist_gn),
+            "shape_dev": gpu.to_cpu(hist_shape),
+        }
+        thetas_final = [th.copy() for th in best_thetas]
         return thetas_final, converged, final_score, solve_trace

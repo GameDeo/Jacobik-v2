@@ -153,7 +153,12 @@ def _solve_single_complex(
         out_window=args.out_window,
         dedup_rmsd=args.dedup_rmsd,
         dedup_max_dev=args.dedup_max_dev,
+        settle_top=getattr(args, "settle_top", None),
     )
+    if getattr(args, "relax", None):
+        res = res.relax(level=args.relax, rerank=bool(args.relax_rerank), device=args.device,
+                        binding=getattr(args, "relax_binding", "keep"), top=getattr(args, "relax_top", None),
+                        etol=getattr(args, "relax_etol", None))
     res.summary()
     out_target = args.out or (Path(args.out_dir) / f"{xyz_stem}.xyz" if args.out_dir else None)
     if out_target is not None:
@@ -320,6 +325,20 @@ def _add_solve_parser(subparsers) -> None:
     sp.add_argument("--out-window", type=float, default=None, help="Global nat score window (default: 200).")
     sp.add_argument("--dedup-rmsd", type=float, default=None, help="Heavy-atom symmetry RMSD threshold (A).")
     sp.add_argument("--dedup-max-dev", type=float, default=None, help="Max per-atom deviation threshold (A, 0=off).")
+    sp.add_argument("--settle-top", type=int, default=None, metavar="K",
+                    help="Settle and write only the K lowest-energy rows of each configuration class (MACE energy at "
+                         "the solver geometry picks them; default: every row).")
+    sp.add_argument("--relax", default=None, choices=["loose", "normal", "tight"],
+                    help="Relax every conformer with MACE-POLAR (batched; needs the mace extra): loose, normal or tight.")
+    sp.add_argument("--relax-rerank", action="store_true", help="With --relax: rank rows by relaxed energy within each class.")
+    sp.add_argument("--relax-top", type=int, default=None, metavar="K",
+                    help="With --relax: relax and write only the K best-ranked rows of each configuration class (default: every row).")
+    sp.add_argument("--relax-etol", type=float, default=None, metavar="KJ",
+                    help="With --relax: also stop a row once its energy fell by less than KJ kJ/mol over 5 evaluations "
+                         "(energies to about KJ without the long tail of small force steps; default: force criterion only).")
+    sp.add_argument("--relax-binding", default="keep", choices=["keep", "free"],
+                    help="With --relax: 'keep' (default) relaxes inside the requested binding mode and flags rows held "
+                         "there; 'free' is unconstrained and reports metal-contact changes.")
     sp.add_argument("-v", "--verbose", action="store_true", help="Enable INFO logging.")
 
 
@@ -328,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     _add_solve_parser(sub)
 
-    ck = sub.add_parser("check", help="Validate runtime dependencies (xtb, constraints DB, compute device)")
+    ck = sub.add_parser("check", help="Validate runtime dependencies (xtb, constraints DB, compute device, Triton)")
     ck.add_argument("--db", default=None, help="Optional explicit constraints DB path to check.")
     ck.add_argument("--device", default=None, help="Optional compute device to check (e.g. cuda, cpu).")
     ck.add_argument("--no-xtb", action="store_true", help="Skip checking for external xtb binary.")

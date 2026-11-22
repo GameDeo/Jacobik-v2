@@ -12,20 +12,89 @@ n_joints_base torsion joints.
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
 from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 
 import numpy as np
-import torch
 
-from jacobik.ik.kernels import (  # noqa: F401
-    axisangle_to_matrix,
-    dihedral as _dihedral,
-    dihedral_axis_from_quad,
-    gather_atoms,
-    rodrigues,
-    wrap_angle as _wrap_angle,
-)
+from jacobik.core.gpu import cp
+
+
+def _wrap_angle(x):
+    return (x + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _gather_atoms(X, idx):
+    return X[:, idx]
+
+
+def _skew(v):
+    """Skew-symmetric matrix [v]_x for v of shape (..., 3) -> (..., 3, 3)."""
+    S = cp.zeros(v.shape[:-1] + (3, 3), dtype=v.dtype)
+    S[..., 0, 1] = -v[..., 2]; S[..., 0, 2] = v[..., 1]
+    S[..., 1, 0] = v[..., 2];  S[..., 1, 2] = -v[..., 0]
+    S[..., 2, 0] = -v[..., 1]; S[..., 2, 1] = v[..., 0]
+    return S
+
+
+def _left_jacobian(omega):
+    """SO(3) left Jacobian J_l(omega) for omega (B, 3) -> (B, 3, 3), capture-safe."""
+    theta2 = (omega * omega).sum(axis=-1, keepdims=True)
+    theta2_c = cp.maximum(theta2, 1e-12)
+    angle = cp.sqrt(theta2_c)
+    A_c = cp.where(theta2 < 1e-6, 0.5 - theta2 / 24.0 + theta2 * theta2 / 720.0, (1.0 - cp.cos(angle)) / theta2_c)
+    Bc_c = cp.where(theta2 < 1e-6, 1.0 / 6.0 - theta2 / 120.0 + theta2 * theta2 / 5040.0, (angle - cp.sin(angle)) / cp.maximum(angle * theta2, 1e-12))
+    W = _skew(omega)
+    WW = (W[:, :, :, None] * W[:, None, :, :]).sum(axis=2)
+    Jl = A_c[..., None] * W + Bc_c[..., None] * WW
+    Jl[:, 0, 0] += 1.0; Jl[:, 1, 1] += 1.0; Jl[:, 2, 2] += 1.0
+    return Jl
+
+
+def _axisangle_to_matrix(omega):
+    theta2 = cp.sum(omega * omega, axis=-1, keepdims=True)
+    theta = cp.sqrt(cp.maximum(theta2, 1e-12))
+    K = _skew(omega / theta)
+    s, c = cp.sin(theta)[..., None], cp.cos(theta)[..., None]
+    KK = (K[:, :, :, None] * K[:, None, :, :]).sum(axis=2)
+    R = s * K + (1.0 - c) * KK
+    R[:, 0, 0] += 1.0; R[:, 1, 1] += 1.0; R[:, 2, 2] += 1.0
+    W = _skew(omega)
+    W[:, 0, 0] += 1.0; W[:, 1, 1] += 1.0; W[:, 2, 2] += 1.0
+    return cp.where(theta2[..., None] < 1e-12, W, R)
+
+
+def _rodrigues(pts, pivot, axis, delta, axis_normalized=True):
+    if not axis_normalized:
+        axis = axis / cp.maximum(cp.linalg.norm(axis, axis=-1, keepdims=True), 1e-8)
+    v = pts - pivot[:, None, :]
+    c = cp.cos(delta)[:, None, None]
+    s = cp.sin(delta)[:, None, None]
+    k = axis[:, None, :]
+    v_rot = v * c + cp.cross(k, v, axis=-1) * s + k * (cp.sum(k * v, axis=-1, keepdims=True) * (1.0 - c))
+    return pivot[:, None, :] + v_rot
+
+
+def _dihedral(p0, p1, p2, p3):
+    b0 = p1 - p0
+    b1 = p2 - p1
+    b2 = p3 - p2
+    u = b1 / cp.maximum(cp.linalg.norm(b1, axis=-1, keepdims=True), 1e-8)
+    n1 = cp.cross(b0, b1, axis=-1)
+    n2 = cp.cross(b1, b2, axis=-1)
+    return cp.arctan2(cp.sum(cp.cross(n1, n2, axis=-1) * u, axis=-1), cp.sum(n1 * n2, axis=-1))
+
+
+def _dihedral_axis_from_quad(P):
+    b0 = P[:, 1] - P[:, 0]
+    b1 = P[:, 2] - P[:, 1]
+    b2 = P[:, 3] - P[:, 2]
+    u = b1 / cp.maximum(cp.linalg.norm(b1, axis=-1, keepdims=True), 1e-8)
+    n1 = cp.cross(b0, b1, axis=-1)
+    n2 = cp.cross(b1, b2, axis=-1)
+    phi = cp.arctan2(cp.sum(cp.cross(n1, n2, axis=-1) * u, axis=-1), cp.sum(n1 * n2, axis=-1))
+    return phi, u
 
 if TYPE_CHECKING:
     from jacobik.core.types import Ligand, TMComplex
@@ -46,6 +115,11 @@ _BO_THRESHOLD: float = 0.5
 
 # Production resolved configuration (hardcoded values)
 _SMALL_RING_OPEN_ADJ = True
+
+from jacobik.core import profile as _profile  # noqa: E402
+
+#: v1.0b: macrocycles get the opening-adjacent joints too (profile field macro_open_adj)
+MACRO_OPEN_ADJ = _profile.get("macro_open_adj")
 
 
 def _build_pos_map(mol: "TMComplex") -> Dict[int, int]:
@@ -70,350 +144,411 @@ class _FKEvalMixin:
     # Public API
     # ------------------------------------------------------------------
 
-    def bend_seed_angles(self, X_ref: torch.Tensor) -> torch.Tensor:
+    def bend_seed_angles(self, X_ref):
         """
         Current dihedral angle of each bend joint in X_ref, used to seed the
         bend-joint columns of theta so they are a no-op at t=0.  Returns an
-        empty (0,) tensor if no donor qualified for a bend joint.
-
-        Parameters
-        ----------
-        X_ref : (N, 3) reference atom positions (single conformer, no batch dim)
-
-        Returns
-        -------
-        (n_bend_joints,) angles in radians
+        empty (0,) array if no donor qualified for a bend joint.
         """
         if self.n_bend_joints == 0:
-            return torch.zeros(0, device=X_ref.device)
+            return cp.zeros(0, dtype=X_ref.dtype)
 
-        X = X_ref if X_ref.dim() == 2 else X_ref[0]
-        angles = []
-        for k in range(self.n_joints_base, self.n_joints_base + self.n_bend_joints):
-            fi, pj, pk, fl = (
-                self._flanking_i[k],
-                self._pivot_j[k],
-                self._pivot_k[k],
-                self._flanking_l[k],
-            )
-            angles.append(_dihedral(X[fi][None, :], X[pj][None, :], X[pk][None, :], X[fl][None, :])[0])
-        return torch.stack(angles, dim=0)
+        X = X_ref if X_ref.ndim == 2 else X_ref[0]
+        k0, k1 = self.n_joints_base, self.n_joints_base + self.n_bend_joints
+        qi = cp.asarray(self._flanking_i[k0:k1], dtype=cp.int64)
+        qj = cp.asarray(self._pivot_j[k0:k1], dtype=cp.int64)
+        qk = cp.asarray(self._pivot_k[k0:k1], dtype=cp.int64)
+        ql = cp.asarray(self._flanking_l[k0:k1], dtype=cp.int64)
+        return _dihedral(X[qi], X[qj], X[qk], X[ql])
 
-    def q5_alignment(self, ge, X_ref: torch.Tensor):
+    def q5_alignment(self, ge, X_ref):
         """
         Map this ligand's base torsion joints onto the scorer's Q5 rows.
-
-        The Q5 rows (GeometryExtractor, ligand pivot chains, canonical flank atoms) and the FK joints (root-body BFS,
-        heaviest-neighbour flanks) enumerate the same rotatable bonds in a different order and may measure the
-        dihedral with different flank atoms. Returns (rows, offsets): rows (n_joints_base,) long = Q5 row of the
-        same bond (-1 if the bond has no Q5 row), offsets (n_joints_base,) radians = phi_FK - phi_Q5 on X_ref,
-        so a Q5 value mu corresponds to the FK joint value mu + offset (the difference between two dihedrals about
-        the same bond with different flanks is fixed by the rigid flanking groups).
         """
         J = self.n_joints_base
-        X = X_ref if X_ref.dim() == 2 else X_ref[0]
+        if J == 0:
+            return cp.zeros(0, dtype=cp.int64), cp.zeros(0, dtype=X_ref.dtype)
+        X = X_ref if X_ref.ndim == 2 else X_ref[0]
         row_of = {}
-        # one device->host transfer of the Q5 index table (was 2 single-element reads per row)
-        q5 = torch.stack([ge._q5_i, ge._q5_j, ge._q5_k, ge._q5_l], dim=1).tolist() if int(ge._q5_j.shape[0]) else []
+        q5 = cp.stack([ge._q5_i, ge._q5_j, ge._q5_k, ge._q5_l], axis=1).tolist() if int(ge._q5_j.shape[0]) else []
         for r, (_, a, b, _) in enumerate(q5):
             row_of[(min(a, b), max(a, b))] = r
-        rows = torch.full((J,), -1, dtype=torch.long, device=X.device)
-        offs = torch.zeros(J, dtype=X.dtype, device=X.device)
+
+        qi = cp.asarray(self._flanking_i[:J], dtype=cp.int64)
+        qj = cp.asarray(self._pivot_j[:J], dtype=cp.int64)
+        qk = cp.asarray(self._pivot_k[:J], dtype=cp.int64)
+        ql = cp.asarray(self._flanking_l[:J], dtype=cp.int64)
+        phi_fk = _dihedral(X[qi], X[qj], X[qk], X[ql])
+
+        rows_l = [-1] * J
+        q5_match_k, q5_quads = [], []
         for k in range(J):
-            fi, pj, pk, fl = self._flanking_i[k], self._pivot_j[k], self._pivot_k[k], self._flanking_l[k]
-            key = (min(int(pj), int(pk)), max(int(pj), int(pk)))
-            r = row_of.get(key)
-            phi_fk = _dihedral(X[fi][None], X[pj][None], X[pk][None], X[fl][None])[0]
-            if r is None:
-                offs[k] = phi_fk  # no statistics: callers keep the current dihedral
-                continue
-            qi, qj, qk, ql = q5[r]
-            phi_q5 = _dihedral(X[qi][None], X[qj][None], X[qk][None], X[ql][None])[0]
-            rows[k] = r
-            offs[k] = _wrap_angle(phi_fk - phi_q5)
+            pj, pk = self._pivot_j[k], self._pivot_k[k]
+            r = row_of.get((min(int(pj), int(pk)), max(int(pj), int(pk))))
+            if r is not None:
+                rows_l[k] = r
+                q5_match_k.append(k)
+                q5_quads.append(q5[r])
+        rows = cp.asarray(rows_l, dtype=cp.int64)
+        offs = phi_fk.copy()
+        if q5_match_k:
+            qt = cp.asarray(q5_quads, dtype=cp.int64)
+            phi_q5 = _dihedral(X[qt[:, 0]], X[qt[:, 1]], X[qt[:, 2]], X[qt[:, 3]])
+            mk = cp.asarray(q5_match_k, dtype=cp.int64)
+            offs[mk] = _wrap_angle(phi_fk[mk] - phi_q5)
         return rows, offs
 
-    def macro_seed_angles(self, P: torch.Tensor) -> torch.Tensor:
+    def macro_seed_angles(self, P):
         """
         Macrocycle-joint dihedrals for conformers, used to seed the trailing
         macro columns of theta.
-
-        P : (C, n_atoms_local, 3) conformer coordinates in ligand-local atom
-            order (mol atom.idx - ligand.atom_indices[0]).
-        Returns (C, n_macro_joints) radians.
         """
-        cols = []
-        for fi, pj, pk, fl in self.macro_quads_atom:
-            q = [i - self._lig_first for i in (fi, pj, pk, fl)]
-            cols.append(_dihedral(P[:, q[0]], P[:, q[1]], P[:, q[2]], P[:, q[3]]))
-        if not cols:
-            return P.new_zeros(P.shape[0], 0)
-        return torch.stack(cols, dim=-1)
+        if not self.macro_quads_atom:
+            return cp.zeros((P.shape[0], 0), dtype=P.dtype)
+        C = P.shape[0]
+        M = len(self.macro_quads_atom)
+        off = self._lig_first
+        qt = cp.asarray([[fi - off, pj - off, pk - off, fl - off] for fi, pj, pk, fl in self.macro_quads_atom],
+                        dtype=cp.int64)
+        Pm = P[:, qt.reshape(-1)].reshape(C * M, 4, 3)
+        return _dihedral(Pm[:, 0], Pm[:, 1], Pm[:, 2], Pm[:, 3]).reshape(C, M)
 
-    def seam_d0(self, X_ref: torch.Tensor) -> torch.Tensor:
+    def seam_d0(self, X_ref):
         """Seam distances of each row's own (closed) reference conformer: (B or 1, R)."""
         c = self._cl
-        Xr = X_ref if X_ref.dim() == 3 else X_ref[None]
+        Xr = X_ref if X_ref.ndim == 3 else X_ref[None]
         xs = Xr[:, c["seam"]]
-        return (xs[:, c["a"]] - xs[:, c["b"]]).norm(dim=-1)
+        return cp.linalg.norm(xs[:, c["a"]] - xs[:, c["b"]], axis=-1)
 
-    def closure_residual_jacobian(self, X: torch.Tensor, d0: torch.Tensor):
+    def closure_residual_jacobian(self, X, d0):
         """
         Seam residuals r = |x_a - x_b| - d0 (B, R) and their exact Jacobian with
         respect to the macro-joint dihedrals (B, R, K).
-
-        Joints are internal (dihedral) coordinates, so raising one dihedral by
-        d rigidly rotates its downstream atoms about the current joint axis and
-        leaves every other dihedral unchanged: dx/dphi = u x (x - p) for
-        downstream atoms, 0 otherwise.  No autograd is needed.
         """
         c = self._cl
-        xs = X[:, c["seam"]]  # (B, S, 3)
-        pj = X[:, c["pj"]]  # (B, K, 3)
+        xs = X[:, c["seam"]]
+        pj = X[:, c["pj"]]
         u = X[:, c["pk"]] - pj
-        u = u / u.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-        rel = xs[:, None, :, :] - pj[:, :, None, :]  # (B, K, S, 3)
-        dx = torch.linalg.cross(u[:, :, None, :].expand_as(rel), rel, dim=-1)
+        u = u / cp.maximum(cp.linalg.norm(u, axis=-1, keepdims=True), 1e-8)
+        rel = xs[:, None, :, :] - pj[:, :, None, :]
+        dx = cp.cross(cp.broadcast_to(u[:, :, None, :], rel.shape), rel, axis=-1)
         dx = dx * c["mask"][None, :, :, None]
-        diff = xs[:, c["a"]] - xs[:, c["b"]]  # (B, R, 3)
-        dist = diff.norm(dim=-1).clamp(min=1e-8)
+        diff = xs[:, c["a"]] - xs[:, c["b"]]
+        dist = cp.maximum(cp.linalg.norm(diff, axis=-1), 1e-8)
         e = diff / dist[..., None]
-        dpair = dx[:, :, c["a"]] - dx[:, :, c["b"]]  # (B, K, R, 3)
-        J = torch.einsum("bic,bkic->bik", e, dpair)
+        dpair = dx[:, :, c["a"]] - dx[:, :, c["b"]]
+        J = (e[:, None, :, :] * dpair).sum(axis=-1).swapaxes(1, 2)
         return dist - d0, J
 
-    def closure_fused_step(self, X: torch.Tensor, d0: torch.Tensor, s_m: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _solve_small_spd(A, b):
+        """Capture-safe batched SPD linear solve A x = b via pure-CuPy Cholesky (no cuSOLVER/cuBLAS)."""
+        R = A.shape[-1]
+        if R == 1:
+            return b / cp.where(cp.abs(A) > 1e-12, A, 1e-12)
+        L = cp.zeros_like(A)
+        for j in range(R):
+            s = A[:, j, j] - (L[:, j, :j] * L[:, j, :j]).sum(axis=-1) if j > 0 else A[:, j, j]
+            L[:, j, j] = cp.sqrt(cp.maximum(s, 1e-12))
+            for i in range(j + 1, R):
+                t = A[:, i, j] - (L[:, i, :j] * L[:, j, :j]).sum(axis=-1) if j > 0 else A[:, i, j]
+                L[:, i, j] = t / L[:, j, j]
+        y = cp.zeros_like(b[:, :, 0])
+        for i in range(R):
+            rhs_i = b[:, i, 0] - (L[:, i, :i] * y[:, :i]).sum(axis=-1) if i > 0 else b[:, i, 0]
+            y[:, i] = rhs_i / L[:, i, i]
+        x = cp.zeros_like(y)
+        for i in range(R - 1, -1, -1):
+            rhs_i = y[:, i] - (L[:, i + 1:, i] * x[:, i + 1:]).sum(axis=-1) if i + 1 < R else y[:, i]
+            x[:, i] = rhs_i / L[:, i, i]
+        return x[..., None]
+
+    def closure_fused_step(self, X, d0, s_m):
         """
         Fold ring closure into an optimiser update without another FK pass.
-
-        X   : (B, N, 3) current positions (already computed for the score);
-        s_m : (B, K) proposed decrement of the macro dihedrals (theta -= s_m).
-        Returns the adjusted decrement so the linearised seam residual after
-        the update is ~0:  r' = r - J s_m + J corr = 0, with the damped
-        minimum-norm corr = -J^T (J J^T + lam I)^-1 (r - J s_m).  Exact
-        analytic J, fixed shapes, no autograd, no host sync.
         """
-        with torch.no_grad():
-            r, J = self.closure_residual_jacobian(X.detach(), d0)
-            rhs = r - torch.einsum("brk,bk->br", J, s_m)
-            eye = torch.eye(r.shape[-1], device=r.device, dtype=r.dtype)
-            sol = torch.linalg.solve_ex(J @ J.transpose(-1, -2) + 1e-4 * eye, rhs[..., None], check_errors=False).result
-            corr = -(J.transpose(-1, -2) @ sol)[..., 0]
-            return s_m - corr.clamp(-0.5, 0.5)
+        r, J = self.closure_residual_jacobian(X, d0)
+        rhs = r - (J * s_m[:, None, :]).sum(axis=-1)
+        A = (J[:, :, None, :] * J[:, None, :, :]).sum(axis=-1)
+        R = r.shape[-1]
+        for i in range(R):
+            A[:, i, i] += 1e-4
+        sol = self._solve_small_spd(A, rhs[..., None])
+        corr = -(J * sol).sum(axis=1)
+        return s_m - cp.clip(corr, -0.5, 0.5)
 
     def closure_project(
         self,
-        theta: torch.Tensor,
-        X_ref: torch.Tensor,
+        theta,
+        X_ref,
         iters: int = 4,
         damping: float = 1e-4,
         max_step: float = 0.5,
     ):
         """
         Damped Gauss-Newton projection of the macro-joint dihedrals onto the
-        ring-closure manifold: dphi = -J^T (J J^T + lam I)^-1 r, a fixed number
-        of iterations, fixed shapes, no host synchronisation.  Returns
-        (theta_projected, seam residual sum of squares (B,)).  Non-differentiable.
+        ring-closure manifold.
         """
         if self._cl is None:
-            return theta, theta.new_zeros(theta.shape[0])
+            return theta, cp.zeros(theta.shape[0], dtype=theta.dtype)
         c0 = self._macro_col0
-        theta = theta.detach().clone()
-        eye = torch.eye(self._cl["a"].shape[0], device=theta.device, dtype=theta.dtype)
-        with torch.no_grad():
-            d0 = self.seam_d0(X_ref)
-            for _ in range(iters):
-                X = self.apply(theta, X_ref)
-                r, J = self.closure_residual_jacobian(X, d0)
-                A = J @ J.transpose(-1, -2) + damping * eye
-                # solve_ex(check_errors=False): no host-side info check, so no device sync.
-                sol = torch.linalg.solve_ex(A, r[..., None], check_errors=False).result
-                step = -(J.transpose(-1, -2) @ sol)[..., 0]
-                c1 = c0 + self.n_macro_joints   # angle-bend columns (small donor rings) follow the ring joints
-                theta[:, c0:c1] = _wrap_angle(theta[:, c0:c1] + step.clamp(-max_step, max_step))
-            r, _ = self.closure_residual_jacobian(self.apply(theta, X_ref), d0)
-        return theta, (r * r).sum(dim=-1)
+        theta = theta.copy()
+        eye = cp.eye(self._cl["a"].shape[0], dtype=theta.dtype)
+        d0 = self.seam_d0(X_ref)
+        for _ in range(iters):
+            X = self.apply(theta, X_ref)
+            r, J = self.closure_residual_jacobian(X, d0)
+            A = J @ J.swapaxes(-1, -2) + damping * eye
+            sol = cp.linalg.solve(A, r[..., None])
+            step = -(J.swapaxes(-1, -2) @ sol)[..., 0]
+            c1 = c0 + self.n_macro_joints
+            theta[:, c0:c1] = _wrap_angle(theta[:, c0:c1] + cp.clip(step, -max_step, max_step))
+        r, _ = self.closure_residual_jacobian(self.apply(theta, X_ref), d0)
+        return theta, (r * r).sum(axis=-1)
 
     def apply(
         self,
-        theta: torch.Tensor,
-        X_ref: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Apply the full FK map: base transform then all J torsions.
-
-        Parameters
-        ----------
-        theta : (B, 6 + J)
-            DOF vector.  theta[:, 0:3] = translation, theta[:, 3:6] =
-            axis-angle rotation, theta[:, 6:] = absolute torsion angles
-            in radians.
-        X_ref : (B, N, 3) or (N, 3)
-            Reference atom positions.  If (N, 3), broadcast over batch.
-
-        Returns
-        -------
-        X : (B, N, 3) — updated atom positions (only ligand atoms changed)
-        """
+        theta,
+        X_ref,
+    ):
+        """Apply the full FK map: base transform then all J torsions."""
         n = 6 + self.n_joints
         X = self._apply_internal(theta[:, :n] if theta.shape[1] > n else theta, X_ref, self.n_joints)
         if self.n_angle_bends and theta.shape[1] >= n + self.n_angle_bends:
-            from jacobik.ik import angle_bends as AB
-
             X = self._bend_plan.apply(X, theta[:, n:n + self.n_angle_bends])
         return X
 
     def partial_apply(
         self,
-        theta: torch.Tensor,
-        X_ref: torch.Tensor,
+        theta,
+        X_ref,
         n_joints: int,
-    ) -> torch.Tensor:
-        """
-        Apply the base transform and only the first n_joints torsions.
-
-        Parameters
-        ----------
-        theta    : (B, 6 + J)
-        X_ref    : (B, N, 3) or (N, 3)
-        n_joints : number of torsion joints to apply (0 ≤ n_joints ≤ J)
-
-        Returns
-        -------
-        X : (B, N, 3)
-        """
+    ):
+        """Apply the base transform and only the first n_joints torsions."""
         n_joints = max(0, min(n_joints, self.n_joints))
         return self._apply_internal(theta, X_ref, n_joints)
 
-    # ------------------------------------------------------------------
-    # Internal implementation
-    # ------------------------------------------------------------------
-
     def _apply_internal(
         self,
-        theta: torch.Tensor,
-        X_ref: torch.Tensor,
+        theta,
+        X_ref,
         n_joints: int,
-    ) -> torch.Tensor:
-        """
-        Core FK computation.  Applies base transform then the first
-        n_joints torsions.
-        """
+    ):
         B = theta.shape[0]
-
-        # Broadcast X_ref to (B, N, 3) if needed
-        if X_ref.dim() == 2:
-            X = X_ref.unsqueeze(0).expand(B, -1, -1).clone()
+        if X_ref.ndim == 2:
+            X = cp.broadcast_to(X_ref[None, ...], (B, X_ref.shape[0], X_ref.shape[1])).copy()
         else:
-            X = X_ref.clone()
+            X = X_ref.copy()
 
-        if self._lig_pos_t.numel() == 0:
-            return X  # empty ligand — nothing to do
+        if self._lig_pos_t.size == 0:
+            return X
 
-        # ------------------------------------------------------------------
-        # Step 1: Base rigid-body transform
-        # ------------------------------------------------------------------
         X = self._apply_base_transform(theta, X)
-
-        # ------------------------------------------------------------------
-        # Step 2: Torsion loop
-        # ------------------------------------------------------------------
         for k in range(n_joints):
             X = self._apply_torsion(theta, X, k)
-
         return X
 
     def _apply_base_transform(
         self,
-        theta: torch.Tensor,
-        X: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Apply theta[:, 0:3] (translation) and theta[:, 3:6] (axis-angle
-        rotation) to all ligand atoms.
-        """
-        transl = theta[:, 0:3]  # (B, 3)
-        omega = theta[:, 3:6]  # (B, 3) axis-angle
+        theta,
+        X,
+    ):
+        transl = theta[:, 0:3]
+        omega = theta[:, 3:6]
+        R = _axisangle_to_matrix(omega)
 
-        # Compute rotation matrices
-        R = axisangle_to_matrix(omega)  # (B, 3, 3)
-
-        # Pivot = centroid of donor atoms
-        if self._donor_pos_t.numel() > 0:
-            donor_pos = gather_atoms(X, self._donor_pos_t)  # (B, n_donors, 3)
-            pivot = donor_pos.mean(dim=1)  # (B, 3)
+        if self._donor_pos_t.size > 0:
+            donor_pos = _gather_atoms(X, self._donor_pos_t)
+            pivot = donor_pos.mean(axis=1)
         else:
-            pivot = X.mean(dim=1)  # fallback: molecule centroid
+            pivot = X.mean(axis=1)
 
-        # Extract ligand atoms, translate to pivot frame, rotate, translate back
-        lig = gather_atoms(X, self._lig_pos_t)  # (B, n_lig, 3)
-        lig_centered = lig - pivot[:, None, :]  # (B, n_lig, 3)
-
-        # Batch matrix multiply: (B, n_lig, 3) × (B, 3, 3)^T
-        lig_rotated = torch.bmm(lig_centered, R.transpose(1, 2))  # (B, n_lig, 3)
+        lig = _gather_atoms(X, self._lig_pos_t)
+        lig_centered = lig - pivot[:, None, :]
+        lig_rotated = (lig_centered[:, :, None, :] * R[:, None, :, :]).sum(axis=-1)
         lig_new = lig_rotated + pivot[:, None, :] + transl[:, None, :]
-
-        # In-place write is safe: _apply_internal passes a freshly cloned X.
         X[:, self._lig_pos_t, :] = lig_new
         return X
 
     def _apply_torsion(
         self,
-        theta: torch.Tensor,
-        X: torch.Tensor,
+        theta,
+        X,
         k: int,
-    ) -> torch.Tensor:
-        """
-        Set joint k to the absolute torsion angle theta[:, 6+k].
-        """
-        target_phi = theta[:, 6 + k]  # (B,) — absolute target torsion
+    ):
+        target_phi = theta[:, 6 + k]
+        P = X[:, self._quad_idx[k]]
+        phi_cur, axis_unit = _dihedral_axis_from_quad(P)
+        delta = target_phi - phi_cur
 
-        # Current dihedral: flanking_i - pivot_j - pivot_k - flanking_l, plus
-        # the unit pivot_j -> pivot_k axis (reused as the rotation axis).
-        P = X.index_select(1, self._quad_idx[k])  # (B, 4, 3)
-        phi_cur, axis_unit = dihedral_axis_from_quad(P)  # (B,), (B, 3)
-
-        # Delta: how much to rotate to reach the target
-        delta = target_phi - phi_cur  # (B,)
-
-        # Downstream atoms
-        down_idx = self._downstream[k]  # (n_down,)
-        if down_idx.numel() == 0:
+        down_idx = self._downstream[k]
+        if down_idx.size == 0:
             return X
 
-        pts = gather_atoms(X, down_idx)  # (B, n_down, 3)
-        pivot = P[:, 1]  # (B, 3) = p_j
+        pts = _gather_atoms(X, down_idx)
+        pivot = P[:, 1]
+        pts_rotated = _rodrigues(pts, pivot, axis_unit, delta, axis_normalized=True)
+        X_out = X.copy()
+        X_out[:, down_idx, :] = pts_rotated
+        return X_out
 
-        pts_rotated = rodrigues(
-            pts, pivot, axis_unit, delta, axis_normalized=True
-        )  # (B, n_down, 3)
+    def forward_with_state(self, theta, X_ref):
+        """Run FK and return (X_out, state) for analytical ``vjp()``."""
+        B = theta.shape[0]
+        if X_ref.ndim == 2:
+            X = cp.broadcast_to(X_ref[None, ...], (B, X_ref.shape[0], X_ref.shape[1])).copy()
+        else:
+            X = X_ref.copy()
+        if self._lig_pos_t.size == 0:
+            return X, ("empty", theta.shape)
 
-        # Out-of-place single-kernel equivalent of clone + row overwrite.
-        return X.index_copy(1, down_idx, pts_rotated)
+        # Base transform
+        X_in_base = X.copy()
+        transl = theta[:, 0:3]
+        omega = theta[:, 3:6]
+        R = _axisangle_to_matrix(omega)
+        if self._donor_pos_t.size > 0:
+            pivot_b = _gather_atoms(X, self._donor_pos_t).mean(axis=1)
+        else:
+            pivot_b = X.mean(axis=1)
+        lig = _gather_atoms(X, self._lig_pos_t)
+        lig_centered = lig - pivot_b[:, None, :]
+        lig_new = (lig_centered[:, :, None, :] * R[:, None, :, :]).sum(axis=-1) + pivot_b[:, None, :] + transl[:, None, :]
+        X[:, self._lig_pos_t, :] = lig_new
+        base_state = (omega, R, lig_centered, X_in_base.shape[1])
 
-    def jacobian_column_norm_sq(self, theta: torch.Tensor, X_ref: torch.Tensor) -> torch.Tensor:
-        """Analytic diagonal of JᵀJ for this FK map, refreshed at the supplied pose.
+        # Torsions
+        n = 6 + self.n_joints
+        th_t = theta[:, :n] if theta.shape[1] > n else theta
+        torsion_states = []
+        for k in range(self.n_joints):
+            down_idx = self._downstream[k]
+            if down_idx.size == 0:
+                torsion_states.append(None)
+                continue
+            P = X[:, self._quad_idx[k]]
+            phi_cur, axis_unit = _dihedral_axis_from_quad(P)
+            delta = th_t[:, 6 + k] - phi_cur
+            pts = _gather_atoms(X, down_idx)
+            pivot = P[:, 1]
+            pts_rot = _rodrigues(pts, pivot, axis_unit, delta, axis_normalized=True)
+            torsion_states.append((k, P, axis_unit, delta, pts, pts_rot))
+            X_next = X.copy()
+            X_next[:, down_idx, :] = pts_rot
+            X = X_next
 
-        Cartesian columns use identity translation derivatives, the SO(3) left
-        Jacobian for the axis-angle base rotation, and axis × lever-arm for each
-        internal joint. This is O(N·D), uses fixed-shape tensor operations, and
-        avoids one JVP per generalized coordinate.
-        """
+        bend_state = None
+        if self.n_angle_bends and theta.shape[1] >= n + self.n_angle_bends:
+            X, bend_state = self._bend_plan.forward_with_state(X, theta[:, n:n + self.n_angle_bends])
+        return X, ("ok", theta.shape, base_state, torsion_states, bend_state)
+
+    def vjp(self, state, grad_X):
+        """Analytical backward pass for ForwardKinematics: returns (grad_theta, grad_X_ref)."""
+        if state[0] == "empty":
+            return cp.zeros(state[1], dtype=grad_X.dtype), grad_X.copy()
+        _, th_shape, base_state, torsion_states, bend_state = state
+        gX = grad_X.copy()
+        gtheta = cp.zeros(th_shape, dtype=grad_X.dtype)
+        n = 6 + self.n_joints
+
+        if bend_state is not None:
+            gX, gbeta = self._bend_plan.vjp(bend_state, gX)
+            gtheta[:, n:n + self.n_angle_bends] = gbeta
+
+        for ts in reversed(torsion_states):
+            if ts is None:
+                continue
+            k, P, u, delta, pts, pts_rot = ts
+            down_idx = self._downstream[k]
+            g_pts = gX[:, down_idx, :]
+            pivot = P[:, 1]
+            v = pts - pivot[:, None, :]
+            v_rot = pts_rot - pivot[:, None, :]
+
+            g_delta = cp.sum(g_pts * cp.cross(u[:, None, :], v_rot, axis=-1), axis=(1, 2))
+            gtheta[:, 6 + k] += g_delta
+
+            c = cp.cos(delta)[:, None, None]
+            s = cp.sin(delta)[:, None, None]
+            u3 = u[:, None, :]
+            g_v = g_pts * c + cp.cross(g_pts, u3, axis=-1) * s + u3 * (cp.sum(g_pts * u3, axis=-1, keepdims=True) * (1.0 - c))
+            g_pivot = g_pts.sum(axis=1) - g_v.sum(axis=1)
+
+            uv = cp.sum(u3 * v, axis=-1, keepdims=True)
+            guv = cp.sum(g_pts * u3, axis=-1, keepdims=True)
+            g_u = cp.sum(
+                (g_pts * uv + v * guv) * (1.0 - c) + cp.cross(v, g_pts, axis=-1) * s,
+                axis=1,
+            )
+
+            gX[:, down_idx, :] = g_v
+            cp.add.at(gX, (slice(None), self._quad_idx[k][:, 1] if self._quad_idx[k].ndim > 1 else self._quad_idx[k][1]), g_pivot)
+
+            # Dihedral + axis VJP
+            b0 = P[:, 1] - P[:, 0]
+            b1 = P[:, 2] - P[:, 1]
+            b2 = P[:, 3] - P[:, 2]
+            b1_len = cp.maximum(cp.linalg.norm(b1, axis=-1, keepdims=True), 1e-8)
+            n1 = cp.cross(b0, b1, axis=-1)
+            n2 = cp.cross(b1, b2, axis=-1)
+            n1_sq = cp.maximum(cp.sum(n1 * n1, axis=-1, keepdims=True), 1e-12)
+            n2_sq = cp.maximum(cp.sum(n2 * n2, axis=-1, keepdims=True), 1e-12)
+            b1_sq = b1_len * b1_len
+
+            g_phi = -g_delta[:, None]
+            dp0 = -g_phi * (b1_len / n1_sq) * n1
+            dp3 = g_phi * (b1_len / n2_sq) * n2
+            c01 = cp.sum(b0 * b1, axis=-1, keepdims=True) / b1_sq
+            c21 = cp.sum(b2 * b1, axis=-1, keepdims=True) / b1_sq
+            dp1 = -(1.0 + c01) * dp0 + c21 * dp3
+            dp2 = -(dp0 + dp1 + dp3)
+
+            g_b1 = (g_u - cp.sum(g_u * u, axis=-1, keepdims=True) * u) / b1_len
+            dp1 = dp1 - g_b1
+            dp2 = dp2 + g_b1
+
+            q = self._quad_idx[k]
+            cp.add.at(gX, (slice(None), q[0]), dp0)
+            cp.add.at(gX, (slice(None), q[1]), dp1)
+            cp.add.at(gX, (slice(None), q[2]), dp2)
+            cp.add.at(gX, (slice(None), q[3]), dp3)
+
+        # Base transform VJP
+        omega, R, lig_centered, N_atoms = base_state
+        g_lig = gX[:, self._lig_pos_t, :]
+        gtheta[:, 0:3] += g_lig.sum(axis=1)
+        g_R = (g_lig[:, :, :, None] * lig_centered[:, :, None, :]).sum(axis=1)
+        A = (R[:, :, None, :] * g_R[:, None, :, :]).sum(axis=-1)
+        g_vec = cp.stack([A[:, 1, 2] - A[:, 2, 1], A[:, 2, 0] - A[:, 0, 2], A[:, 0, 1] - A[:, 1, 0]], axis=-1)
+
+        Jl = _left_jacobian(omega)
+        gtheta[:, 3:6] += (Jl * g_vec[:, :, None]).sum(axis=1)
+
+        g_lig_centered = (g_lig[:, :, None, :] * R[:, None, :, :]).sum(axis=2)
+        g_pivot_b = g_lig.sum(axis=1) - g_lig_centered.sum(axis=1)
+        gX[:, self._lig_pos_t, :] = g_lig_centered
+        if self._donor_pos_t.size > 0:
+            cp.add.at(gX, (slice(None), self._donor_pos_t), g_pivot_b[:, None, :] / float(self._donor_pos_t.size))
+        else:
+            gX = gX + g_pivot_b[:, None, :] / float(N_atoms)
+        return gtheta, gX
+
+    def jacobian_column_norm_sq(self, theta, X_ref):
+        """Analytic diagonal of J^T J for this FK map, refreshed at the supplied pose."""
         B, width = theta.shape
-        out = theta.new_zeros((B, width))
-        nlig = int(self._lig_pos_t.numel())
+        out = cp.zeros((B, width), dtype=theta.dtype)
+        nlig = int(self._lig_pos_t.size)
         if nlig == 0:
             return out
-        X_ref_b = X_ref.unsqueeze(0).expand(B, -1, -1) if X_ref.dim() == 2 else X_ref
+        X_ref_b = cp.broadcast_to(X_ref[None, ...], (B, X_ref.shape[0], X_ref.shape[1])) if X_ref.ndim == 2 else X_ref
 
-        # The rigid translation affects every ligand atom by one Cartesian unit.
         out[:, :3] = float(nlig)
-        Xbase = self._apply_base_transform(theta, X_ref_b.clone())
+        Xbase = self._apply_base_transform(theta, X_ref_b.copy())
         X = Xbase
         joint_axes, joint_pivots, joint_down = [], [], []
         for k in range(self.n_joints):
-            P = X.index_select(1, self._quad_idx[k])
-            _, axis = dihedral_axis_from_quad(P)
+            P = X[:, self._quad_idx[k]]
+            _, axis = _dihedral_axis_from_quad(P)
             down = self._downstream[k]
             joint_axes.append(axis)
             joint_pivots.append(P[:, 1])
@@ -425,39 +560,22 @@ class _FKEvalMixin:
         X_prebend = X
         Xfinal = self._bend_plan.apply(X, beta) if beta is not None and self._bend_plan is not None else X
 
-        # Exact derivative of Exp(omega) applied to the final rigidly carried
-        # coordinates: d(Rv)/domega = -[Rv]x J_l(omega).
-        if self._donor_pos_t.numel() > 0:
-            pivot = gather_atoms(X_ref_b, self._donor_pos_t).mean(dim=1)
+        if self._donor_pos_t.size > 0:
+            pivot = _gather_atoms(X_ref_b, self._donor_pos_t).mean(axis=1)
         else:
-            pivot = X_ref_b.mean(dim=1)
-        # Base rotation is an equivariant rigid transform of the whole FK map,
-        # including the bend axes built from the transformed coordinates.
-        r = gather_atoms(Xfinal, self._lig_pos_t) - pivot[:, None, :] - theta[:, None, :3]
-        omega = theta[:, 3:6]
-        theta2 = (omega * omega).sum(dim=-1, keepdim=True)
-        angle = torch.sqrt(theta2.clamp_min(1e-12))
-        A = (1.0 - torch.cos(angle)) / theta2.clamp_min(1e-12)
-        Bc = (angle - torch.sin(angle)) / (angle * theta2).clamp_min(1e-12)
-        A = torch.where(theta2 < 1e-6, 0.5 - theta2 / 24.0 + theta2 * theta2 / 720.0, A)
-        Bc = torch.where(theta2 < 1e-6, 1.0 / 6.0 - theta2 / 120.0 + theta2 * theta2 / 5040.0, Bc)
-        wx, wy, wz = omega.unbind(-1)
-        z = torch.zeros_like(wx)
-        W = torch.stack([z, -wz, wy, wz, z, -wx, -wy, wx, z], dim=-1).reshape(B, 3, 3)
-        eye = torch.eye(3, dtype=theta.dtype, device=theta.device).expand(B, 3, 3)
-        Jl = eye + A[..., None] * W + Bc[..., None] * (W @ W)
-        rx, ry, rz = r.unbind(-1)
-        zr = torch.zeros_like(rx)
-        skew_r = torch.stack([zr, -rz, ry, rz, zr, -rx, -ry, rx, zr], dim=-1).reshape(B, nlig, 3, 3)
+            pivot = X_ref_b.mean(axis=1)
+        r = _gather_atoms(Xfinal, self._lig_pos_t) - pivot[:, None, :] - theta[:, None, :3]
+        Jl = _left_jacobian(theta[:, 3:6])
+        skew_r = _skew(r)
         jrot = -skew_r @ Jl[:, None, :, :]
-        out[:, 3:6] = (jrot * jrot).sum(dim=(1, 2))
+        out[:, 3:6] = (jrot * jrot).sum(axis=(1, 2))
 
         for k, (axis, pv, down) in enumerate(zip(joint_axes, joint_pivots, joint_down)):
-            if down.numel() == 0:
+            if down.size == 0:
                 continue
-            lever = X_prebend.index_select(1, down) - pv[:, None, :]
-            deriv = torch.linalg.cross(axis[:, None, :], lever, dim=-1)
-            out[:, 6 + k] = (deriv * deriv).sum(dim=(1, 2))
+            lever = X_prebend[:, down] - pv[:, None, :]
+            deriv = cp.cross(axis[:, None, :], lever, axis=-1)
+            out[:, 6 + k] = (deriv * deriv).sum(axis=(1, 2))
 
         if beta is not None and self._bend_plan is not None:
             out[:, n:n + self.n_angle_bends] = self._bend_plan.jacobian_column_norm_sq(X_prebend, beta)
@@ -487,7 +605,7 @@ class ForwardKinematics(_FKEvalMixin):
         self,
         mol: "TMComplex",
         ligand: "Ligand",
-        device: torch.device,
+        device=None,
         angle_bends: bool = False,
     ) -> None:
         self.device = device
@@ -514,7 +632,7 @@ class ForwardKinematics(_FKEvalMixin):
             idx_to_pos[idx] for idx in ligand.atom_indices if idx in idx_to_pos
         ]
         self._lig_first = min(ligand.atom_indices) if ligand.atom_indices else 0
-        self._lig_pos_t = torch.tensor(self._lig_pos_indices, dtype=torch.long, device=device)
+        self._lig_pos_t = cp.asarray(self._lig_pos_indices, dtype=cp.int64)
 
         donor_atom_idxs: List[int] = []
         for chain in ligand.pivot_chains:
@@ -528,11 +646,9 @@ class ForwardKinematics(_FKEvalMixin):
                 donor_atom_idxs_dedup.append(idx)
         self._donor_pos_indices: List[int] = [idx_to_pos[idx] for idx in donor_atom_idxs_dedup]
         if self._donor_pos_indices:
-            self._donor_pos_t = torch.tensor(
-                self._donor_pos_indices, dtype=torch.long, device=device
-            )
+            self._donor_pos_t = cp.asarray(self._donor_pos_indices, dtype=cp.int64)
         else:
-            self._donor_pos_t = torch.zeros(0, dtype=torch.long, device=device)
+            self._donor_pos_t = cp.zeros(0, dtype=cp.int64)
 
         decomp = ligand.decomposition  # _LigandGraph: body_of, pivot_bonds, rigid_bodies
 
@@ -702,7 +818,14 @@ class ForwardKinematics(_FKEvalMixin):
             def _single(u, v):
                 return abs(_bo.get((min(u, v), max(u, v)), 1.0) - 1.0) < 0.25
 
-            from jacobik.topology.decompose import _RING_JOINT_MIN_SIZE, RING_JOINTS
+            def _pi(x):
+                return any(not _single(x, y) for y in Gl.neighbors(x))
+
+            def _conj(u, v):
+                lp = lambda x: atom_map[x].symbol in ("N", "O", "S")
+                return (_pi(u) and (_pi(v) or lp(v))) or (_pi(v) and (_pi(u) or lp(u)))
+
+            from jacobik.topology.decompose import _RING_JOINT_MIN_SIZE, MACRO_FUSED, RING_JOINTS
             min_n = _RING_JOINT_MIN_SIZE if RING_JOINTS else 8
             # bends this ligand gets (angle_bends): (fixed points, moved atoms) of each, to choose a ring opening no
             # bend disturbs
@@ -745,6 +868,20 @@ class ForwardKinematics(_FKEvalMixin):
                         S = {u, v} | set(Gl.neighbors(u)) | set(Gl.neighbors(v))
                         return all(not (S & mv) or (S - fx) <= mv for fx, mv in _bend_moves)
                     anchor = next((q for q in cands if _undisturbed(q)), None)
+                shared = set()
+                if MACRO_FUSED:
+                    # bonds this ring shares with another ring stay rigid and never open it
+                    for cyc in nx.minimum_cycle_basis(Gl):
+                        if set(cyc) != ring_set:
+                            cs = set(cyc)
+                            shared |= {(min(a, b), max(a, b)) for a, b in Gl.subgraph(cs).edges()}
+                    def _opens(q):
+                        u, v = ring[(q + na) % n], ring[(q + na + 1) % n]
+                        return _single(u, v) and (min(u, v), max(u, v)) not in shared
+                    # keep a bend-safe opening when there is one; else the first anchor whose opening is unshared
+                    if anchor is None or not _opens(anchor):
+                        anchor = next((q for q in cands if _opens(q) and (not _bend_moves or _undisturbed(q))),
+                                      next((q for q in cands if _opens(q)), None))
                 if anchor is None:
                     anchor = next((q for q in cands if _single(ring[(q + na) % n], ring[(q + na + 1) % n])), None)
                 if anchor is None:
@@ -760,19 +897,38 @@ class ForwardKinematics(_FKEvalMixin):
                 # torsion stays at its embed value and a 6-8 ring has no closure-preserving freedom left, so the ring
                 # is locked in its seed fold (COD 2026-09-30: the bound tub unreachable from the free twist-boat).
                 small = n < 8 or not all(_single(ring[q], ring[(q + 1) % n]) for q in range(n))
-                last = 1 if (small and _SMALL_RING_OPEN_ADJ) else 2
+                last = 1 if ((small and _SMALL_RING_OPEN_ADJ) or MACRO_OPEN_ADJ) else 2
                 for arm in (arm_a, arm_b):
                     js: List[Tuple[int, int, int, int]] = []
                     for m in range(len(arm) - last):
                         j_at, k_at = arm[m], arm[m + 1]
                         if not _single(j_at, k_at):
                             continue  # a double bond in the ring stays rigid (no torsion joint)
+                        if MACRO_FUSED:
+                            if (min(j_at, k_at), max(j_at, k_at)) in shared:
+                                continue  # fused bond: rigid
+                            if _conj(j_at, k_at):
+                                continue  # conjugated single bond (amide, aryl-N, aryl-C=O): planar, rigid
+                            H_ = Gl.copy()
+                            H_.remove_edge(j_at, k_at)
+                            H_.remove_edge(cl_u, cl_v)
+                            if nx.has_path(H_, j_at, k_at):
+                                continue  # not a torsion of the opened ring (another path joins its ends)
                         fi = ring[(ring.index(j_at) - 1) % n]
                         if fi == k_at:
                             fi = ring[(ring.index(j_at) + 1) % n]
                         fl = ring[(ring.index(k_at) - 1) % n]
                         if fl == j_at:
                             fl = ring[(ring.index(k_at) + 1) % n]
+                        if MACRO_OPEN_ADJ and not small and {k_at, fl} == {cl_u, cl_v}:
+                            # the joint into an opening atom: its ring neighbour across the opening sits on the other
+                            # arm, so measuring the dihedral to it couples this joint to every joint of that arm (the
+                            # analytic closure Jacobian was off by up to 0.8 A/rad, 2026-11-20); use a substituent
+                            # of the opening atom instead, which moves rigidly with this joint
+                            subs = sorted(x for x in Gl.neighbors(k_at) if x not in (j_at, cl_u, cl_v))
+                            if not subs:
+                                continue
+                            fl = subs[0]
                         js.append((fi, j_at, k_at, fl))
                     arm_joints.append(js)
                 # Interleave the arms so nested (outer) joints follow inner ones.
@@ -826,15 +982,14 @@ class ForwardKinematics(_FKEvalMixin):
             mk = slice(self.n_joints_base + self.n_bend_joints, self.n_joints)
             down_sets = [set(d) for d in downstream_lists[mk]]
             mask = [[a in ds for a in seam] for ds in down_sets]
-            dev = device
             self._cl = dict(
-                seam=torch.tensor(seam, dtype=torch.long, device=dev),
-                a=torch.tensor([sidx[a] for a, _ in closure_pairs], dtype=torch.long, device=dev),
-                b=torch.tensor([sidx[b] for _, b in closure_pairs], dtype=torch.long, device=dev),
-                d0=torch.tensor(closure_d0, dtype=torch.float32, device=dev),
-                pj=torch.tensor(pivot_j_list[mk], dtype=torch.long, device=dev),
-                pk=torch.tensor(pivot_k_list[mk], dtype=torch.long, device=dev),
-                mask=torch.tensor(mask, dtype=torch.float32, device=dev),
+                seam=cp.asarray(seam, dtype=cp.int64),
+                a=cp.asarray([sidx[a] for a, _ in closure_pairs], dtype=cp.int64),
+                b=cp.asarray([sidx[b] for _, b in closure_pairs], dtype=cp.int64),
+                d0=cp.asarray(closure_d0, dtype=cp.float32),
+                pj=cp.asarray(pivot_j_list[mk], dtype=cp.int64),
+                pk=cp.asarray(pivot_k_list[mk], dtype=cp.int64),
+                mask=cp.asarray(mask, dtype=cp.float32),
             )
 
         if self.n_joints > 0:
@@ -842,12 +997,11 @@ class ForwardKinematics(_FKEvalMixin):
             self._pivot_j = pivot_j_list
             self._pivot_k = pivot_k_list
             self._flanking_l = flanking_l_list
-            # Downstream index lists: variable length, kept as a list of tensors
             self._downstream = [
-                torch.tensor(d, dtype=torch.long, device=device) for d in downstream_lists
+                cp.asarray(d, dtype=cp.int64) for d in downstream_lists
             ]
             self._quad_idx = [
-                torch.tensor([fi, pj, pk, fl], dtype=torch.long, device=device)
+                cp.asarray([fi, pj, pk, fl], dtype=cp.int64)
                 for fi, pj, pk, fl in zip(
                     flanking_i_list, pivot_j_list, pivot_k_list, flanking_l_list
                 )
@@ -871,8 +1025,8 @@ class ForwardKinematics(_FKEvalMixin):
             if _specs:
                 self._bend_specs = _specs
                 self._bend_plan = AB.BendPlan(_specs, idx_to_pos, device)
-                self._bend_k = torch.tensor(AB.stiffness(mol, _specs), dtype=torch.float32, device=device)
-                self._bend_free = torch.tensor(AB.free_zone(_specs), dtype=torch.float32, device=device)
+                self._bend_k = cp.asarray(AB.stiffness(mol, _specs), dtype=cp.float32)
+                self._bend_free = cp.asarray(AB.free_zone(_specs), dtype=cp.float32)
                 self.n_angle_bends = self._bend_plan.K
 
         log.debug(

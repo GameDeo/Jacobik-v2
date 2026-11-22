@@ -18,9 +18,11 @@ from dataclasses import replace
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
-import torch
 
 from jacobik.builder.result import ConformerResult, EnsembleResult, attach_solver_state
+from jacobik.core import gpu
+
+cp = gpu.cp
 
 log = logging.getLogger(__name__)
 
@@ -296,6 +298,29 @@ class _ConfigsPrepMixin:
                 lig.chiral_fix = lig_fixes[li]["chiral"] or None
                 lig._strict_stereo = True
 
+    def _prefetch_embeds(self, variants, elements, kw, mode) -> None:
+        """embed_refine: one collect pass over every class's shell build, so the ligand embeds of all classes are refined
+        in ONE batched MACE optimisation (builder.mace_embed); the class preparations then read them from its cache."""
+        from jacobik.builder import mace_embed
+
+        try:
+            with mace_embed.collecting():
+                for v in variants:
+                    if mode != "ez" and not getattr(v, "feasible", True):
+                        continue
+                    if mode == "ez":
+                        for lig, f in zip(self.ligands, v):
+                            lig.ez_fix = f
+                    else:
+                        self._set_variant_fixes(v, elements)
+                    try:
+                        self._build_shell(kw.get("fast_embed", False), False, embed_seed=kw.get("embed_seed"),
+                                          chelate_embed=kw.get("chelate_embed", True), embed=kw.get("embed"))
+                    except Exception as exc:  # the class's own preparation reports it
+                        _e().log.debug("embed prefetch: class shell failed (%s)", exc)
+        finally:
+            self._clear_variant_fixes()
+
     def _clear_variant_fixes(self) -> None:
         for lig in self.ligands:
             lig.ez_fix = None
@@ -305,15 +330,23 @@ class _ConfigsPrepMixin:
     def _label_class_rows(self, conformers, vi, v, elements) -> None:
         """Class descriptors of one class's rows: variant, production flag, requested and perceived stereo labels."""
         from jacobik.ik import stereo
+        if not conformers:
+            return
+        cached_st = getattr(self, "_cached_stereo_elements", None)
+        already_labeled = cached_st is not None and cached_st[1] == elements
+        syms = None if already_labeled else [a.symbol for a in conformers[0].complex.atoms]
+        geom_default = getattr(self, "geometry", "ideal")
         for c in conformers:
             c.stereo_variant_idx = vi
             c.stereo_production = bool(getattr(v, "production", False))
             c.requested_stereo_label = v.class_id
-            pos = np.array([a.position for a in c.complex.atoms])
-            syms = [a.symbol for a in c.complex.atoms]
-            labels = stereo.compute_conformer_stereo_labels(elements, pos, syms, c=c)
-            c.stereo_label = ",".join(f"{k}:{v}" for k, v in sorted(labels.items())) if labels else "none"
-            geom_label = getattr(c.complex, "coordination_geometry", getattr(self, "geometry", "ideal"))
+            if not already_labeled or c.stereo_label is None:
+                if syms is None:
+                    syms = [a.symbol for a in c.complex.atoms]
+                pos = np.array([a.position for a in c.complex.atoms])
+                labels = stereo.compute_conformer_stereo_labels(elements, pos, syms, c=c)
+                c.stereo_label = ",".join(f"{k}:{v}" for k, v in sorted(labels.items())) if labels else "none"
+            geom_label = getattr(c.complex, "coordination_geometry", geom_default)
             a_idx = c.assignment_idx if c.assignment_idx is not None else 0
             c.class_label = f"{geom_label}|S:{c.stereo_label}|A:{a_idx}"
 
@@ -332,16 +365,14 @@ class _ConfigsPrepMixin:
         # Deduplicate merged conformers across variants
         from jacobik.ik import dedup as dd
         deduper = dd.deduper_for(all_confs[0].complex)
-        coords = torch.tensor(np.array([[a.position for a in c.complex.atoms] for c in all_confs]))
-        scores_t = torch.tensor([getattr(c.score, 'total', c.score) for c in all_confs])
+        coords = gpu.as_gpu(np.array([[a.position for a in c.complex.atoms] for c in all_confs]), cp.float64)
+        scores_t = np.array([getattr(c.score, 'total', c.score) for c in all_confs], dtype=np.float64)
         # superset rule: rows of production classes are visited first (never dropped for an extra row); only extra
         # rows can be removed as duplicates of kept ones.
-        prod_flag = torch.tensor([1.0 if getattr(c, "stereo_production", False) else 0.0 for c in all_confs],
-                                 dtype=torch.float64)
+        prod_flag = np.array([1.0 if getattr(c, "stereo_production", False) else 0.0 for c in all_confs], dtype=np.float64)
         # out_mirror: at equal score the source is visited (and ranked) before its reflection (0 in production)
-        refl = torch.tensor([1.0e-9 if getattr(c, "mirror_of", None) is not None else 0.0 for c in all_confs],
-                            dtype=torch.float64)
-        keep_idxs = deduper.select(coords, scores_t.to(torch.float64) + 1.0e6 * prod_flag - refl, k=None, th=dd.DEDUP_RMSD)
+        refl = np.array([1.0e-9 if getattr(c, "mirror_of", None) is not None else 0.0 for c in all_confs], dtype=np.float64)
+        keep_idxs = deduper.select(coords, cp.asarray(scores_t + 1.0e6 * prod_flag - refl), k=None, th=dd.DEDUP_RMSD)
         keep_idxs = sorted(keep_idxs, key=lambda i: (-float(scores_t[i]), getattr(all_confs[i], "mirror_of", None) is not None))
         all_confs = [all_confs[i] for i in keep_idxs]
 
@@ -424,6 +455,8 @@ class _ConfigsBatchedMixin:
         preps, failures = [], []
         inner_attr = "_ez_inner" if mode == "ez" else "_stereo_inner"
         t0 = __import__("time").perf_counter()
+        if _e().EMBED_REFINE:
+            self._prefetch_embeds(variants, elements, kw, mode)
         try:
             setattr(self, inner_attr, True)
             for vi, v in enumerate(variants):
@@ -500,7 +533,7 @@ class _ConfigsBatchedMixin:
             return out_res
 
         def layout(r):
-            return ([tuple(t.shape[1:]) for t in r["thetas"]], [tuple(d.tolist()) for d in r["dpi"]],
+            return ([tuple(t.shape[1:]) for t in r["thetas"]], [tuple(gpu.to_cpu(d).tolist()) for d in r["dpi"]],
                     len(r["ctx"].mol.atoms), int(r["ctx"].n_coord_samples), r["n_ik_steps"])
         base = allp[0]
         blocks = [r for r in allp if layout(r) == layout(base)]
@@ -510,7 +543,6 @@ class _ConfigsBatchedMixin:
                         len(singles), len(allp))
         def run_group(blocks):
             """One joint IK over `blocks` (whole classes): ({job: [(res, vi)]}, {job: [variant]}, solve wall, rows)."""
-            # union of the classes' assignments; each block's row groups re-indexed into it
             union, keys = [], {}
             for r in blocks:
                 m = []
@@ -522,69 +554,52 @@ class _ConfigsBatchedMixin:
                     m.append(keys[k])
                 r["cand_union"] = np.asarray(m, dtype=np.int64)[np.asarray(r["cand"])]
             ctx0 = base["ctx"]
-            dev = ctx0.device
             scorer_u = self._joint_scorer(ctx0, base["ge"], union)
             N = len(ctx0.mol.atoms)
             sizes = [int(r["thetas"][0].shape[0]) for r in blocks]
-            thetas = [torch.cat([r["thetas"][li] for r in blocks], dim=0) for li in range(len(base["thetas"]))]
-            X = torch.cat([(r["X"] if r["X"].dim() == 3 else r["X"].unsqueeze(0).expand(n, N, 3)).to(dev)
-                           for r, n in zip(blocks, sizes)], dim=0)
-            ideal = torch.cat([r["ideal"] for r in blocks], dim=0)
+            thetas = [cp.concatenate([r["thetas"][li] for r in blocks], axis=0) for li in range(len(base["thetas"]))]
+            X = cp.concatenate([r["X"] if r["X"].ndim == 3 else cp.broadcast_to(r["X"][None], (n, N, 3)) for r, n in zip(blocks, sizes)], axis=0)
+            ideal = cp.concatenate([r["ideal"] for r in blocks], axis=0)
             cand = np.concatenate([r["cand_union"] for r in blocks])
             has_state = any(r["state"][0] is not None for r in blocks)
-            ctx0._row_state_E = np.concatenate([r["state"][0] if r["state"][0] is not None else np.zeros(n)
-                                               for r, n in zip(blocks, sizes)]) if has_state else None
-            blk = torch.cat([torch.full((n,), i, dtype=torch.long) for i, n in enumerate(sizes)])
+            ctx0._row_state_E = np.concatenate([r["state"][0] if r["state"][0] is not None else np.zeros(n) for r, n in zip(blocks, sizes)]) if has_state else None
+            blk = cp.concatenate([cp.full((n,), i, dtype=cp.int64) for i, n in enumerate(sizes)])
             bw_total = int(sum(sizes)) // max(ctx0.n_coord_samples, 1)
-            # Donor symmetry differs between classes (a configuration can break an equivalence): the batch takes the union
-            # of the classes' symmetry groups, and each row is tied only by its own class's groups.
             sym_u, q3_u, sym_rows = list(base["sym"] or []), list(base["q3sym"] or []), None
             if any([list(map(tuple, r["sym"] or [])), list(map(tuple, r["q3sym"] or []))]
                    != [list(map(tuple, base["sym"] or [])), list(map(tuple, base["q3sym"] or []))] for r in blocks):
                 sym_rows = {"dist": {}, "q3": {}}
                 for key, lst in (("dist", "sym"), ("q3", "q3sym")):
-                    order = []
-                    for r in blocks:
-                        for g in (r[lst] or []):
-                            if tuple(g) not in order:
-                                order.append(tuple(g))
+                    order = list(dict.fromkeys(tuple(g) for r in blocks for g in (r[lst] or [])))
                     for g in order:
-                        sym_rows[key][g] = torch.cat([torch.full((n,), g in [tuple(x) for x in (r[lst] or [])],
-                                                                 dtype=torch.bool) for r, n in zip(blocks, sizes)])
+                        sym_rows[key][g] = cp.concatenate([cp.full((n,), g in {tuple(x) for x in (r[lst] or [])}, dtype=cp.bool_)
+                                                           for r, n in zip(blocks, sizes)])
                     if key == "dist":
                         sym_u = [list(g) for g in order]
                     else:
                         q3_u = [list(g) for g in order]
             from jacobik.ik.ik_solver import JointIKSolver
-            JointIKSolver.cull_blocks = blk
-            JointIKSolver.sym_rows = sym_rows
+            JointIKSolver.cull_blocks, JointIKSolver.sym_rows = blk, sym_rows
             t1 = __import__("time").perf_counter()
             try:
                 thetas_final, converged, scores, _ = self._run_joint_ik(
-                    ctx0, base["fks"], scorer_u, base["ge"], X, thetas, base["dpi"], ideal, sym_u, q3_u,
-                    bw_total, base["n_ik_steps"], cand)
+                    ctx0, base["fks"], scorer_u, base["ge"], X, thetas, base["dpi"], ideal, sym_u, q3_u, bw_total, base["n_ik_steps"], cand)
             finally:
-                JointIKSolver.cull_blocks = None
-                JointIKSolver.sym_rows = None
+                JointIKSolver.cull_blocks = JointIKSolver.sym_rows = None
             t_solve = __import__("time").perf_counter() - t1
             z = float(scorer_u._agg_norm()) if hasattr(scorer_u, "_agg_norm") else 0.0
-            results, kept = {}, {}
-            off = 0
+            results, kept, off = {}, {}, 0
             for r, n in zip(blocks, sizes):
-                sl = slice(off, off + n)
-                off += n
-                ctx = r["ctx"]
-                job = jobs[r["job"]]
-                failures, mode, elements = job["failures"], job["mode"], job["elements"]
-                remote_ops = job["remote_ops"]
-                for lig, (ez, ch, st) in zip(self.ligands, r["fixes"]):     # the class's fixes, as during its own solve
+                sl = slice(off, off + n); off += n
+                ctx, job = r["ctx"], jobs[r["job"]]
+                failures, mode, elements, remote_ops = job["failures"], job["mode"], job["elements"], job["remote_ops"]
+                for lig, (ez, ch, st) in zip(self.ligands, r["fixes"]):
                     lig.ez_fix, lig.chiral_fix, lig._strict_stereo = ez, ch, st
                 try:
                     ctx._row_state_E, ctx._row_state_tag, ctx._row_state_lab = r["state"]
                     ctx.score_norm = z
                     th_k = [t[sl] for t in thetas_final]
-                    confs = self._assemble_conformers(ctx, base["fks"], X[sl], th_k, scores[sl], converged[sl],
-                                                      r["bw_total"], r["cand"])
+                    confs = self._assemble_conformers(ctx, base["fks"], X[sl], th_k, scores[sl], converged[sl], r["bw_total"], r["cand"])
                     attach_solver_state(confs, th_k, None)
                 except Exception as exc:
                     failures.append(f"class {r['vi']} assembly: {type(exc).__name__}: {exc}")
@@ -594,8 +609,7 @@ class _ConfigsBatchedMixin:
                     self._clear_variant_fixes()
                 res = EnsembleResult(conformers=confs, solve_trace={}, scorer=scorer_u)
                 if len(r["assignments"]) > 1:
-                    res.assignment_search = dict(n_candidates=len(r["assignments"]),
-                                                 candidate_assignments=[a.tolist() for a in r["assignments"]])
+                    res.assignment_search = dict(n_candidates=len(r["assignments"]), candidate_assignments=[a.tolist() for a in r["assignments"]])
                 if not confs:
                     failures.append(f"class {r['vi']} produced 0 conformers")
                     continue
@@ -605,11 +619,9 @@ class _ConfigsBatchedMixin:
                 kept.setdefault(r["job"], []).append(r["v"])
                 if remote_ops:
                     sub = None if sym_rows is None else {k: {g: m[sl] for g, m in d.items()} for k, d in sym_rows.items()}
-                    der = self._derive_remote(ctx0, base, r, X[sl], th_k, scores[sl], ideal[sl], sym_u, q3_u, sub,
-                                              remote_ops, scorer_u, z, elements)
+                    der = self._derive_remote(ctx0, base, r, X[sl], th_k, scores[sl], ideal[sl], sym_u, q3_u, sub, remote_ops, scorer_u, z, elements)
                     if der is not None:
-                        results[r["job"]].append(der[:2])
-                        kept[r["job"]].append(der[2])
+                        results[r["job"]].append(der[:2]); kept[r["job"]].append(der[2])
             return results, kept, t_solve, int(sum(sizes))
 
         cap = getattr(self, "_config_max_rows", None)
@@ -633,11 +645,14 @@ class _ConfigsBatchedMixin:
             try:
                 rs, ks, ts, nr = run_group(g)
                 add(rs, ks)
-            except torch.cuda.OutOfMemoryError:
-                if len(g) == 1:
-                    raise
+            except gpu.OOMError:
+                if len(g) == 1:   # one class too large for a batch: its own solve, which degrades (engine._solve_degrading)
+                    _e().log.warning("config_states: class %d alone is out of GPU memory; solved on its own", g[0]["vi"])
+                    gpu.empty_cache()
+                    singles.append(g[0])
+                    continue
                 _e().log.warning("config_states: %d-class batch out of GPU memory; classes solved one batch each", len(g))
-                torch.cuda.empty_cache()
+                gpu.empty_cache()
                 ts, nr = 0.0, 0
                 for r in g:
                     a_, b_, c_, d_ = run_group([r])
@@ -704,35 +719,33 @@ class _ConfigsBatchedMixin:
             if len(subsets) > self.REMOTE_MAX_SUBSETS:
                 _e().log.info("config_remote: %d inversion subsets, first %d used", len(subsets), self.REMOTE_MAX_SUBSETS)
                 subsets = subsets[:self.REMOTE_MAX_SUBSETS]
-            top = torch.argsort(sc_b, descending=True)[:self.REMOTE_ROWS]
-            with torch.no_grad():
-                Xs = X_b.index_select(0, top)
-                for fk, th in zip(base["fks"], th_b):
-                    Xs = fk.apply(th.index_select(0, top), Xs)
-            Xn = Xs.detach().cpu().numpy()
+            top = cp.argsort(-sc_b)[:self.REMOTE_ROWS]
+            Xs = X_b[top]
+            for fk, th in zip(base["fks"], th_b):
+                Xs = fk.apply(th[top], Xs)
+            Xn = gpu.to_cpu(Xs)
             new = []
             for s in subsets:
                 Xi = Xn
                 for oi in s:
                     Xi = apply(ops[oi], Xi)
                 new.append(Xi)
-            src = np.tile(top.cpu().numpy(), len(subsets))
-            src_t = torch.as_tensor(src, device=X_b.device)
-            Xd = torch.as_tensor(np.concatenate(new), dtype=X_b.dtype, device=X_b.device)
+            src = np.tile(gpu.to_cpu(top), len(subsets))
+            src_t = cp.asarray(src, dtype=cp.int64)
+            Xd = gpu.as_gpu(np.concatenate(new), X_b.dtype)
             # the repair starts AT the inverted rows: zero rigid-body columns, every joint at its measured dihedral
             # (joint columns are absolute dihedrals), angle-bend columns zero; checked: FK(theta0, X_inv) = X_inv
             from jacobik.ik.fk import dihedral_axis_from_quad
             th0 = []
-            with torch.no_grad():
-                for fk, t in zip(base["fks"], th_b):
-                    t0 = torch.zeros_like(t.index_select(0, src_t))
-                    for k in range(fk.n_joints):
-                        t0[:, 6 + k] = dihedral_axis_from_quad(Xd.index_select(1, fk._quad_idx[k]))[0]
-                    th0.append(t0)
-                Xc = Xd
-                for fk, t0 in zip(base["fks"], th0):
-                    Xc = fk.apply(t0, Xc)
-            err = float((Xc - Xd).abs().max())
+            for fk, t in zip(base["fks"], th_b):
+                t0 = cp.zeros_like(t[src_t])
+                for k in range(fk.n_joints):
+                    t0[:, 6 + k] = dihedral_axis_from_quad(Xd[:, fk._quad_idx[k]])[0]
+                th0.append(t0)
+            Xc = Xd
+            for fk, t0 in zip(base["fks"], th0):
+                Xc = fk.apply(t0, Xc)
+            err = float(cp.abs(Xc - Xd).max())
             if err > 1e-3:
                 _e().log.warning("config_remote: FK(theta0, X_inv) != X_inv (%.2e); no derived rows", err)
                 return None
@@ -740,10 +753,10 @@ class _ConfigsBatchedMixin:
             cand_u = np.asarray(r["cand_union"])[src]
             ctx0._row_state_E = st[0]
             JointIKSolver.sym_rows = None if sym_rows_b is None else {
-                k: {g: m[torch.as_tensor(src)] for g, m in d.items()} for k, d in sym_rows_b.items()}
+                k: {g: m[src_t] for g, m in d.items()} for k, d in sym_rows_b.items()}
             try:
                 th_f, conv, sc, _ = self._run_joint_ik(
-                    ctx0, base["fks"], scorer_u, base["ge"], Xd, th0, base["dpi"], ideal_b.index_select(0, src_t),
+                    ctx0, base["fks"], scorer_u, base["ge"], Xd, th0, base["dpi"], ideal_b[src_t],
                     sym_u, q3_u, max(len(src) // max(ctx0.n_coord_samples, 1), 1), self.REMOTE_STEPS, cand_u)
             finally:
                 JointIKSolver.sym_rows = None

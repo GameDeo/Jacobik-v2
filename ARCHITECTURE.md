@@ -1,9 +1,9 @@
 # Jacobik: architecture
 
 How the generator works today: the pipeline, the score, the statistics database and the pipeline that fits it, and the way
-settings, fingerprints and regression references are managed. It describes what exists; the history is in `CHANGELOG.md`, and the
-earlier, much longer design document (with the ledger of discarded variants and the evidence workflow) is archived at
-`research/archive/docs/architecture/ARCHITECTURE_2026-10-20.md`.
+settings, fingerprints and regression references are managed. It describes what exists; the history is in `docs/CHANGELOG.md`. The
+`dev/` and `research/` trees named below (tests, golden references, benchmark and campaign tooling, the archive of the earlier,
+much longer design document) are the maintainers' development tree and are not part of this repository.
 
 Conventions: distances in angstrom (A), energies in kJ/mol unless "nats" (the unit of log-likelihood, the score), RT = 2.479
 kJ/mol at 298.15 K. Paths are relative to the repository root.
@@ -22,9 +22,10 @@ score** is maximal. The score is a sum of log-likelihoods of geometric features 
 structures (tmQM, lnQM). No crystal coordinates of the target enter a solve.
 
 Guarantees the design keeps:
-- **No force field, relaxation or machine-learned potential acts on a complex during a solve.** Physics enters as fitted
+- **No force field, relaxation or machine-learned potential acts on a complex during the solve.** Physics enters as fitted
   parameters measured offline (GFN2 dimer scans for the repulsive contact term, GFN2 Hessians for thermal widths, MACE fits for
-  the bend prior). GFN2 and MACE are used to *measure* results, never to steer the solver.
+  the bend prior). MACE-POLAR acts only before the solve (refinement of each free-ligand embed) and after it (the settle and
+  relax stages, section 2.6); it never steers the solver.
 - **The generator never fails the caller.** It degrades (a failed step logs and falls back) rather than raising out of
   `solve()` for chemistry it cannot handle.
 - **Deterministic given the seeds** (`seed`, `embed_seed`); the GFN2 embed runs on one thread for this reason.
@@ -40,11 +41,13 @@ Entry point: `jacobik.ComplexBuilder(metal, geometry, charge, spin, ligands=[Lig
 |---|---|---|
 | 1 Typing | Oxidation state from charge and ligand charges; donor subclass hierarchy; geometry classification | `core/chemistry.py`, `topology/donor_classifier.py`, `topology/donor_rules.py`, `topology/coord_geom.py` |
 | 2 Configuration enumeration | Donor-to-site assignments up to symmetry; stereocentres (given, unspecified, created by binding) and E/Z bonds; ring-pucker states | `ik/site_enumeration.py`, `ik/stereo.py`, `topology/rings.py`, `builder/embed.py` |
-| 3 Embed | Each free ligand once: ETKDG, MMFF, GFN2 refinement under chelate-aware distance bounds | `builder/embed.py`, `builder/engine.py` |
+| 3 Embed | Each free ligand once: ETKDG, MMFF, then MACE-POLAR refinement (GFN2 as fallback) under chelate-aware distance bounds | `builder/embed.py`, `builder/mace_embed.py`, `builder/engine.py` |
 | 4 Beam and IK solve | Torsion seeds from the statistics, then one batched joint solve of every configuration block | `ik/beam.py`, `ik/ik_solver.py`, `ik/solver_replay.py` |
 | 5 Scoring | Sum of log-likelihood terms, divided by a per-complex constant | `ik/scorer.py`, `ik/kernels.py`, `stats/*` |
 | 6 Dedup | Symmetry-aware heavy-atom RMSD | `ik/dedup.py` |
 | 7 Output by class | Rows grouped into configuration classes, ranked inside each | `builder/engine.py`, `builder/result.py`, `builder/assemble.py` |
+| 8 Settle | Ten batched MACE-POLAR steps with the declared donors held; rows leave at the settled geometry, ordered by settled energy within each class | `builder/settle.py`, `core/relax.py` |
+| 9 Relax (optional) | Batched MACE-POLAR relaxation of the returned rows (`relax=`) | `core/relax.py` |
 
 ### 2.1 Typing and inputs
 Inputs: metal, total charge, spin, one of 13 geometry labels (`linear`, `trigonal`, `t_shaped`, `square_plan`, `tetrahedral`,
@@ -80,6 +83,11 @@ and haptic cases); chelate E/Z bonds get the configuration their ring requires, 
 all bond lengths and bond angles are frozen except the optional bends. `xtb` must be on `PATH`: a failed GFN2 call falls back to
 MMFF and logs "GFN2 embed refinement failed"; structures built that way must not be used.
 
+Since v1.0b the refinement step runs on MACE-POLAR (profile field `embed_refine = "mace"`, `builder/mace_embed.py`): every ligand
+embed of a call is relaxed in one batched optimisation, the free ligand with its caps and every donor-donor distance held. A failure
+of the MACE refinement (MACE unavailable, an evaluation error, a non-finite result) falls back to the GFN2 refinement of that ligand,
+so `xtb` stays required.
+
 ### 2.4 Kinematics and solve
 - **Degrees of freedom.** The ligand is cut at rotatable bonds (non-ring, bond order about 1, both atoms with more than one
   neighbour) into rigid bodies; each ligand has 3 translations, 3 rotations and its torsions, plus branch bends at kappa donors,
@@ -91,14 +99,28 @@ MMFF and logs "GFN2 embed refinement failed"; structures built that way must not
 - **Optimiser.** Adam (200 steps, learning rate 0.1) on -score plus an augmented-Lagrangian shape constraint that keeps the
   donors on the chosen polyhedron (tolerance per geometry measured on crystals) and symmetry ties for equivalent donors;
   successive halving of rows with niches when the batch is large. The production finish phase is an iRprop+ schedule with
-  thermal step sizes (`finish_phase`). On GPU the loop runs through a CUDA-graph replay generated from the Python solver
-  (`ik/solver_replay.py`, built by `dev/tools/jdev/build_replay_solver.py`; never edit the output by hand).
+  thermal step sizes (`finish_phase`). The loop runs on CUDA through fused Triton kernels and CuPy CUDA graphs (`ik/ik_solver.py`, `ik/kernels.py`, `ik/fk.py`).
 
 ### 2.5 Dedup and output
 Every row is rescored by the ranking score, which is the same function as the solve objective. Output deduplication keeps the
 best row of each group within 0.5 A symmetry-aware heavy-atom (plus metal) RMSD (`dedup_rmsd`, with the factored symmetry test
 `dedup_factored`), and drops rows more than 200 nats below the best (`out_window`). `EnsembleResult` groups the rows by class:
 `classes()`, `by_class()`, `summary()`, `write_xyz(by_class=True)`, `to_records()`. `delta_nats` is a score gap, not an energy.
+
+### 2.6 Settle and relax (v1.0b)
+Rows leave the solver on average about 100 kJ/mol above the relaxed minimum of their class, and that strain varies more between rows
+than the energies of the distinct basins of a class, so neither the score nor the energy at the solver geometry orders the basins
+of a class. The settle stage (`settle_steps = 10`, `builder/settle.py`) solves with a larger candidate pool, runs ten batched
+MACE-POLAR steps with the metal-donor distances held, deduplicates, and returns each class ordered by settled energy;
+`settle_top = k` settles only the `k` rows of each class with the lowest MACE energy at the solver geometry. Settled rows are not
+converged minima. `relax=` continues with a batched MACE-POLAR relaxation (L-BFGS with a connectivity preconditioner and a trust
+radius per row; `relax_top`, `relax_binding`, `relax_etol`). The settle and relax stages need the MACE-POLAR-1-S weights
+(downloaded on first use) and otherwise degrade to the unsettled rows with a warning.
+
+### 2.7 Builds
+The release has two builds with the same API, statistics database and fingerprint. `master` is the PyTorch build (CPU or CUDA).
+`master-triton` is the GPU build: the solver, scoring and MACE-POLAR evaluation run on CuPy and Triton kernels with no PyTorch
+dependency (`core/gpu.py`, `core/mace_triton.py`, `core/mace_weights.py`, and the `ik/` solver); it requires a CUDA device.
 
 ## 3. The score
 
@@ -179,8 +201,8 @@ pairs) live in this pipeline, so a DB can always be rebuilt from its metadata.
   (JSON) overrides registered fields. Overriding a hardcoded production setting raises on purpose (it would change the fingerprint
   but not the solver). Retired `JACOBIK_*` switches raise too.
 - The **fingerprint** is `sha1(PRODUCTION_CONFIG)[:12]`; `jacobik.profile.snapshot()` reports it with the active overrides. The
-  production fingerprint on `master` is `2c87e2940af2` (donor-assignment flag consolidation over the `a47283387172` P2R baseline validated in `PERFORMANCE.md`).
-  Flag history and the evidence behind each fold-in: `CHANGELOG.md` and the header of `src/jacobik/core/profile.py`.
+  production fingerprint of v1.0b is `1e4cde06304f` (both builds; v1.0a was `2c87e2940af2`), validated in `PERFORMANCE.md`.
+  Flag history and the evidence behind each fold-in: `docs/CHANGELOG.md` and the header of `src/jacobik/core/profile.py`.
 - **Golden references** (`research/data/golden/`) are arrays recorded for the production and `u1` profiles on a fixed set of
   complexes. `python -m tools.check ws` (fingerprint, parallel golden check, sharded pytest) must show zero differing arrays for
   any change that claims to leave behaviour unchanged. A golden is re-recorded only at an owner-approved fold-in, and the old one
@@ -197,7 +219,6 @@ pairs) live in this pipeline, so a DB can always be rebuilt from its metadata.
 - **Runner.** `python -m tools.run` is the one parent runner (lanes, MPS packing, control cache, telemetry); `python -m tools.check`
   has three levels (`ws`, `pm-quick`, `pm-full`). Benchmark tooling lives in `research/bench/tools/jgen`; contracts and inputs of
   finished campaigns in `research/campaigns/`, archived reports in `research/archive/docs/`.
-- **Perlmutter** is the default compute site for anything beyond a quick check; see `AGENTS.md` for the rules.
 
 ## 8. Code layout
 
@@ -207,12 +228,12 @@ pairs) live in this pipeline, so a DB can always be rebuilt from its metadata.
 | `src/jacobik/builder/` | `ComplexBuilder` orchestration (`engine.py`), `LigandInput`, `EnsembleResult`, conformer containers (`result.py`), `assemble.py`, `configs.py`, `ligands.py`, `embed.py`, `atom_map.py`, `assignment.py`, `beam.py`, `shell.py`, `cli.py` |
 | `src/jacobik/core/` | Profile and fingerprint (`profile.py`), chemistry/oxidation/radii (`chemistry.py`), energy constants (`energy.py`), environment/xtb checks (`env.py`), math/geometry primitives (`geometry.py`), lossless NPZ/JSON DB container (`container.py`), shared types (`types.py`) |
 | `src/jacobik/topology/` | Donor classification (`donor_classifier.py`, `donor_rules.py`), graph/haptic/mapping (`graph.py`, `haptic.py`, `mapping.py`), coordination geometry (`coord_geom.py`), rigid-body decomposition (`decompose.py`), ring-pucker states (`rings.py`) |
-| `src/jacobik/ik/` | Forward/inverse kinematics (`fk.py`, `fk_compose.py`, `reachability.py`), solver & generated replay (`ik_solver.py`, `solver_replay.py`, `finish_phase.py`, `polish.py`), `beam.py`, `site_enumeration.py`, `stereo.py`, `angle_bends.py`, `scorer.py`, `kernels.py`, `geometry.py`, `kabsch.py`, `targets.py`, `dedup.py` |
+| `src/jacobik/ik/` | Forward/inverse kinematics (`fk.py`, `fk_compose.py`, `reachability.py`), solver (`ik_solver.py`, `finish_phase.py`, `polish.py`), `beam.py`, `site_enumeration.py`, `stereo.py`, `angle_bends.py`, `scorer.py`, `kernels.py`, `geometry.py`, `kabsch.py`, `targets.py`, `dedup.py` |
 | `src/jacobik/stats/` | Database loading and lookup (`stats.py`), keys/ladders (`keys.py`, `ladders.py`), mixtures (`mixture.py`), S_orient (`orientation.py`), physical Q6 steric repulsion (`steric.py`), hypothesis priors (`hypothesis_tables.py`), reference log-likelihood (`reference_ll.py`) |
 | `src/fit/` | Fitting pipeline (`build_db.py`, `pipeline/{extract,fitting,confidence,compare}.py`, extractors/expanders/fitters `q1.py`–`q6.py`, `q6p.py`, `qo.py`, `bends.py`, `pooling.py`, `sanity.py`, `parser.py`, `data/benchmark_holdout_codes.json`) |
 | `interface/` | CLI (`jacobik_cli.py`, `prepare_data.py`), ligand library & debug complexes (`ligand_library.py`), notebooks |
-| `dev/` | Developer tree: unit/regression tests (`dev/tests/`), check levels (`dev/tools/check/`), parent runner (`dev/tools/run/`), dev/replay helpers (`dev/tools/jdev/`), SLURM scripts (`dev/tools/d2/`) |
-| `research/` | Benchmarks (`bench/`), campaign contracts (`campaigns/`), paper drafts (`paper/`), Colab helper (`gpuwork/`), archive (`archive/{docs,code,tests,...}`) |
+| `dev/` (development tree, not published) | Developer tree: unit/regression tests (`dev/tests/`), check levels (`dev/tools/check/`), parent runner (`dev/tools/run/`), dev/replay helpers (`dev/tools/jdev/`), SLURM scripts (`dev/tools/d2/`) |
+| `research/` (development tree, not published) | Benchmarks (`bench/`), campaign contracts (`campaigns/`), paper drafts (`paper/`), Colab helper (`gpuwork/`), archive (`archive/{docs,code,tests,...}`) |
 
 ## 9. Limits and open items
 

@@ -11,55 +11,17 @@ import numpy as np
 from jacobik.core.chemistry import METALS, covalent_radius as _covalent_radius
 from jacobik.core.types import Atom, Bond, Ligand, TMComplex
 
-
-# ---------------------------------------------------------------------------
-# Graph & SMILES alignment helpers
-# ---------------------------------------------------------------------------
-from typing import Dict, FrozenSet, List, Set, Tuple
-
-
-# Bonds above this raw BO threshold are treated as real ligand-internal bonds
-# when building the connectivity graph for component decomposition.
 _LIGAND_BO_THRESHOLD: float = 0.5
-
-
-# Raw BO thresholds for the no-SMILES fallback quantizer.
-# These are applied after metal and aromatic-ring detection.
-_BO_SINGLE_LO: float = 0.75  # raw BO >= this -> single (below = coordination)
-
-
-_BO_DOUBLE_LO: float = 1.30  # raw BO >= this -> tentatively double
-
-
-_BO_AROM_LO: float = 1.05  # used within rings for aromatic detection
-
-
+_BO_SINGLE_LO: float = 0.75   # raw BO >= this -> single (below = coordination)
+_BO_DOUBLE_LO: float = 1.30   # raw BO >= this -> tentatively double
+_BO_AROM_LO: float = 1.05     # used within rings for aromatic detection
 _BO_AROM_HI: float = 1.85
-
-
-_BO_TRIPLE_LO: float = 2.30  # raw BO >= this -> triple
-
-
-# Distance sanity screening for raw coordination edges (covalent-radii based).
-# The SMILES record is incomplete for many metal coordination bonds, so it
-# supplements rather than replaces retained, geometrically sane raw M--X BO
-# edges.  Contact cleaning removes known through-bond/second-sphere artifacts
-# before refit extraction.
+_BO_TRIPLE_LO: float = 2.30   # raw BO >= this -> triple
 _DIST_MIN_SCALE: float = 0.55
-
-
 _DIST_MIN_PAD: float = 0.20
-
-
 _DIST_MAX_NONMETAL_SCALE: float = 1.25
-
-
 _DIST_MAX_NONMETAL_PAD: float = 0.25
-
-
 _DIST_MAX_METAL_SCALE: float = 1.55
-
-
 _DIST_MAX_METAL_PAD: float = 0.45
 
 
@@ -700,53 +662,25 @@ def _apply_fallback_path(
     bonds: List[Bond],
     metal_idx: int,
 ) -> Tuple[Dict[Tuple[int, int], float], Set[int], Set[Tuple[int, int]]]:
-    """
-    Quantize raw bond orders without SMILES guidance.
-
-    Returns
-    -------
-    bo_updates : dict (min_xyz_i, max_xyz_j) -> discrete_bo
-                 for ligand-internal bonds that pass distance sanity checks
-    xyz_donor_indices : set of xyz atom indices inferred as donors
-                        (metal neighbors that also pass distance sanity checks)
-    allowed_coord_keys : set of (min_xyz_i, max_xyz_j) for metal-touching
-                        bonds that pass distance sanity checks and should be kept
-    """
+    """Quantize raw bond orders without SMILES guidance."""
     atom_map: Dict[int, Atom] = {a.idx: a for a in atoms}
     aromatic_keys = _detect_aromatic_rings_fallback(atoms, bonds, metal_idx)
-
     bo_updates: Dict[Tuple[int, int], float] = {}
     xyz_donor_indices = _raw_coordination_donor_indices(atoms, bonds, metal_idx)
     allowed_coord_keys: Set[Tuple[int, int]] = set()
-
     for b in bonds:
         key = (min(b.i, b.j), max(b.i, b.j))
-        ai = atom_map.get(b.i)
-        aj = atom_map.get(b.j)
+        ai, aj = atom_map.get(b.i), atom_map.get(b.j)
         if ai is None or aj is None:
             continue
-
-        # Metal-touching bonds: keep raw BO.  Donor admission was performed
-        # above through the shared raw-edge rule.
-        if b.i == metal_idx or b.j == metal_idx:
-            if not _distance_sanity_pass(ai, aj, is_metal_bond=True):
-                continue
+        is_m = b.i == metal_idx or b.j == metal_idx
+        if not _distance_sanity_pass(ai, aj, is_metal_bond=is_m):
+            continue
+        if is_m:
             allowed_coord_keys.add(key)
-            # Raw BO preserved on the Bond object itself; no update needed
-            continue
-
-        if not _distance_sanity_pass(ai, aj, is_metal_bond=False):
-            continue
-
-        is_aromatic = key in aromatic_keys
-        bo_updates[key] = _quantize_single_bo(b.order, is_aromatic)
-
+        else:
+            bo_updates[key] = _quantize_single_bo(b.order, key in aromatic_keys)
     return bo_updates, xyz_donor_indices, allowed_coord_keys
-
-
-# ---------------------------------------------------------------------------
-# Bond order application
-# ---------------------------------------------------------------------------
 
 
 def _apply_bo_updates(
@@ -757,80 +691,48 @@ def _apply_bo_updates(
     allowed_coord_keys: Optional[Set[Tuple[int, int]]] = None,
     atom_map: Optional[Dict[int, "Atom"]] = None,
 ) -> List[Bond]:
-    """
-    Return a new list of Bond objects with finalised bond orders.
-    """
+    """Return a new list of Bond objects with finalised bond orders."""
     updated: List[Bond] = []
     for b in bonds:
         key = (min(b.i, b.j), max(b.i, b.j))
-        is_metal_bond = b.i == metal_idx or b.j == metal_idx
-
+        is_m = b.i == metal_idx or b.j == metal_idx
         if smiles_path:
-            if is_metal_bond:
+            if is_m:
                 updated.append(Bond(i=b.i, j=b.j, order=b.order))
             elif key in bo_updates:
                 updated.append(Bond(i=b.i, j=b.j, order=bo_updates[key]))
             elif (
-                atom_map is not None
-                and b.order >= _LIGAND_BO_THRESHOLD
-                and (atom_map.get(b.i, None) is not None and atom_map.get(b.j, None) is not None)
+                atom_map is not None and b.order >= _LIGAND_BO_THRESHOLD
+                and atom_map.get(b.i) is not None and atom_map.get(b.j) is not None
                 and (atom_map[b.i].symbol == "H" or atom_map[b.j].symbol == "H")
             ):
-                # H-heavy bonds never appear in smiles_bo_table; re-admit as
-                # single bonds so H atoms are not left as isolated ligand nodes.
                 updated.append(Bond(i=b.i, j=b.j, order=1.0))
-            # else: heavy-heavy bond with no SMILES entry -> not a real bond -> drop
         else:
-            if is_metal_bond:
-                if allowed_coord_keys is not None and key not in allowed_coord_keys:
-                    continue
-                updated.append(Bond(i=b.i, j=b.j, order=b.order))
-                continue
-
-            if key not in bo_updates:
-                continue
-            new_order = bo_updates.get(key, b.order)
-            updated.append(Bond(i=b.i, j=b.j, order=new_order))
-
+            if is_m:
+                if allowed_coord_keys is None or key in allowed_coord_keys:
+                    updated.append(Bond(i=b.i, j=b.j, order=b.order))
+            elif key in bo_updates:
+                updated.append(Bond(i=b.i, j=b.j, order=bo_updates[key]))
     return updated
 
 
-# ---------------------------------------------------------------------------
-# Complex assembly entry points
-# ---------------------------------------------------------------------------
 def _extract_ligands(
     atoms: List[Atom],
     bonds: List[Bond],
     metal_idx: int,
     xyz_donor_indices: Set[int],
 ) -> List[Ligand]:
-    """
-    Identify connected components of the ligand graph (all non-metal atoms,
-    edges for bonds with quantized BO >= 0.5) and build Ligand objects.
-    """
+    """Identify connected components of the ligand graph (quantized BO >= 0.5) and build Ligand objects."""
     G = nx.Graph()
-    for a in atoms:
-        if a.idx != metal_idx:
-            G.add_node(a.idx)
-
-    for b in bonds:
-        if b.i == metal_idx or b.j == metal_idx:
-            continue
-        if b.order >= _LIGAND_BO_THRESHOLD:
-            G.add_edge(b.i, b.j)
-
-    ligands: List[Ligand] = []
-    for lig_id, component in enumerate(nx.connected_components(G), start=1):
-        donor_atoms = sorted(xyz_donor_indices & component)
-        ligands.append(
-            Ligand(
-                ligand_id=lig_id,
-                atom_indices=sorted(component),
-                donor_atoms=donor_atoms,
-            )
-        )
-
-    return ligands
+    G.add_nodes_from(a.idx for a in atoms if a.idx != metal_idx)
+    G.add_edges_from(
+        (b.i, b.j) for b in bonds
+        if b.i != metal_idx and b.j != metal_idx and b.order >= _LIGAND_BO_THRESHOLD
+    )
+    return [
+        Ligand(ligand_id=lig_id, atom_indices=sorted(comp), donor_atoms=sorted(xyz_donor_indices & comp))
+        for lig_id, comp in enumerate(nx.connected_components(G), start=1)
+    ]
 
 
 def assemble(raw) -> TMComplex:

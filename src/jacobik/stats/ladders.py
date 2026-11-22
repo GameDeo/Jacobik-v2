@@ -366,36 +366,34 @@ def q3_named_levels(key: tuple) -> List[Tuple[str, tuple]]:
     return lv
 
 
-def q3_candidates(
-    key: tuple, variant: str = DEFAULT_ORIENTATION_VARIANT
+def _orient_candidates(
+    named: List[Tuple[str, tuple]],
+    sub: str,
+    variant: str,
+    pool_names: set,
+    fine_order: List[str],
+    anionic_order: List[str],
 ) -> List[tuple]:
-    named = _dedupe(q3_named_levels(key))
-    bkt, _ = bucket_family(key[0])
+    bkt, _ = bucket_family(sub)
     v = _orientation_variant(variant)
     if bkt == "O_neutral_sigma":
         if v == "neutral_sigma_pool":
-            # Blanket-pool: skip straight to the bucket level regardless of
-            # how much data the finer rungs have.  Kept only for comparison
-            # against anionic_context -- see the module docstring above.
-            return [k for name, k in named if name in {"bkt", "fam", "any"}]
-        if v == "anionic_context":
-            # Prefer the co-donor-context rungs first (most to least
-            # specific), THEN fall through to the old metal/geom rungs and
-            # finally the blanket pool.  _resolve() still gates every step
-            # on n_min, so this only actually uses a rung when it has enough
-            # data -- it does not skip metal/geom specificity when a
-            # combined (sub, metal, anion) or (sub, anion) fit isn't
-            # populated (e.g. before a refit has run with the new key).
-            order = ["L0", "sub_m_anion", "sub_anion", "sub_m_geom", "sub_m",
-                      "sub_pg", "sub", "bkt", "fam", "any"]
-            by_name = dict(named)
-            return [by_name[n] for n in order if n in by_name]
-        # fine_leaf: behave exactly as before the anion_bucket feature
-        # existed -- try metal+geom (old L0 shape) first, ignore anion rungs.
-        order = ["sub_m_geom", "sub_m", "sub_pg", "sub", "bkt", "fam", "any"]
+            return [k for name, k in named if name in pool_names]
         by_name = dict(named)
+        order = anionic_order if v == "anionic_context" else fine_order
         return [by_name[n] for n in order if n in by_name]
     return [k for _, k in named]
+
+
+def q3_candidates(
+    key: tuple, variant: str = DEFAULT_ORIENTATION_VARIANT
+) -> List[tuple]:
+    return _orient_candidates(
+        _dedupe(q3_named_levels(key)), key[0], variant,
+        {"bkt", "fam", "any"},
+        ["sub_m_geom", "sub_m", "sub_pg", "sub", "bkt", "fam", "any"],
+        ["L0", "sub_m_anion", "sub_anion", "sub_m_geom", "sub_m", "sub_pg", "sub", "bkt", "fam", "any"],
+    )
 
 
 def q3_ancestor_rows(key: tuple) -> List[Tuple[int, tuple]]:
@@ -429,20 +427,12 @@ def q4_named_levels(key: tuple) -> List[Tuple[str, tuple]]:
 def q4_candidates(
     key: tuple, variant: str = DEFAULT_ORIENTATION_VARIANT
 ) -> List[tuple]:
-    named = _dedupe(q4_named_levels(key))
-    bkt, _ = bucket_family(key[0])
-    v = _orientation_variant(variant)
-    if bkt == "O_neutral_sigma":
-        if v == "neutral_sigma_pool":
-            return [k for name, k in named if name in {"bkt_k", "fam_k", "k", "any"}]
-        if v == "anionic_context":
-            order = ["L0", "sub_k_anion", "sub_geom_k", "sub_k", "bkt_k", "fam_k", "k", "any"]
-            by_name = dict(named)
-            return [by_name[n] for n in order if n in by_name]
-        order = ["sub_geom_k", "sub_k", "bkt_k", "fam_k", "k", "any"]
-        by_name = dict(named)
-        return [by_name[n] for n in order if n in by_name]
-    return [k for _, k in named]
+    return _orient_candidates(
+        _dedupe(q4_named_levels(key)), key[0], variant,
+        {"bkt_k", "fam_k", "k", "any"},
+        ["sub_geom_k", "sub_k", "bkt_k", "fam_k", "k", "any"],
+        ["L0", "sub_k_anion", "sub_geom_k", "sub_k", "bkt_k", "fam_k", "k", "any"],
+    )
 
 
 def q4_ancestor_rows(key: tuple) -> List[Tuple[int, tuple]]:

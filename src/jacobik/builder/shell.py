@@ -125,8 +125,10 @@ def _shallow_copy_mol_for_conformer(mol: "TMComplex") -> "TMComplex":
     are copied per object (their positions/centroids are reassigned or updated
     in place per conformer); immutable topology metadata is shared by reference.
     """
+    from jacobik.core.types import Atom
+
     mol_copy = copy.copy(mol)
-    mol_copy.atoms = [copy.copy(a) for a in mol.atoms]
+    mol_copy.atoms = [Atom(a.idx, a.symbol, a.position, a.total_valence) for a in mol.atoms]
     mol_copy.coord_sites = [copy.copy(s) for s in getattr(mol, "coord_sites", [])]
 
     new_ligands = []
@@ -140,30 +142,25 @@ def _shallow_copy_mol_for_conformer(mol: "TMComplex") -> "TMComplex":
 
 
 def _refresh_coord_geometry(mol) -> None:
-    """
-    Recompute derived coordination geometry (coord_site positions and haptic
-    centroids) from the current ``mol.atoms`` positions, in place.
-    """
+    """Recompute derived coordination geometry (coord_site positions and haptic centroids) from ``mol.atoms``."""
     pos_by_idx = {a.idx: a.position for a in mol.atoms}
 
-    for site in getattr(mol, "coord_sites", []):
-        idxs = [i for i in site.donor_indices if i in pos_by_idx]
-        if not idxs:
-            continue
-        site.position = np.mean([pos_by_idx[i] for i in idxs], axis=0).copy()
+    def _centroid(idxs):
+        pts = [pos_by_idx[i] for i in idxs if i in pos_by_idx]
+        if not pts:
+            return None
+        return pts[0].copy() if len(pts) == 1 else np.mean(pts, axis=0)
 
-    # Haptic centroids live on the ligands' haptic_groups (and, if present, on
-    # mol.haptic_interactions).  Refresh both views from the same atom coords.
+    for site in getattr(mol, "coord_sites", []):
+        if (c := _centroid(site.donor_indices)) is not None:
+            site.position = c
     for lig in getattr(mol, "ligands", []):
         for h in getattr(lig, "haptic_groups", []):
-            idxs = [i for i in h.donor_indices if i in pos_by_idx]
-            if idxs:
-                h.centroid = np.mean([pos_by_idx[i] for i in idxs], axis=0).copy()
-
+            if (c := _centroid(h.donor_indices)) is not None:
+                h.centroid = c
     for h in getattr(mol, "haptic_interactions", []):
-        idxs = [i for i in h.donor_indices if i in pos_by_idx]
-        if idxs:
-            h.centroid = np.mean([pos_by_idx[i] for i in idxs], axis=0).copy()
+        if (c := _centroid(h.donor_indices)) is not None:
+            h.centroid = c
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +259,7 @@ def _smiles_to_conformer(
             AllChem.MMFFOptimizeMolecule(sur_h)
         spos = sur_h.GetConformer().GetPositions().astype(np.float64)
         if use_gfn2:
-            spos = _e()._gfn2_refine(sur_h, spos, donors, experiment_flags=False)
+            spos = _e()._embed_refine(sur_h, spos, donors, experiment_flags=False)
         orig_h = Chem.AddHs(Chem.MolFromSmiles(smiles))
         positions = _cem.map_surrogate_positions(orig_h, sur_h, spos)
         conf = Chem.Conformer(orig_h.GetNumAtoms())
@@ -285,7 +282,7 @@ def _smiles_to_conformer(
             rdmol_h, positions, info = r
             _e().log.debug("chelate-aware embed %s: %s", smiles, info)
             if use_gfn2:
-                positions = _e()._gfn2_refine(rdmol_h, positions, donors)
+                positions = _e()._embed_refine(rdmol_h, positions, donors)
             return rdmol_h, positions, has_h
 
     mol = Chem.MolFromSmiles(smiles)
@@ -313,7 +310,7 @@ def _smiles_to_conformer(
     conf = mol_h.GetConformer()
     positions = conf.GetPositions().astype(np.float64)  # (N_all, 3) incl. H
     if use_gfn2:
-        positions = _e()._gfn2_refine(mol_h, positions, donors)
+        positions = _e()._embed_refine(mol_h, positions, donors)
 
     return mol_h, positions, has_h
 
